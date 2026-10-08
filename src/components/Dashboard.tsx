@@ -100,6 +100,7 @@ import {
 import { SiteSettingsModal } from './SiteSettingsModal';
 import { DeleteAllGiftsModal } from './DeleteAllGiftsModal';
 import { ImageShapeEditorModal } from './ImageShapeEditorModal';
+import { QuickCoverSnapshotModal } from './QuickCoverSnapshotModal';
 import { SELECTABLE_GIFT_CATEGORIES } from '../data/categories';
 
 interface DashboardProps {
@@ -265,6 +266,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [posterUrl, setPosterUrl] = useState('');
   const [usePosterImage, setUsePosterImage] = useState<boolean>(true);
   const [posterLoadError, setPosterLoadError] = useState(false);
+
+  // Quick Cover Snapshot & Image Changer Modal State (التقاط وتغيير صورة الغلاف المباشرة وتثبيتها في الكود)
+  const [quickCoverGift, setQuickCoverGift] = useState<GiftItem | null>(null);
 
   // Bulk Upload by Links State (رفع جماعي لعدة روابط بتسعيرة موحدة تلقائياً)
   const [uploadMode, setUploadMode] = useState<'single' | 'bulk'>('single');
@@ -948,10 +952,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
         } catch (uErr) {
           console.error('Update gift cloud sync note:', uErr);
         }
+        // Persist directly to codebase files (initialGifts.ts) and disk
+        fetch('/api/gifts/persist-code', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ gift: updatedGift })
+        }).catch(() => {});
       }
 
       setEditingId(null);
-      setSuccessMessage(lang === 'ar' ? 'تم تحديث الهدية وحفظها في السيرفر بنجاح!' : '素材更新成功！');
+      setSuccessMessage(lang === 'ar' ? 'تم تحديث الهدية وحفظها ودمجها في الكود بنجاح!' : '素材更新并保存至代码成功！');
     } else {
       // Create new - Automatically linked to current active staff & WhatsApp!
       const newId = 'NO.' + Math.floor(200000 + Math.random() * 700000);
@@ -995,10 +1005,17 @@ export const Dashboard: React.FC<DashboardProps> = ({
         console.error('Add gift cloud sync note:', aErr);
       }
 
+      // Persist directly to codebase files (initialGifts.ts) and disk
+      fetch('/api/gifts/persist-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ gift: newGift })
+      }).catch(() => {});
+
       // Increment employee's gifts count
       updateEmployee({ ...activeStaff, giftsCount: (activeStaff.giftsCount || 0) + 1 });
 
-      setSuccessMessage(lang === 'ar' ? `تم نشر وتسميع الهدية [${newGift.title}] بنجاح في السيرفر والمتجر لكل المستخدمين!` : `礼物 [${newGift.title}] 成功发布并在服务器实时同步！`);
+      setSuccessMessage(lang === 'ar' ? `تم نشر وتسميع الهدية [${newGift.title}] ودمجها في الكود البرمجي بنجاح!` : `礼物 [${newGift.title}] 成功发布并写入代码！`);
     }
 
     // Reset Form
@@ -3842,9 +3859,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       </div>
                     </div>
 
-                    {/* Actions Row: 4 Clear & Comfortable Buttons */}
-                    <div className="grid grid-cols-4 gap-2 pt-1 border-t border-slate-800/80">
-                      {/* Preview Button */}
+                    {/* Actions Row: 5 Action Buttons (المعاينة، لقطة وتغيير الغلاف بالكود، التعديل، النسخ، الحذف) */}
+                    <div className="grid grid-cols-5 gap-1.5 pt-1 border-t border-slate-800/80">
+                      {/* 1. Preview Button */}
                       <button
                         type="button"
                         onClick={() => onPreviewGift(g)}
@@ -3854,7 +3871,17 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         <Eye className="w-4 h-4" />
                       </button>
 
-                      {/* Edit Button */}
+                      {/* 2. Quick Snapshot / Change Cover Button (المطلوب في 6630.png و 5.png) */}
+                      <button
+                        type="button"
+                        onClick={() => setQuickCoverGift(g)}
+                        className="py-2 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/40 flex items-center justify-center transition-all cursor-pointer shadow-sm hover:scale-105 active:scale-95"
+                        title={lang === 'ar' ? 'أخذ لقطة من الفيديو / تغيير صورة الغلاف وتثبيتها' : '从视频截图/更换并锁定封面'}
+                      >
+                        <Camera className="w-4 h-4 text-emerald-400" />
+                      </button>
+
+                      {/* 3. Edit Button */}
                       <button
                         type="button"
                         onClick={() => handleStartEdit(g)}
@@ -3864,7 +3891,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         <Edit3 className="w-4 h-4" />
                       </button>
 
-                      {/* Copy Link Button */}
+                      {/* 4. Copy Link Button */}
                       <button
                         type="button"
                         onClick={() => handleCopyGiftLink(g)}
@@ -3878,7 +3905,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         )}
                       </button>
 
-                      {/* Delete Button */}
+                      {/* 5. Delete Button */}
                       <button
                         type="button"
                         onClick={() => handleDeleteGift(g.id)}
@@ -3976,6 +4003,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
                             title={lang === 'ar' ? 'معاينة' : 'Preview'}
                           >
                             <Eye className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => setQuickCoverGift(g)}
+                            className="p-2 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 transition-colors"
+                            title={lang === 'ar' ? 'أخذ لقطة من الفيديو / تغيير صورة الغلاف وتثبيتها' : '从视频截图/更换并锁定封面'}
+                          >
+                            <Camera className="w-4 h-4" />
                           </button>
                           <button
                             onClick={() => handleStartEdit(g)}
@@ -5742,6 +5776,27 @@ export const Dashboard: React.FC<DashboardProps> = ({
               : '✓ Image cropped, shaped and applied successfully!'
           );
           setTimeout(() => setSuccessMessage(null), 5000);
+        }}
+      />
+
+      {/* Quick Cover Snapshot & Codebase Lock Modal */}
+      <QuickCoverSnapshotModal
+        isOpen={Boolean(quickCoverGift)}
+        onClose={() => setQuickCoverGift(null)}
+        gift={quickCoverGift}
+        lang={lang}
+        onCoverSaved={(updated) => {
+          setGifts(prev => prev.map(g => g.id === updated.id ? updated : g));
+          setSuccessMessage(
+            lang === 'ar'
+              ? `✓ تم تثبيت وحفظ صورة الغلاف للهدية (${updated.id}) ودمجها في الكود البرمجي بنجاح!`
+              : `✓ Cover image permanently baked into codebase for (${updated.id})!`
+          );
+          setTimeout(() => setSuccessMessage(null), 4000);
+        }}
+        onOpenShapeEditor={(img) => {
+          setShapeEditorImage(img);
+          setIsShapeEditorOpen(true);
         }}
       />
     </div>

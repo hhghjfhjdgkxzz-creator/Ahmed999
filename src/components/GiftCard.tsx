@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Play, Video, Volume2, Sparkles, ArrowRight, ArrowLeft, Check, Flame } from 'lucide-react';
+import { Play, Video, Volume2, Sparkles, ArrowRight, ArrowLeft, Check, Flame, Camera } from 'lucide-react';
 import { GiftItem, Language } from '../types';
 import { translations } from '../utils/translations';
 import { SvgaPlayer } from './SvgaPlayer';
@@ -14,6 +14,7 @@ interface GiftCardProps {
   isSelected?: boolean;
   canPin?: boolean;
   onTogglePin?: (gift: GiftItem) => void;
+  onSnapshot?: (gift: GiftItem) => void;
 }
 
 export const GiftCard: React.FC<GiftCardProps> = ({
@@ -22,7 +23,8 @@ export const GiftCard: React.FC<GiftCardProps> = ({
   onSelectGift,
   isSelected = false,
   canPin = false,
-  onTogglePin
+  onTogglePin,
+  onSnapshot
 }) => {
   const t = translations[lang];
   const [isHovered, setIsHovered] = useState(false);
@@ -276,6 +278,20 @@ export const GiftCard: React.FC<GiftCardProps> = ({
               >
                 <Check className={`w-3 h-3 ${gift.pinnedTop ? 'text-emerald-400' : 'text-slate-500'}`} />
                 <span>{gift.pinnedTop ? '✓ جديد' : '+ جديد'}</span>
+              </button>
+            )}
+            {canPin && onSnapshot && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onSnapshot(gift);
+                }}
+                className="px-2 py-0.5 rounded-lg text-[10px] font-bold border transition-all flex items-center gap-1 cursor-pointer select-none shrink-0 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border-emerald-500/40 hover:scale-105 active:scale-95 shadow-sm"
+                title={lang === 'ar' ? 'أخذ لقطة من الفيديو / تغيير وتثبيت صورة الغلاف بالكود' : '从视频截图/更换并锁定封面'}
+              >
+                <Camera className="w-3.5 h-3.5 text-emerald-400" />
+                <span>{lang === 'ar' ? 'لقطة' : '截图'}</span>
               </button>
             )}
           </div>

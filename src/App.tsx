@@ -17,6 +17,7 @@ import { AuthModal } from './components/AuthModal';
 import { SupportModal } from './components/SupportModal';
 import { VipModal } from './components/VipModal';
 import { SiteSettingsModal } from './components/SiteSettingsModal';
+import { QuickCoverSnapshotModal } from './components/QuickCoverSnapshotModal';
 import { Footer } from './components/Footer';
 import { Check } from 'lucide-react';
 import { seedDatabase, subscribeToGifts, subscribeToDeliveries, subscribeToEmployees, subscribeToBanners, addDelivery, purgeDummyGifts, isDummyGift } from './lib/firebaseService';
@@ -166,9 +167,16 @@ export default function App() {
     return null;
   });
 
-  // Permission check for managing gifts (admin, staff, designer)
+  // Permission check for managing gifts (admin, staff, designer strictly - NEVER for ordinary buyers or guests)
   const canManageGifts = Boolean(
-    user && (user.role === 'admin' || user.role === 'employee' || user.role === 'designer' || (user.permissions as any)?.gifts || (user.permissions as any)?.giftUploadAndPublish !== false)
+    user && 
+    user.role !== 'buyer' && 
+    (
+      user.role === 'admin' || 
+      user.role === 'employee' || 
+      user.role === 'designer' || 
+      user.permissions?.giftUploadAndPublish === true
+    )
   );
   const [pinToastMessage, setPinToastMessage] = useState<string | null>(null);
 
@@ -256,6 +264,17 @@ export default function App() {
   const [isDeliveriesOpen, setIsDeliveriesOpen] = useState(false);
   const [isSupportOpen, setIsSupportOpen] = useState(false);
   const [isVipOpen, setIsVipOpen] = useState(false);
+  const [quickCoverGift, setQuickCoverGift] = useState<GiftItem | null>(null);
+
+  const handleCoverSaved = (updatedGift: GiftItem) => {
+    setGifts((prev) => prev.map((g) => (g.id === updatedGift.id ? updatedGift : g)));
+    if (selectedGift && selectedGift.id === updatedGift.id) {
+      setSelectedGift(updatedGift);
+    }
+    if (inspectedGift && inspectedGift.id === updatedGift.id) {
+      setInspectedGift(updatedGift);
+    }
+  };
 
   // Pagination State: Configurable from Dashboard siteSettings (default 26)!
   const ITEMS_PER_PAGE = Math.max(1, siteSettings?.giftsPerPage || 26);
@@ -573,6 +592,7 @@ ID الحساب: ${user.id}` : ''}
                       isSelected={inspectedGift?.id === gift.id}
                       canPin={canManageGifts}
                       onTogglePin={handleTogglePinGift}
+                      onSnapshot={canManageGifts ? (g) => setQuickCoverGift(g) : undefined}
                       onSelectGift={(g) => {
                         setInspectedGift(g);
                         setSelectedGift(g);
@@ -606,9 +626,9 @@ ID الحساب: ${user.id}` : ''}
           </section>
         </main>
       ) : (
-        /* DASHBOARD VIEW (Admin / Staff with Full Permissions) */
+        /* DASHBOARD VIEW (Admin / Staff with Full Permissions Strictly) */
         <main className="flex-1 w-full">
-          {(!user || (!['admin', 'employee', 'designer'].includes(user.role) && !user.permissions?.giftUploadAndPublish)) ? (
+          {(!user || user.role === 'buyer' || !canManageGifts) ? (
             <div className="max-w-xl mx-auto my-16 p-8 rounded-3xl bg-[#111520] border border-slate-800 text-center space-y-5 shadow-2xl">
               <div className="w-16 h-16 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center mx-auto text-cyan-400">
                 <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -694,6 +714,7 @@ ID الحساب: ${user.id}` : ''}
           setInspectedGift(g);
           setSelectedGift(g);
         }}
+        onCoverSaved={handleCoverSaved}
       />
 
       {/* MODAL 2: Purchase Box ("صندوق شراء") */}
@@ -773,6 +794,18 @@ ID الحساب: ${user.id}` : ''}
         lang={lang}
         siteSettings={siteSettings}
         onSettingsSaved={(newSettings) => setSiteSettings(newSettings)}
+      />
+
+      {/* MODAL 10: Quick Cover Snapshot Modal (Storefront Grid & Gallery) */}
+      <QuickCoverSnapshotModal
+        isOpen={Boolean(quickCoverGift)}
+        onClose={() => setQuickCoverGift(null)}
+        gift={quickCoverGift}
+        lang={lang}
+        onCoverSaved={(updatedGift) => {
+          handleCoverSaved(updatedGift);
+          setQuickCoverGift(null);
+        }}
       />
 
       {/* Real-time Pin Confirmation Toast */}

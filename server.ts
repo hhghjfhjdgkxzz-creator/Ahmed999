@@ -61,6 +61,9 @@ const upload = multer({
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
+// Statically serve uploads directly from public/uploads across all environments
+app.use('/uploads', express.static(UPLOADS_DIR));
+
 // CORS headers
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -90,6 +93,133 @@ app.post('/api/upload', upload.single('file') as any, (req: Request, res: Respon
     size: fileSize,
     mimeType
   });
+});
+
+// Endpoint to permanently persist gifts, snapshots, posters, and video links into codebase files & disk
+app.post('/api/gifts/persist-code', express.json({ limit: '50mb' }), (req: Request, res: Response) => {
+  try {
+    const { gift, allGifts } = req.body;
+    if (!gift && !allGifts) {
+      return res.status(400).json({ error: 'Missing gift or allGifts data' });
+    }
+
+    const initialGiftsPath = path.resolve(process.cwd(), 'src/data/initialGifts.ts');
+    const jsonStorePath = path.resolve(process.cwd(), 'public/gifts_store.json');
+
+    // 1. Process single gift poster if it is a base64 data URL
+    if (gift) {
+      if (gift.posterUrl && typeof gift.posterUrl === 'string' && gift.posterUrl.startsWith('data:image/')) {
+        try {
+          const matches = gift.posterUrl.match(/^data:image\/([a-zA-Z0-9]+);base64,(.+)$/);
+          if (matches) {
+            const ext = matches[1] === 'jpeg' ? 'jpg' : matches[1];
+            const buffer = Buffer.from(matches[2], 'base64');
+            const cleanId = String(gift.id || 'gift_' + Date.now()).replace(/[^a-zA-Z0-9_-]/g, '_');
+            const filename = `poster_${cleanId}_${Date.now()}.${ext}`;
+            const filePath = path.join(UPLOADS_DIR, filename);
+            fs.writeFileSync(filePath, buffer);
+            
+            // Also copy to dist/uploads if dist exists for production build
+            const distUploads = path.resolve(process.cwd(), 'dist/uploads');
+            if (fs.existsSync(distUploads)) {
+              try {
+                fs.writeFileSync(path.join(distUploads, filename), buffer);
+              } catch (e) {}
+            }
+
+            gift.posterUrl = `/uploads/${filename}`;
+          }
+        } catch (imgErr) {
+          console.warn('Error saving poster image buffer to disk:', imgErr);
+        }
+      }
+    }
+
+    // 2. Read or initialize current gifts list
+    let currentGifts: any[] = [];
+    if (Array.isArray(allGifts) && allGifts.length > 0) {
+      currentGifts = allGifts;
+    } else if (fs.existsSync(jsonStorePath)) {
+      try {
+        currentGifts = JSON.parse(fs.readFileSync(jsonStorePath, 'utf8'));
+      } catch (e) {
+        currentGifts = [];
+      }
+    }
+
+    // If still empty, safely read from realGiftsCatalog.ts
+    const realCatalogPath = path.resolve(process.cwd(), 'src/data/realGiftsCatalog.ts');
+    if ((!currentGifts || currentGifts.length === 0) && fs.existsSync(realCatalogPath)) {
+      try {
+        const catContent = fs.readFileSync(realCatalogPath, 'utf8');
+        const match = catContent.match(/export const REAL_GIFTS_CATALOG: GiftItem\[\] = (\[[\s\S]*?\]);/);
+        if (match) {
+          currentGifts = JSON.parse(match[1]);
+        }
+      } catch (e) {
+        console.warn('Error parsing realGiftsCatalog:', e);
+      }
+    }
+
+    if (gift) {
+      const idx = currentGifts.findIndex((g: any) => g.id === gift.id);
+      if (idx >= 0) {
+        currentGifts[idx] = { ...currentGifts[idx], ...gift };
+      } else {
+        currentGifts.unshift(gift);
+      }
+    }
+
+    // 3. Save to public/gifts_store.json for persistent JSON access
+    try {
+      fs.writeFileSync(jsonStorePath, JSON.stringify(currentGifts, null, 2), 'utf8');
+    } catch (jErr) {
+      console.warn('Error writing gifts_store.json:', jErr);
+    }
+
+    // 4. Save directly into src/data/realGiftsCatalog.ts & src/data/initialGifts.ts so the codebase itself contains the updated gifts and posters!
+    if (fs.existsSync(realCatalogPath)) {
+      try {
+        const formattedTs = `import { GiftItem } from '../types';\n\nexport const REAL_GIFTS_CATALOG: GiftItem[] = ${JSON.stringify(currentGifts, null, 2)};\n`;
+        fs.writeFileSync(realCatalogPath, formattedTs, 'utf8');
+        console.log(`[Codebase Sync] Successfully persisted ${currentGifts.length} gifts into ${realCatalogPath}!`);
+      } catch (tsErr) {
+        console.warn('Error updating realGiftsCatalog.ts:', tsErr);
+      }
+    }
+
+    if (fs.existsSync(initialGiftsPath)) {
+      try {
+        const formattedTs = `import { GiftItem } from '../types';\n\nexport const INITIAL_GIFTS: GiftItem[] = ${JSON.stringify(currentGifts, null, 2)};\n`;
+        fs.writeFileSync(initialGiftsPath, formattedTs, 'utf8');
+        console.log(`[Codebase Sync] Successfully persisted ${currentGifts.length} gifts into ${initialGiftsPath}!`);
+      } catch (tsErr) {
+        console.warn('Error updating initialGifts.ts:', tsErr);
+      }
+    }
+
+    res.json({
+      success: true,
+      gift,
+      savedPosterUrl: gift?.posterUrl,
+      totalGifts: currentGifts.length,
+      message: 'تم حفظ الهدية ودمج الصورة والرابط في الكود البرمجي بنجاح'
+    });
+  } catch (err: any) {
+    console.error('Error in /api/gifts/persist-code:', err);
+    res.status(500).json({ error: err?.message || 'Failed to persist gift to codebase' });
+  }
+});
+
+app.get('/api/gifts/store', (_req: Request, res: Response) => {
+  const jsonStorePath = path.resolve(process.cwd(), 'public/gifts_store.json');
+  if (fs.existsSync(jsonStorePath)) {
+    try {
+      const data = JSON.parse(fs.readFileSync(jsonStorePath, 'utf8'));
+      return res.json({ success: true, gifts: data });
+    } catch {}
+  }
+  res.json({ success: true, gifts: [] });
 });
 
 // Video / Audio / SVGA Streaming with HTTP 206 Partial Content (Range requests)

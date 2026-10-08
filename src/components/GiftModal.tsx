@@ -15,12 +15,14 @@ import {
   AlertCircle,
   Film,
   Check,
-  Flame
+  Flame,
+  Camera
 } from 'lucide-react';
 import { GiftItem, Language } from '../types';
 import { translations } from '../utils/translations';
 import { SvgaPlayer } from './SvgaPlayer';
 import { resolveMediaUrl, getMediaFromIndexedDb, getProxyMediaUrl } from '../utils/mediaStorage';
+import { QuickCoverSnapshotModal } from './QuickCoverSnapshotModal';
 
 interface GiftModalProps {
   gift: GiftItem | null;
@@ -32,6 +34,7 @@ interface GiftModalProps {
   onSelectGift: (gift: GiftItem) => void;
   canPin?: boolean;
   onTogglePin?: (gift: GiftItem) => void;
+  onCoverSaved?: (updatedGift: GiftItem) => void;
 }
 
 export const GiftModal: React.FC<GiftModalProps> = ({
@@ -42,7 +45,8 @@ export const GiftModal: React.FC<GiftModalProps> = ({
   allGifts = [],
   onSelectGift,
   canPin = false,
-  onTogglePin
+  onTogglePin,
+  onCoverSaved
 }) => {
   const t = translations[lang];
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -57,6 +61,8 @@ export const GiftModal: React.FC<GiftModalProps> = ({
   const [hasVideoError, setHasVideoError] = useState(false);
   const [selectedFormatTag, setSelectedFormatTag] = useState<string>('MP4');
   const [copiedFormat, setCopiedFormat] = useState<string | null>(null);
+  const [isSnapshotModalOpen, setIsSnapshotModalOpen] = useState(false);
+  const [coverSavedSuccess, setCoverSavedSuccess] = useState(false);
   const retryCountRef = useRef<number>(0);
 
   const handleFormatClick = (fmtName: string) => {
@@ -500,6 +506,17 @@ export const GiftModal: React.FC<GiftModalProps> = ({
                     {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4 text-emerald-400 animate-pulse" />}
                     <span className="text-[10px] font-bold hidden xs:inline">{!isMuted ? (lang === 'ar' ? 'صوت' : 'Sound') : ''}</span>
                   </button>
+                  {canPin && (
+                    <button
+                      type="button"
+                      onClick={() => setIsSnapshotModalOpen(true)}
+                      className="p-1.5 px-2 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 flex items-center gap-1 transition-all cursor-pointer shadow-sm hover:scale-105 active:scale-95"
+                      title={lang === 'ar' ? 'أخذ لقطة من الفيديو وتعيينها كصورة غلاف وتثبيتها في الكود البرمجي' : '截取视频帧作为封面并固化到代码'}
+                    >
+                      <Camera className="w-3.5 h-3.5 text-emerald-400" />
+                      <span className="text-[10px] font-bold">{lang === 'ar' ? 'لقطة الغلاف' : '截取封面'}</span>
+                    </button>
+                  )}
                 </div>
 
                 <div className="text-[10px] text-cyan-300 font-mono font-semibold bg-cyan-950/60 px-2 py-0.5 rounded border border-cyan-800/40">
@@ -568,6 +585,60 @@ export const GiftModal: React.FC<GiftModalProps> = ({
                 </button>
                 </div>
               </div>
+
+              {/* Cover Snapshot & Code Embedding Card (Strictly for Admin & Staff, Never for Buyers) */}
+              {canPin && (
+                <>
+                  {coverSavedSuccess && (
+                    <div className="p-3 rounded-2xl bg-emerald-500/20 border border-emerald-500/50 text-emerald-300 text-xs font-bold flex items-center gap-2 animate-fade-in shadow-lg">
+                      <Check className="w-4 h-4 text-emerald-400 shrink-0 stroke-[3]" />
+                      <span>
+                        {lang === 'ar'
+                          ? '✓ تم تأكيد وتثبيت لقطة الغلاف ورابط الفيديو في الكود البرمجي بنجاح!'
+                          : '✓ Cover snapshot & video link permanently baked into code!'}
+                      </span>
+                    </div>
+                  )}
+
+                  <div className="p-3.5 rounded-2xl bg-gradient-to-r from-slate-900 to-[#0e1624] border border-emerald-500/35 flex items-center justify-between gap-3 shadow-sm">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      {gift.posterUrl ? (
+                        <img
+                          src={resolveMediaUrl(gift.posterUrl)}
+                          alt={displayTitle}
+                          className="w-10 h-10 rounded-xl object-contain border border-emerald-500/40 bg-black/60 shrink-0"
+                        />
+                      ) : (
+                        <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
+                          <Camera className="w-5 h-5" />
+                        </div>
+                      )}
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs sm:text-sm font-bold text-white truncate">
+                            {lang === 'ar' ? 'صورة الغلاف وتثبيتها بالكود' : 'Cover & Code Snapshot'}
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-emerald-400 font-medium truncate">
+                          {gift.posterUrl
+                            ? (lang === 'ar' ? '✓ الغلاف مدمج ومثبت في الكود' : '✓ 封面已固化至代码')
+                            : (lang === 'ar' ? 'لم يتم التقاط غلاف بعد' : '未设置封面')}
+                        </div>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setIsSnapshotModalOpen(true)}
+                      className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-md transition-all shrink-0 active:scale-95 cursor-pointer"
+                      title={lang === 'ar' ? 'أخذ لقطة من هذا الفيديو وتعيينها كغلاف وتثبيتها' : '截取当前视频帧'}
+                    >
+                      <Camera className="w-3.5 h-3.5" />
+                      <span>{lang === 'ar' ? 'التقاط / تغيير' : '截取/更换'}</span>
+                    </button>
+                  </div>
+                </>
+              )}
 
               {/* Formats Info Bar */}
               <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800/90 space-y-2.5 shadow-sm">
@@ -735,6 +806,21 @@ export const GiftModal: React.FC<GiftModalProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Embedded Quick Cover Snapshot Modal */}
+      <QuickCoverSnapshotModal
+        isOpen={isSnapshotModalOpen}
+        onClose={() => setIsSnapshotModalOpen(false)}
+        gift={gift}
+        lang={lang}
+        onCoverSaved={(updatedGift) => {
+          setCoverSavedSuccess(true);
+          setTimeout(() => setCoverSavedSuccess(false), 4500);
+          if (onCoverSaved) {
+            onCoverSaved(updatedGift);
+          }
+        }}
+      />
     </div>
   );
 };

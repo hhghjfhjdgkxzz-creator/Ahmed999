@@ -160,19 +160,27 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       return;
     }
 
-    // Success: Create AuthUser payload
+    // Success: Create AuthUser payload with strict role isolation
+    const isVerifiedStaff = matchedUser.role === 'admin' || matchedUser.role === 'employee' || matchedUser.role === 'designer';
     const authUser: AuthUser = {
       id: matchedUser.id,
       name: matchedUser.name,
       email: matchedUser.email,
-      role: matchedUser.role,
+      role: isVerifiedStaff ? matchedUser.role : 'buyer',
       status: matchedUser.status || 'active',
-      permissions: matchedUser.permissions || {
-        giftUploadAndPublish: matchedUser.role === 'admin' || matchedUser.role === 'designer',
-        manageAccounts: matchedUser.role === 'admin',
-        manageBanners: matchedUser.role === 'admin',
-        viewOrders: true
-      },
+      permissions: isVerifiedStaff 
+        ? (matchedUser.permissions || {
+            giftUploadAndPublish: matchedUser.role === 'admin' || matchedUser.role === 'designer',
+            manageAccounts: matchedUser.role === 'admin',
+            manageBanners: matchedUser.role === 'admin',
+            viewOrders: true
+          })
+        : {
+            giftUploadAndPublish: false,
+            manageAccounts: false,
+            manageBanners: false,
+            viewOrders: false
+          },
       avatar: matchedUser.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=160&auto=format&fit=crop&q=80',
       whatsapp: matchedUser.whatsapp,
       employeeId: matchedUser.id,
@@ -226,10 +234,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     try {
       const newUserId = `USER-${Date.now().toString().slice(-6)}`;
       const defaultPermissions: UserPermissions = {
-        giftUploadAndPublish: false, // Default is false; Admin grants this in Dashboard!
+        giftUploadAndPublish: false, // Strictly false for all new registrations
         manageAccounts: false,
         manageBanners: false,
-        viewOrders: true
+        viewOrders: false
       };
 
       const newUserAccount: EmployeeUser = {

@@ -284,12 +284,13 @@ export const Header: React.FC<HeaderProps> = ({
                 </button>
               )}
 
-              {/* Staff / Admin Dashboard Toggle */}
-              {user && (
+              {/* Staff / Admin Dashboard Toggle (Strictly for Admin & Staff, Never for Buyers) */}
+              {user && user.role !== 'buyer' && (
                 user.role === 'admin' || 
+                user.role === 'employee' ||
                 user.role === 'designer' || 
-                user.permissions?.giftUploadAndPublish || 
-                user.permissions?.viewOrders
+                user.permissions?.manageAccounts === true ||
+                user.permissions?.giftUploadAndPublish === true
               ) && (
                 <button
                   onClick={handleDashboardToggle}
