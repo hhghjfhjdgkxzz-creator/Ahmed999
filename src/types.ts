@@ -716,7 +716,8 @@ export interface ClanMessage {
   senderAvatar?: string;
   senderClanRole: ClanRole;
   content: string;
-  type: 'text' | 'image' | 'sticker' | 'system';
+  type: 'text' | 'image' | 'audio' | 'sticker' | 'system';
+  audioDuration?: number;
   mediaUrl?: string;
   mediaStoragePath?: string;
   mediaSize?: number;
@@ -732,6 +733,7 @@ export interface ClanSettings {
   bannerUrl?: string;
   isOpenForRequests: boolean;
   allowMemberImages: boolean;
+  allowMemberAudio?: boolean;
   allowMemberStickers: boolean;
   allowMemberMessages: boolean;
   autoDeleteImagesDays: number;

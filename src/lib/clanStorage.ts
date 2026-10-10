@@ -174,3 +174,99 @@ export async function deleteClanImagesFromCloud(mode: 'all' | 'older_than', days
 
   return { deletedCount, freedBytes };
 }
+
+/**
+ * Uploads a Clan voice note (audio Blob or File):
+ * - Reads audio as base64 dataUrl (WebM/MP4/OGG/MP3/WAV)
+ * - Stores in Firestore 'clan_media' for guaranteed cross-device streaming
+ * - Returns clean URL that plays natively in any browser/phone
+ */
+export async function uploadClanAudioUniversal(blob: Blob, durationSec: number = 0): Promise<ClanUploadResult> {
+  const mediaId = `audio_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+  const ext = blob.type?.includes('mp4') || blob.type?.includes('m4a') ? 'mp4' 
+    : blob.type?.includes('ogg') ? 'ogg' 
+    : blob.type?.includes('mpeg') || blob.type?.includes('mp3') ? 'mp3' 
+    : blob.type?.includes('wav') ? 'wav' 
+    : 'webm';
+  const filename = (blob as any).name || `voice_${Date.now()}.${ext}`;
+  const mimeType = blob.type || (ext === 'mp3' ? 'audio/mpeg' : `audio/${ext}`);
+
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Failed to read audio blob'));
+    reader.onload = () => resolve(reader.result as string);
+    reader.readAsDataURL(blob);
+  });
+
+  try {
+    const mediaDocRef = doc(db, 'clan_media', mediaId);
+    await setDoc(mediaDocRef, {
+      id: mediaId,
+      filename,
+      dataUrl,
+      type: 'audio',
+      duration: durationSec,
+      size: blob.size,
+      mimeType,
+      createdAt: new Date().toISOString()
+    });
+  } catch (firestoreErr) {
+    console.warn('Firestore clan_media voice save note:', firestoreErr);
+  }
+
+  return {
+    url: dataUrl,
+    filename,
+    size: blob.size,
+    mimeType
+  };
+}
+
+/**
+ * Purges ALL clan messages, images, audios, and media from both Firestore and LocalStorage
+ */
+export async function purgeAllClanChatAndMedia(): Promise<{ deletedMessages: number; deletedMedia: number }> {
+  let deletedMessages = 0;
+  let deletedMedia = 0;
+
+  // 1. Delete all clan messages from Firestore
+  try {
+    const msgCol = collection(db, 'clan_messages');
+    const msgSnap = await getDocs(msgCol);
+    for (const d of msgSnap.docs) {
+      await deleteDoc(d.ref);
+      deletedMessages++;
+    }
+  } catch (err) {
+    console.warn('Error clearing clan_messages from Firestore:', err);
+  }
+
+  // 2. Delete all clan media from Firestore
+  try {
+    const mediaCol = collection(db, 'clan_media');
+    const mediaSnap = await getDocs(mediaCol);
+    for (const d of mediaSnap.docs) {
+      await deleteDoc(d.ref);
+      deletedMedia++;
+    }
+  } catch (err) {
+    console.warn('Error clearing clan_media from Firestore:', err);
+  }
+
+  // 3. Clear localStorage caches
+  try {
+    localStorage.removeItem('clan_messages_cache');
+    localStorage.removeItem('clan_media_cache');
+  } catch (e) {}
+
+  // 4. Try server cleanup endpoint if reachable
+  try {
+    await fetch('/api/clan/delete-images', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: 'all', days: 0 })
+    });
+  } catch (e) {}
+
+  return { deletedMessages, deletedMedia };
+}

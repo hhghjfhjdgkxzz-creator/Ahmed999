@@ -1,6 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  Users, 
+  Users,
+  Mic,
+  Volume2,
+  MessageSquareX,
+  AlertCircle, 
   UserCheck, 
   UserX, 
   Settings, 
@@ -41,9 +45,10 @@ import {
   updateClanJoinRequestStatus, 
   addClanSticker, 
   deleteClanSticker, 
-  logClanAudit 
+  logClanAudit,
+  clearAllClanMessages
 } from '../../lib/clanService';
-import { deleteClanImagesFromCloud } from '../../lib/clanStorage';
+import { deleteClanImagesFromCloud, purgeAllClanChatAndMedia } from '../../lib/clanStorage';
 
 interface ClanAdminTabProps {
   lang: Language;
@@ -91,6 +96,9 @@ export const ClanAdminTab: React.FC<ClanAdminTabProps> = ({
   const [deleteMode, setDeleteMode] = useState<'all' | 'older_than'>('older_than');
   const [deleteOlderDays, setDeleteOlderDays] = useState(30);
   const [isDeletingImages, setIsDeletingImages] = useState(false);
+  const [isPurgingAllChatModalOpen, setIsPurgingAllChatModalOpen] = useState(false);
+  const [isPurgingAll, setIsPurgingAll] = useState(false);
+  const [deletingImageId, setDeletingImageId] = useState<string | null>(null);
   const [deleteSuccessToast, setDeleteSuccessToast] = useState<string | null>(null);
 
   // New Sticker state
@@ -194,7 +202,73 @@ export const ClanAdminTab: React.FC<ClanAdminTabProps> = ({
       'تم تحديث إعدادات وهوية وصلاحيات قبيلة المصممين',
       currentUser
     );
-    alert(lang === 'ar' ? '✓ تم حفظ إعدادات القبيلة بنجاح!' : 'Clan settings saved!');
+    setDeleteSuccessToast(lang === 'ar' ? '✓ تم حفظ إعدادات القبيلة بنجاح!' : 'Clan settings saved!');
+    setTimeout(() => setDeleteSuccessToast(null), 4000);
+  };
+
+  // Delete single image/media
+  const handleDeleteSingleImage = async (fileItem: { name: string; url: string }) => {
+    if (!confirm(lang === 'ar' ? `هل أنت متأكد من حذف هذه الصورة نهائياً؟` : `Delete this image permanently?`)) return;
+    setDeletingImageId(fileItem.name);
+    try {
+      // 1. Delete matching messages from Firestore & local
+      const msgMatch = messages.find(m => m.mediaUrl === fileItem.url || m.content === fileItem.name);
+      if (msgMatch) {
+        const { deleteClanMessage } = await import('../../lib/clanService');
+        await deleteClanMessage(msgMatch.id);
+      }
+      // 2. Delete from cloud/server
+      const { doc, deleteDoc } = await import('firebase/firestore');
+      const { db } = await import('../../lib/firebase');
+      try {
+        await deleteDoc(doc(db, 'clan_media', fileItem.name));
+      } catch (e) {}
+
+      // 3. Call server if exists
+      try {
+        await fetch('/api/clan/delete-images', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mode: 'single', filename: fileItem.name })
+        });
+      } catch (e) {}
+
+      setDeleteSuccessToast(lang === 'ar' ? '✓ تم حذف الصورة بنجاح' : 'Image deleted');
+      setTimeout(() => setDeleteSuccessToast(null), 3000);
+      await logClanAudit('delete_single_image', `تم حذف صورة محددة (${fileItem.name}) بواسطة الإدارة`, currentUser);
+      fetchStorageStats();
+    } catch (err) {
+      console.error('Error deleting single image:', err);
+    } finally {
+      setDeletingImageId(null);
+    }
+  };
+
+  // Handle Purge All Chat, Messages, Audio, and Storage
+  const handleExecutePurgeAllChat = async () => {
+    setIsPurgingAll(true);
+    try {
+      const res = await purgeAllClanChatAndMedia();
+      setDeleteSuccessToast(
+        lang === 'ar'
+          ? `✓ تم حذف وتصفير جميع محادثات القبيلة (${res.deletedMessages} رسالة) وكافة الصور والتسجيلات الصوتية!`
+          : `✓ All chat, images, and voice notes purged successfully!`
+      );
+      setTimeout(() => setDeleteSuccessToast(null), 5000);
+      await logClanAudit(
+        'purge_all_chat',
+        `تم حذف جميع محادثات الدردشة الكتابية والصور والتسجيلات الصوتية وتفريغ المساحة بالكامل`,
+        currentUser
+      );
+      setIsPurgingAllChatModalOpen(false);
+      fetchStorageStats();
+    } catch (e) {
+      console.warn('Error purging chat:', e);
+      setDeleteSuccessToast(lang === 'ar' ? '⚠️ حدث خطأ أثناء حذف الدردشة' : 'Failed to purge chat');
+      setTimeout(() => setDeleteSuccessToast(null), 4000);
+    } finally {
+      setIsPurgingAll(false);
+    }
   };
 
   // Handle Safe Clan Image Deletion
@@ -222,8 +296,9 @@ export const ClanAdminTab: React.FC<ClanAdminTabProps> = ({
         fetchStorageStats();
       }
     } catch (e) {
-      console.error('Error deleting clan images:', e);
-      alert(lang === 'ar' ? 'فشل حذف الصور، حاول مرة أخرى' : 'Failed to delete images');
+      console.warn('Error deleting clan images:', e);
+      setDeleteSuccessToast(lang === 'ar' ? '⚠️ فشل حذف الصور، حاول مرة أخرى' : 'Failed to delete images');
+      setTimeout(() => setDeleteSuccessToast(null), 4000);
     } finally {
       setIsDeletingImages(false);
       setIsDeleteImagesModalOpen(false);
@@ -711,6 +786,24 @@ export const ClanAdminTab: React.FC<ClanAdminTabProps> = ({
                 />
               </label>
 
+              {/* Toggle: Voice Notes / Audio */}
+              <label className="flex items-center justify-between p-3 rounded-2xl bg-slate-900/60 border border-slate-800/80 cursor-pointer">
+                <div>
+                  <span className="text-xs font-bold text-white block">
+                    {lang === 'ar' ? 'السماح بتسجيل وإرسال الفويس الصوتي في المجموعة 🎙️' : 'Allow Voice Notes / Audio'}
+                  </span>
+                  <span className="text-[11px] text-slate-400">
+                    {lang === 'ar' ? 'تسجيل رسائل صوتية مباشرة وسماعها من قِبل جميع أعضاء القبيلة' : 'Direct voice messaging'}
+                  </span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={clanSettings.allowMemberAudio !== false}
+                  onChange={(e) => setClanSettings(prev => ({ ...prev, allowMemberAudio: e.target.checked }))}
+                  className="w-5 h-5 accent-emerald-500 rounded"
+                />
+              </label>
+
               {/* Toggle 4: Stickers */}
               <label className="flex items-center justify-between p-3 rounded-2xl bg-slate-900/60 border border-slate-800/80 cursor-pointer">
                 <div>
@@ -757,15 +850,25 @@ export const ClanAdminTab: React.FC<ClanAdminTabProps> = ({
                 </p>
               </div>
 
-              {/* Action: Clear Images Button */}
-              <button
-                type="button"
-                onClick={() => setIsDeleteImagesModalOpen(true)}
-                className="px-5 py-2.5 rounded-xl bg-red-600/90 hover:bg-red-500 text-white font-bold text-xs flex items-center gap-2 shadow-lg shadow-red-500/20 cursor-pointer"
-              >
-                <Trash2 className="w-4 h-4" />
-                <span>{lang === 'ar' ? 'حذف صور القبيلة' : 'Delete Clan Images'}</span>
-              </button>
+              {/* Actions: Clear Images & Purge All Chat */}
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsDeleteImagesModalOpen(true)}
+                  className="px-4 py-2.5 rounded-xl bg-amber-600/90 hover:bg-amber-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-lg shadow-amber-500/20 cursor-pointer"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  <span>{lang === 'ar' ? 'حذف صور القبيلة' : 'Delete Clan Images'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsPurgingAllChatModalOpen(true)}
+                  className="px-4 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white font-black text-xs flex items-center gap-1.5 shadow-lg shadow-red-600/30 cursor-pointer border border-red-500/50 animate-pulse"
+                >
+                  <MessageSquareX className="w-4 h-4" />
+                  <span>{lang === 'ar' ? 'حذف جميع تكييفات ومحادثات الدردشة والصور' : 'Purge All Chat & Media'}</span>
+                </button>
+              </div>
             </div>
 
             {/* Storage Metric Cards */}
@@ -835,28 +938,63 @@ export const ClanAdminTab: React.FC<ClanAdminTabProps> = ({
               </button>
             </div>
 
-            {storageStats.files.length === 0 ? (
-              <div className="p-10 rounded-2xl bg-[#111722] border border-slate-800 text-center text-slate-500">
-                <p className="text-xs">{lang === 'ar' ? 'لا توجد صور مرفوعة في مساحة القبيلة حالياً.' : 'No images found.'}</p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-3">
-                {storageStats.files.map((file) => (
-                  <div key={file.name} className="group relative rounded-xl overflow-hidden bg-slate-900 border border-slate-800 aspect-square">
-                    <img
-                      src={file.url}
-                      alt={file.name}
-                      className="w-full h-full object-cover group-hover:scale-105 transition-transform"
-                      loading="lazy"
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity p-2 flex flex-col justify-end">
-                      <span className="text-[10px] text-white truncate">{file.name}</span>
-                      <span className="text-[9px] text-cyan-300 font-mono">{(file.size / 1024).toFixed(1)} KB</span>
+            {(() => {
+                // Combine both server storage stats files AND images sent in messages so ALL uploaded images from any user are 100% visible
+                const msgImages = messages
+                  .filter(m => m.type === 'image' && m.mediaUrl)
+                  .map(m => ({
+                    name: m.content || m.id,
+                    url: m.mediaUrl as string,
+                    size: m.mediaSize || 50000,
+                    senderName: m.senderName,
+                    msgId: m.id
+                  }));
+
+                const allDisplayImages: Array<{ name: string; url: string; size: number; senderName?: string; msgId?: string }> = [
+                  ...storageStats.files,
+                  ...msgImages.filter(mi => !storageStats.files.some(sf => sf.url === mi.url))
+                ];
+
+                if (allDisplayImages.length === 0) {
+                  return (
+                    <div className="p-10 rounded-2xl bg-[#111722] border border-slate-800 text-center text-slate-500">
+                      <p className="text-xs">{lang === 'ar' ? 'لا توجد صور مرفوعة في مساحة القبيلة حالياً.' : 'No images found.'}</p>
                     </div>
+                  );
+                }
+
+                return (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+                    {allDisplayImages.map((file, idx) => (
+                      <div key={file.msgId || file.name || idx} className="group relative rounded-2xl overflow-hidden bg-slate-900 border border-slate-800 aspect-square shadow-md">
+                        <img
+                          src={file.url}
+                          alt={file.name}
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                          loading="lazy"
+                        />
+                        {/* Delete button overlay on each image */}
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteSingleImage(file)}
+                          className="absolute top-2 end-2 p-1.5 rounded-xl bg-red-600/90 hover:bg-red-500 text-white shadow-lg transition-all z-10 opacity-90 hover:opacity-100 hover:scale-110 cursor-pointer"
+                          title={lang === 'ar' ? 'حذف هذه الصورة نهائياً' : 'Delete this image'}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                        {/* Info banner */}
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent p-2.5 flex flex-col justify-end pointer-events-none">
+                          <span className="text-[10px] font-bold text-white truncate">{file.name}</span>
+                          {file.senderName && (
+                            <span className="text-[9px] text-amber-300 truncate">بواسطة: {file.senderName}</span>
+                          )}
+                          <span className="text-[9px] text-cyan-300 font-mono">{(file.size / 1024).toFixed(1)} KB</span>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-            )}
+                );
+              })()}
           </div>
         </div>
       )}

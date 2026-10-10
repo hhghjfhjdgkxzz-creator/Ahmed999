@@ -19,7 +19,17 @@ import {
   Search,
   Camera,
   ShieldCheck,
-  ChevronDown
+  ChevronDown,
+  Mic,
+  Square,
+  Play,
+  Pause,
+  Volume2,
+  AlertCircle,
+  Smartphone,
+  FileAudio,
+  RefreshCw,
+  Music
 } from 'lucide-react';
 import { 
   ClanMessage, 
@@ -35,7 +45,7 @@ import {
   markClanMessageAsRead, 
   deleteClanMessage 
 } from '../../lib/clanService';
-import { uploadClanImageUniversal } from '../../lib/clanStorage';
+import { uploadClanImageUniversal, uploadClanAudioUniversal } from '../../lib/clanStorage';
 
 interface ClanChatProps {
   lang: Language;
@@ -70,11 +80,35 @@ export const ClanChat: React.FC<ClanChatProps> = ({
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
   const [showScrollBottomBtn, setShowScrollBottomBtn] = useState(false);
+  // Voice Recording & Playback State
+  const [isRecordingVoice, setIsRecordingVoice] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const [isUploadingVoice, setIsUploadingVoice] = useState(false);
+  const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
+  const [audioProgress, setAudioProgress] = useState<{ [msgId: string]: number }>({});
+  const [showVoiceOptionsModal, setShowVoiceOptionsModal] = useState(false);
+  const [micPermissionError, setMicPermissionError] = useState<string | null>(null);
+  const [chatToast, setChatToast] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
+  
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const recordingTimerRef = useRef<any>(null);
+  const currentAudioElemRef = useRef<HTMLAudioElement | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const audioFileInputRef = useRef<HTMLInputElement>(null);
+  const nativeVoiceRecordInputRef = useRef<HTMLInputElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Auto clear notification toast
+  useEffect(() => {
+    if (chatToast) {
+      const timer = setTimeout(() => setChatToast(null), 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [chatToast]);
 
   // Auto scroll to bottom on new message
   useEffect(() => {
@@ -123,7 +157,308 @@ export const ClanChat: React.FC<ClanChatProps> = ({
 
   const canSendMessages = isAdmin || (currentMember && clanSettings.allowMemberMessages);
   const canSendImages = isAdmin || (currentMember && clanSettings.allowMemberImages);
+  const canSendAudio = isAdmin || (currentMember && (clanSettings.allowMemberAudio !== false));
   const canSendStickers = isAdmin || (currentMember && clanSettings.allowMemberStickers);
+
+  // Clean up recording timer on unmount
+  useEffect(() => {
+    return () => {
+      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+      if (currentAudioElemRef.current) {
+        currentAudioElemRef.current.pause();
+        currentAudioElemRef.current = null;
+      }
+    };
+  }, []);
+
+  // Voice Note Recording Methods (Instant Voice Record)
+  const startVoiceRecording = async () => {
+    if (!currentUser || !canSendAudio || isRecordingVoice || isUploadingVoice) return;
+    try {
+      if (!navigator?.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        // Fallback instantly to native mobile voice recorder capture
+        if (nativeVoiceRecordInputRef.current) {
+          nativeVoiceRecordInputRef.current.click();
+          return;
+        }
+        setMicPermissionError(
+          lang === 'ar'
+            ? 'المتصفح لا يدعم تسجيل الميكروفون المباشر. يمكنك استخدام مسجل الهاتف أو رفع ملف صوتي.'
+            : 'Direct microphone recording is not supported. You can use phone voice recorder.'
+        );
+        setShowVoiceOptionsModal(true);
+        return;
+      }
+
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ 
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true
+          } 
+        });
+      } catch (constraintErr) {
+        // Fallback to basic audio in case advanced constraints aren't supported
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      }
+
+      audioChunksRef.current = [];
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus'
+        : MediaRecorder.isTypeSupported('audio/mp4')
+        ? 'audio/mp4'
+        : MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')
+        ? 'audio/ogg;codecs=opus'
+        : 'audio/webm';
+
+      const mediaRecorder = new MediaRecorder(stream, { mimeType });
+      mediaRecorderRef.current = mediaRecorder;
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) {
+          audioChunksRef.current.push(e.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop());
+      };
+
+      mediaRecorder.start(250); // collect in 250ms chunks
+      setIsRecordingVoice(true);
+      setRecordingSeconds(0);
+      setMicPermissionError(null);
+      setShowVoiceOptionsModal(false);
+
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingSeconds(prev => {
+          if (prev >= 120) { // Max 2 minutes voice note limit
+            stopAndSendVoiceRecording();
+            return 120;
+          }
+          return prev + 1;
+        });
+      }, 1000);
+    } catch (err: any) {
+      // If direct browser microphone permission is blocked in preview/iframe, instantly launch native recorder
+      console.warn('Microphone direct access restricted, launching instant native recorder:', err?.message || err);
+      if (nativeVoiceRecordInputRef.current) {
+        nativeVoiceRecordInputRef.current.click();
+        return;
+      }
+      setMicPermissionError(
+        lang === 'ar'
+          ? 'تم تقييد إذن الميكروفون المباشر. يرجى استخدام زر مسجل الهاتف أدناه.'
+          : 'Microphone permission restricted. Please use phone recorder option.'
+      );
+      setShowVoiceOptionsModal(true);
+    }
+  };
+
+  const cancelVoiceRecording = () => {
+    if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      try {
+        mediaRecorderRef.current.stop();
+      } catch (e) {}
+    }
+    audioChunksRef.current = [];
+    setIsRecordingVoice(false);
+    setRecordingSeconds(0);
+  };
+
+  const stopAndSendVoiceRecording = async () => {
+    if (!mediaRecorderRef.current || mediaRecorderRef.current.state === 'inactive') return;
+    if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+
+    const recordedDuration = recordingSeconds;
+    if (recordedDuration < 1) {
+      cancelVoiceRecording();
+      return;
+    }
+
+    setIsUploadingVoice(true);
+    setIsRecordingVoice(false);
+
+    try {
+      const mimeType = mediaRecorderRef.current.mimeType || 'audio/webm';
+      
+      const finishedBlob = await new Promise<Blob>((resolve) => {
+        mediaRecorderRef.current!.onstop = () => {
+          const blob = new Blob(audioChunksRef.current, { type: mimeType });
+          resolve(blob);
+        };
+        mediaRecorderRef.current!.stop();
+      });
+
+      // Upload audio universally to cloud & local
+      const uploadRes = await uploadClanAudioUniversal(finishedBlob, recordedDuration);
+
+      const userClanRole: ClanRole = isAdmin ? 'leader' : (currentMember?.clanRole || 'member');
+      const newMsg: ClanMessage = {
+        id: `msg_voice_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        senderId: currentUser!.id,
+        senderName: currentUser!.name,
+        senderAvatar: currentUser!.avatar || '',
+        senderClanRole: userClanRole,
+        content: lang === 'ar' ? `تسجيل صوتي (${recordedDuration} ثانية)` : `Voice note (${recordedDuration}s)`,
+        type: 'audio',
+        mediaUrl: uploadRes.url,
+        mediaSize: uploadRes.size,
+        audioDuration: recordedDuration,
+        createdAt: new Date().toISOString(),
+        readBy: [{
+          userId: currentUser!.id,
+          userName: currentUser!.name,
+          userAvatar: currentUser!.avatar,
+          readAt: new Date().toISOString()
+        }]
+      };
+
+      await sendClanMessage(newMsg);
+      setChatToast({
+        type: 'success',
+        text: lang === 'ar' ? '✓ تم إرسال التسجيل الصوتي بنجاح لجميع الأعضاء!' : 'Voice note sent!'
+      });
+    } catch (err: any) {
+      console.warn('Failed to send voice message:', err?.message || err);
+      setChatToast({
+        type: 'error',
+        text: lang === 'ar' ? 'فشل إرسال التسجيل الصوتي، يرجى المحاولة مرة أخرى.' : 'Voice note upload failed'
+      });
+    } finally {
+      setIsUploadingVoice(false);
+      setRecordingSeconds(0);
+      audioChunksRef.current = [];
+    }
+  };
+
+  // Upload Audio/Voice from Device or Native Mobile Recorder
+  const handleAudioFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !currentUser || !canSendAudio) return;
+
+    if (audioFileInputRef.current) audioFileInputRef.current.value = '';
+    if (nativeVoiceRecordInputRef.current) nativeVoiceRecordInputRef.current.value = '';
+
+    if (file.size > 15 * 1024 * 1024) {
+      setChatToast({
+        type: 'error',
+        text: lang === 'ar' ? 'حجم الملف الصوتي يتجاوز الحد المسموح به (15 ميغابايت)' : 'Audio exceeds 15MB limit'
+      });
+      return;
+    }
+
+    setIsUploadingVoice(true);
+    try {
+      let durationSec = 0;
+      try {
+        const audioUrl = URL.createObjectURL(file);
+        const tempAudio = new Audio(audioUrl);
+        await new Promise<void>((resolve) => {
+          tempAudio.onloadedmetadata = () => {
+            if (isFinite(tempAudio.duration) && tempAudio.duration > 0) {
+              durationSec = Math.round(tempAudio.duration);
+            }
+            resolve();
+          };
+          tempAudio.onerror = () => resolve();
+          setTimeout(resolve, 1500);
+        });
+        URL.revokeObjectURL(audioUrl);
+      } catch (durErr) {
+        console.warn('Could not read audio duration:', durErr);
+      }
+
+      const uploadRes = await uploadClanAudioUniversal(file, durationSec);
+      const userClanRole: ClanRole = isAdmin ? 'leader' : (currentMember?.clanRole || 'member');
+      const newMsg: ClanMessage = {
+        id: `msg_voice_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        senderId: currentUser.id,
+        senderName: currentUser.name,
+        senderAvatar: currentUser.avatar || '',
+        senderClanRole: userClanRole,
+        content: durationSec > 0
+          ? (lang === 'ar' ? `تسجيل صوتي (${durationSec} ثانية)` : `Voice note (${durationSec}s)`)
+          : (lang === 'ar' ? `تسجيل صوتي` : `Voice note`),
+        type: 'audio',
+        mediaUrl: uploadRes.url,
+        mediaSize: uploadRes.size,
+        audioDuration: durationSec,
+        createdAt: new Date().toISOString(),
+        readBy: [{
+          userId: currentUser.id,
+          userName: currentUser.name,
+          userAvatar: currentUser.avatar,
+          readAt: new Date().toISOString()
+        }]
+      };
+
+      await sendClanMessage(newMsg);
+      setChatToast({
+        type: 'success',
+        text: lang === 'ar' ? '✓ تم إرسال التسجيل الصوتي بنجاح لجميع الأعضاء!' : 'Voice note sent!'
+      });
+      setShowVoiceOptionsModal(false);
+    } catch (err: any) {
+      console.warn('Failed to upload audio:', err?.message || err);
+      setChatToast({
+        type: 'error',
+        text: lang === 'ar' ? 'فشل إرسال التسجيل الصوتي، يرجى المحاولة مرة أخرى.' : 'Failed to send voice note'
+      });
+    } finally {
+      setIsUploadingVoice(false);
+    }
+  };
+
+  // Audio Playback Controller
+  const togglePlayAudio = (msg: ClanMessage) => {
+    if (!msg.mediaUrl) return;
+
+    if (playingAudioId === msg.id) {
+      // Pause
+      if (currentAudioElemRef.current) {
+        currentAudioElemRef.current.pause();
+      }
+      setPlayingAudioId(null);
+      return;
+    }
+
+    // Stop currently playing
+    if (currentAudioElemRef.current) {
+      currentAudioElemRef.current.pause();
+      currentAudioElemRef.current = null;
+    }
+
+    const audio = new Audio(msg.mediaUrl);
+    currentAudioElemRef.current = audio;
+    setPlayingAudioId(msg.id);
+
+    audio.ontimeupdate = () => {
+      if (audio.duration) {
+        const pct = (audio.currentTime / audio.duration) * 100;
+        setAudioProgress(prev => ({ ...prev, [msg.id]: pct }));
+      }
+    };
+
+    audio.onended = () => {
+      setPlayingAudioId(null);
+      setAudioProgress(prev => ({ ...prev, [msg.id]: 0 }));
+      currentAudioElemRef.current = null;
+    };
+
+    audio.onerror = () => {
+      setPlayingAudioId(null);
+      currentAudioElemRef.current = null;
+    };
+
+    audio.play().catch(e => {
+      console.warn('Audio play failed:', e);
+      setPlayingAudioId(null);
+    });
+  };
 
   const handleSendText = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -193,9 +528,12 @@ export const ClanChat: React.FC<ClanChatProps> = ({
     // Check size limit
     const maxSize = clanSettings.maxImageSizeBytes || 5 * 1024 * 1024;
     if (file.size > maxSize) {
-      alert(lang === 'ar' 
-        ? `حجم الصورة يتجاوز الحد المسموح به (${(maxSize / (1024 * 1024)).toFixed(1)} ميغابايت)` 
-        : `Image exceeds maximum allowed size`);
+      setChatToast({
+        type: 'error',
+        text: lang === 'ar' 
+          ? `حجم الصورة يتجاوز الحد المسموح به (${(maxSize / (1024 * 1024)).toFixed(1)} ميغابايت)` 
+          : `Image exceeds maximum allowed size`
+      });
       return;
     }
 
@@ -227,8 +565,11 @@ export const ClanChat: React.FC<ClanChatProps> = ({
 
       await sendClanMessage(newMsg);
     } catch (err) {
-      console.error('Failed to upload image:', err);
-      alert(lang === 'ar' ? 'فشل رفع الصورة، يرجى المحاولة مرة أخرى.' : 'Image upload failed');
+      console.warn('Failed to upload image:', err);
+      setChatToast({
+        type: 'error',
+        text: lang === 'ar' ? 'فشل رفع الصورة، يرجى المحاولة مرة أخرى.' : 'Image upload failed'
+      });
     } finally {
       setIsUploadingImage(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -557,6 +898,50 @@ export const ClanChat: React.FC<ClanChatProps> = ({
                         </div>
                       )}
 
+                      {/* TYPE: Audio Voice Note Message */}
+                      {msg.type === 'audio' && msg.mediaUrl && (
+                        <div className="flex items-center gap-2.5 py-1 min-w-[200px] sm:min-w-[250px] max-w-full">
+                          {/* Play/Pause Button */}
+                          <button
+                            type="button"
+                            onClick={() => togglePlayAudio(msg)}
+                            className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 shadow-md transition-all cursor-pointer ${
+                              isMe 
+                                ? 'bg-white text-cyan-700 hover:bg-cyan-50' 
+                                : 'bg-gradient-to-r from-emerald-500 to-teal-500 text-white hover:brightness-110'
+                            }`}
+                            title={playingAudioId === msg.id ? (lang === 'ar' ? 'إيقاف' : 'Pause') : (lang === 'ar' ? 'تشغيل الصوت' : 'Play Voice')}
+                          >
+                            {playingAudioId === msg.id ? (
+                              <Pause className="w-4 h-4 fill-current" />
+                            ) : (
+                              <Play className="w-4 h-4 fill-current ml-0.5 rtl:mr-0.5 rtl:ml-0" />
+                            )}
+                          </button>
+
+                          {/* Sound Wave Graphic & Duration */}
+                          <div className="flex-1 flex flex-col gap-1 min-w-0">
+                            <div className="flex items-center justify-between text-[10px] font-mono">
+                              <span className={`flex items-center gap-1 font-bold ${isMe ? 'text-white' : 'text-emerald-400'}`}>
+                                <Volume2 className="w-3 h-3" />
+                                <span>{lang === 'ar' ? 'تسجيل صوتي' : 'Voice Note'}</span>
+                              </span>
+                              <span className={`${isMe ? 'text-cyan-100' : 'text-slate-400'}`}>
+                                {msg.audioDuration ? `${msg.audioDuration}s` : '0:00'}
+                              </span>
+                            </div>
+
+                            {/* Progress bar / animated wave bars */}
+                            <div className="w-full bg-black/25 rounded-full h-1.5 overflow-hidden">
+                              <div 
+                                className={`h-full transition-all duration-150 ${isMe ? 'bg-white' : 'bg-emerald-400'}`}
+                                style={{ width: `${audioProgress[msg.id] || 0}%` }}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
                       {/* TYPE 3: Sticker Message */}
                       {msg.type === 'sticker' && msg.mediaUrl && (
                         <div className="flex flex-col items-center py-1">
@@ -670,6 +1055,40 @@ export const ClanChat: React.FC<ClanChatProps> = ({
 
       {/* 4. Bottom Input Controls (Mobile First, Touch Optimized) */}
       <div className="p-2 sm:p-3 bg-[#101623] border-t border-slate-800/90 z-20 relative shrink-0">
+                {/* Voice Recording Live Bar */}
+        {isRecordingVoice && (
+          <div className="absolute inset-x-2 bottom-2 sm:bottom-3 bg-red-950/90 border border-red-500/50 rounded-2xl p-2.5 flex items-center justify-between z-30 backdrop-blur-md animate-in slide-in-from-bottom-2">
+            <div className="flex items-center gap-2.5">
+              <span className="w-3 h-3 rounded-full bg-red-500 animate-ping" />
+              <span className="text-xs font-black text-white flex items-center gap-1.5">
+                <Mic className="w-4 h-4 text-red-400 animate-bounce" />
+                <span>{lang === 'ar' ? 'جاري تسجيل الفويس...' : 'Recording Voice...'}</span>
+              </span>
+              <span className="text-xs font-mono font-bold text-red-300 bg-red-900/60 px-2 py-0.5 rounded-lg border border-red-800">
+                {Math.floor(recordingSeconds / 60)}:{String(recordingSeconds % 60).padStart(2, '0')}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={cancelVoiceRecording}
+                className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition-colors cursor-pointer"
+              >
+                {lang === 'ar' ? 'إلغاء' : 'Cancel'}
+              </button>
+              <button
+                type="button"
+                onClick={stopAndSendVoiceRecording}
+                className="px-4 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black shadow-lg shadow-emerald-600/30 transition-all flex items-center gap-1.5 cursor-pointer"
+              >
+                <Send className="w-3.5 h-3.5 rtl:rotate-180" />
+                <span>{lang === 'ar' ? 'إرسال الفويس' : 'Send'}</span>
+              </button>
+            </div>
+          </div>
+        )}
+
         <form onSubmit={handleSendText} className="flex items-center gap-1.5 sm:gap-2">
           
           {/* Sticker Picker Button */}
@@ -710,6 +1129,57 @@ export const ClanChat: React.FC<ClanChatProps> = ({
               <Camera className="w-4 h-4 sm:w-5 sm:h-5" />
             )}
           </button>
+
+          {/* Audio / Voice Upload Hidden Inputs */}
+          <input
+            type="file"
+            ref={audioFileInputRef}
+            onChange={handleAudioFileUpload}
+            accept="audio/*"
+            className="hidden"
+          />
+          <input
+            type="file"
+            ref={nativeVoiceRecordInputRef}
+            onChange={handleAudioFileUpload}
+            accept="audio/*"
+            capture="microphone"
+            className="hidden"
+          />
+
+          {/* Voice Note Recording Button & Options (🎙️ الفويس الصوتي) */}
+          <div className="relative flex items-center shrink-0">
+            <button
+              type="button"
+              disabled={!canSendAudio || isUploadingVoice}
+              onClick={isRecordingVoice ? stopAndSendVoiceRecording : startVoiceRecording}
+              className={`p-2 sm:p-2.5 rounded-xl border transition-all cursor-pointer shrink-0 ${
+                isRecordingVoice
+                  ? 'bg-red-500/20 border-red-500 text-red-400 animate-pulse'
+                  : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-emerald-400 hover:bg-slate-800'
+              } ${(!canSendAudio || isUploadingVoice) ? 'opacity-40 cursor-not-allowed' : ''}`}
+              title={isRecordingVoice ? (lang === 'ar' ? 'إنهاء وإرسال الفويس' : 'Send Voice') : (lang === 'ar' ? 'تسجيل فويس صوتي 🎙️' : 'Record Voice')}
+            >
+              {isUploadingVoice ? (
+                <Loader2 className="w-4 h-4 sm:w-5 sm:h-5 animate-spin text-emerald-400" />
+              ) : isRecordingVoice ? (
+                <Square className="w-4 h-4 sm:w-5 sm:h-5 fill-current text-red-400" />
+              ) : (
+                <Mic className="w-4 h-4 sm:w-5 sm:h-5" />
+              )}
+            </button>
+            {/* Quick voice audio options trigger */}
+            {!isRecordingVoice && canSendAudio && (
+              <button
+                type="button"
+                onClick={() => setShowVoiceOptionsModal(true)}
+                className="absolute -top-1.5 -end-1.5 w-4 h-4 rounded-full bg-slate-800 border border-slate-700 hover:border-emerald-500 hover:text-emerald-400 text-slate-400 flex items-center justify-center text-[9px] shadow-sm transition-all cursor-pointer font-bold"
+                title={lang === 'ar' ? 'خيارات الفويس والرفع من الجهاز' : 'Voice options'}
+              >
+                +
+              </button>
+            )}
+          </div>
 
           {/* Input Text Field (font-size 16px on mobile to avoid iOS Safari auto-zoom) */}
           <input
@@ -884,6 +1354,178 @@ export const ClanChat: React.FC<ClanChatProps> = ({
               )}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* 8. Voice Note Options & Fallback Modal */}
+      {showVoiceOptionsModal && (
+        <div 
+          onClick={() => setShowVoiceOptionsModal(false)}
+          className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4 animate-in fade-in"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-md bg-[#0f172a] border border-slate-700/80 rounded-2xl p-4 sm:p-5 shadow-2xl space-y-4 text-slate-200"
+          >
+            {/* Modal Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shadow-inner">
+                  <Mic className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-white">
+                    {lang === 'ar' ? 'إرسال تسجيل صوتي للقبيلة' : 'Send Voice Note to Clan'}
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    {lang === 'ar' ? 'خيارات التسجيل والصوت المباشر' : 'Voice recording options'}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowVoiceOptionsModal(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Permission Notice if mic direct access was restricted */}
+            {micPermissionError && (
+              <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl flex items-start gap-2.5 text-amber-300 text-xs">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <p className="font-bold text-[11px]">
+                    {lang === 'ar' 
+                      ? 'تم حظر أو تقييد إذن الميكروفون المباشر في المتصفح أو داخل هذا الإطار.' 
+                      : 'Direct microphone permission was blocked or denied.'}
+                  </p>
+                  <p className="text-[10px] text-amber-300/80 leading-relaxed">
+                    {lang === 'ar'
+                      ? 'يمكنك تسجيل صوتك بسهولة عبر مسجل الهاتف أو اختيار أي ملف صوتي جاهز من جهازك أدناه:'
+                      : 'You can easily record using your phone voice recorder or choose any audio file below:'}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Action Buttons */}
+            <div className="space-y-2.5">
+              {/* Option 1: Mobile Native Recorder */}
+              <button
+                type="button"
+                onClick={() => {
+                  setShowVoiceOptionsModal(false);
+                  nativeVoiceRecordInputRef.current?.click();
+                }}
+                className="w-full p-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white flex items-center justify-between text-start transition-all shadow-lg shadow-emerald-900/30 group cursor-pointer"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-lg bg-white/20 flex items-center justify-center shrink-0">
+                    <Smartphone className="w-5 h-5 text-white" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-black">
+                      {lang === 'ar' ? 'تسجيل فويس عبر مسجل الهاتف 📱' : 'Record via Phone Voice Recorder'}
+                    </div>
+                    <div className="text-[10px] text-emerald-100/80">
+                      {lang === 'ar' ? 'يعمل على أجهزة الجوال دون أي قيود' : 'Works natively on smartphones'}
+                    </div>
+                  </div>
+                </div>
+                <ChevronDown className="w-4 h-4 -rotate-90 rtl:rotate-90 text-emerald-200 group-hover:translate-x-0.5 transition-transform" />
+              </button>
+
+              {/* Option 2: Upload Audio File from Device */}
+              <button
+                type="button"
+                onClick={() => {
+                  setShowVoiceOptionsModal(false);
+                  audioFileInputRef.current?.click();
+                }}
+                className="w-full p-3 rounded-xl bg-slate-800/80 hover:bg-slate-800 border border-slate-700/80 text-white flex items-center justify-between text-start transition-all cursor-pointer group"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-lg bg-cyan-500/20 text-cyan-400 flex items-center justify-center shrink-0">
+                    <FileAudio className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-black">
+                      {lang === 'ar' ? 'رفع ملف صوتي مسجل من الجهاز 📁' : 'Attach Recorded Audio File'}
+                    </div>
+                    <div className="text-[10px] text-slate-400">
+                      {lang === 'ar' ? 'يدعم MP3, WebM, M4A, OGG, WAV (حتى 15 ميغابايت)' : 'MP3, WebM, M4A, OGG, WAV (up to 15MB)'}
+                    </div>
+                  </div>
+                </div>
+                <ChevronDown className="w-4 h-4 -rotate-90 rtl:rotate-90 text-slate-400 group-hover:translate-x-0.5 transition-transform" />
+              </button>
+
+              {/* Option 3: Retry Direct Browser Mic */}
+              <button
+                type="button"
+                onClick={() => {
+                  setShowVoiceOptionsModal(false);
+                  setTimeout(startVoiceRecording, 100);
+                }}
+                className="w-full p-2.5 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white flex items-center justify-center gap-2 text-xs font-bold transition-all cursor-pointer"
+              >
+                <RefreshCw className="w-3.5 h-3.5 text-cyan-400" />
+                <span>{lang === 'ar' ? 'إعادة طلب صلاحية الميكروفون المباشر' : 'Retry Direct Browser Mic'}</span>
+              </button>
+            </div>
+
+            {/* Browser Permission Tip */}
+            <div className="p-2.5 rounded-xl bg-slate-900/60 border border-slate-800/90 text-[10px] text-slate-400 leading-relaxed space-y-1">
+              <p className="font-semibold text-slate-300">
+                {lang === 'ar' ? '💡 لتفعيل الميكروفون في المتصفح:' : '💡 To allow microphone in browser:'}
+              </p>
+              <p>
+                {lang === 'ar'
+                  ? 'انقر على أيقونة القفل أو الضبط بجانب رابط الموقع في شريط العناوين ⬅️ اختر "أذونات الموقع" ⬅️ فعّل "الميكروفون" على السماح (Allow).'
+                  : 'Click the lock icon next to the URL ➡️ Site settings ➡️ set Microphone to Allow.'}
+              </p>
+            </div>
+
+            {/* Close Button */}
+            <div className="pt-2 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowVoiceOptionsModal(false)}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition-colors cursor-pointer"
+              >
+                {lang === 'ar' ? 'إغلاق' : 'Close'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 9. Floating In-App Toast Notification */}
+      {chatToast && (
+        <div className={`fixed top-4 start-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-xl shadow-2xl text-xs font-bold backdrop-blur-md flex items-center gap-2 animate-in fade-in slide-in-from-top-3 max-w-sm text-center ${
+          chatToast.type === 'error'
+            ? 'bg-red-950/95 border border-red-500/50 text-red-200 shadow-red-950/50'
+            : chatToast.type === 'success'
+            ? 'bg-emerald-950/95 border border-emerald-500/50 text-emerald-200 shadow-emerald-950/50'
+            : 'bg-slate-900/95 border border-slate-700 text-white'
+        }`}>
+          {chatToast.type === 'error' ? (
+            <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+          ) : chatToast.type === 'success' ? (
+            <CheckCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+          ) : (
+            <Sparkles className="w-4 h-4 text-cyan-400 shrink-0" />
+          )}
+          <span>{chatToast.text}</span>
+          <button
+            type="button"
+            onClick={() => setChatToast(null)}
+            className="ms-2 p-0.5 rounded text-slate-400 hover:text-white"
+          >
+            <X className="w-3 h-3" />
+          </button>
         </div>
       )}
 

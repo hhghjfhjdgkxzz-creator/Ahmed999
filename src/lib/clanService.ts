@@ -456,3 +456,16 @@ export async function logClanAudit(action: string, details: string, admin: AuthU
   const updated = [logItem, ...cached];
   setCache('clan_audit_logs_cache', updated);
 }
+
+export async function clearAllClanMessages(): Promise<void> {
+  try {
+    const colRef = collection(db, 'clan_messages');
+    const snap = await getDocs(colRef);
+    for (const d of snap.docs) {
+      await deleteDoc(d.ref);
+    }
+  } catch (err) {
+    console.warn('Error clearing messages in Firestore:', err);
+  }
+  setCache('clan_messages_cache', []);
+}
