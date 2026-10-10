@@ -132,6 +132,12 @@ service cloud.firestore {
     }
 
     // 15. Clan Audit Logs Collection
+    match /clan_media/{mediaId} {
+      allow read: if isValidId(mediaId);
+      allow create, update, delete: if isValidId(mediaId);
+    }
+
+    // 16. Clan Audit Logs Collection
     match /clan_audit_logs/{logId} {
       allow read: if isValidId(logId);
       allow create, update, delete: if isValidId(logId);

@@ -43,6 +43,7 @@ import {
   deleteClanSticker, 
   logClanAudit 
 } from '../../lib/clanService';
+import { deleteClanImagesFromCloud } from '../../lib/clanStorage';
 
 interface ClanAdminTabProps {
   lang: Language;

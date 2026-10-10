@@ -35,6 +35,7 @@ import {
   markClanMessageAsRead, 
   deleteClanMessage 
 } from '../../lib/clanService';
+import { uploadClanImageUniversal } from '../../lib/clanStorage';
 
 interface ClanChatProps {
   lang: Language;
@@ -200,20 +201,9 @@ export const ClanChat: React.FC<ClanChatProps> = ({
 
     setIsUploadingImage(true);
     try {
-      const formData = new FormData();
-      formData.append('file', file);
-
-      const res = await fetch('/api/clan/upload', {
-        method: 'POST',
-        body: formData
-      });
-
-      if (!res.ok) {
-        throw new Error('Upload failed');
-      }
-
-      const data = await res.json();
-      const imageUrl = data.url;
+      // Robust hybrid upload: compresses locally and syncs to Firestore & backend storage
+      const uploadResult = await uploadClanImageUniversal(file);
+      const imageUrl = uploadResult.url;
 
       const userClanRole: ClanRole = isAdmin ? 'leader' : (currentMember?.clanRole || 'member');
       const newMsg: ClanMessage = {
