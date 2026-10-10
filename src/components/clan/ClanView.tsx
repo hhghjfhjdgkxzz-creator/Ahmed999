@@ -112,29 +112,31 @@ export const ClanView: React.FC<ClanViewProps> = ({
   };
 
   return (
-    <main className="flex-1 w-full max-w-[1720px] mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-6">
+    <main className={`flex-1 w-full max-w-[1720px] mx-auto py-2 sm:py-6 space-y-3 sm:space-y-6 ${
+      activeTab === 'chat' ? 'px-1 sm:px-6 lg:px-8' : 'px-3 sm:px-6 lg:px-8'
+    }`}>
       
       {/* Back Button & Top Navigation */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between px-1 sm:px-0">
         <button
           onClick={onBackToStore}
-          className="flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 text-xs font-bold transition-all cursor-pointer group"
+          className="flex items-center gap-2 px-3 sm:px-4 py-2 rounded-xl bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 text-xs font-bold transition-all cursor-pointer group"
         >
           <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform rtl:rotate-180 rtl:group-hover:translate-x-1" />
-          <span>{lang === 'ar' ? 'العودة إلى متجر التصاميم' : 'Back to Store'}</span>
+          <span>{lang === 'ar' ? 'العودة للمتجر' : 'Back to Store'}</span>
         </button>
 
         {/* Status Indicator Tag */}
         <div className="flex items-center gap-2">
           {isAdmin ? (
-            <span className="px-3 py-1 rounded-full text-xs font-black bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-1.5 shadow-md shadow-amber-500/10">
+            <span className="px-2.5 sm:px-3 py-1 rounded-full text-[11px] sm:text-xs font-black bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-1.5 shadow-md shadow-amber-500/10">
               <Crown className="w-3.5 h-3.5" />
-              <span>{lang === 'ar' ? 'صلاحيات قائد وإدارة القبيلة' : 'Clan Leader / Admin'}</span>
+              <span>{lang === 'ar' ? 'إدارة القبيلة' : 'Clan Leader'}</span>
             </span>
           ) : isAcceptedMember ? (
-            <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1.5">
+            <span className="px-2.5 sm:px-3 py-1 rounded-full text-[11px] sm:text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1.5">
               <CheckCircle className="w-3.5 h-3.5" />
-              <span>{lang === 'ar' ? 'عضو معتمد في القبيلة' : 'Official Clan Member'}</span>
+              <span>{lang === 'ar' ? 'عضو معتمد' : 'Member'}</span>
             </span>
           ) : null}
         </div>
@@ -153,8 +155,10 @@ export const ClanView: React.FC<ClanViewProps> = ({
         </div>
       )}
 
-      {/* Hero Banner of the Clan */}
-      <div className="relative rounded-3xl overflow-hidden border border-slate-800 shadow-2xl bg-[#0e121b]">
+      {/* Hero Banner of the Clan - Collapsed on mobile when chat is active for maximum mobile space */}
+      <div className={`relative rounded-2xl sm:rounded-3xl overflow-hidden border border-slate-800 shadow-2xl bg-[#0e121b] transition-all ${
+        activeTab === 'chat' ? 'hidden sm:block' : 'block'
+      }`}>
         {/* Background Image / Gradient */}
         <div className="absolute inset-0 z-0">
           <img
@@ -324,17 +328,17 @@ export const ClanView: React.FC<ClanViewProps> = ({
       </div>
 
       {/* Navigation Tabs (نظرة عامة / الدردشة الجماعية / الأعضاء) */}
-      <div className="flex items-center gap-2 border-b border-slate-800 pb-2 text-xs sm:text-sm">
+      <div className="flex items-center gap-1.5 sm:gap-2 border-b border-slate-800 pb-2 text-xs sm:text-sm overflow-x-auto scrollbar-none px-1">
         <button
           onClick={() => setActiveTab('overview')}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-2xl font-black transition-all cursor-pointer ${
+          className={`flex items-center gap-2 px-3.5 sm:px-5 py-2 sm:py-2.5 rounded-xl sm:rounded-2xl font-black whitespace-nowrap transition-all cursor-pointer ${
             activeTab === 'overview'
               ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-lg shadow-amber-500/10'
               : 'text-slate-400 hover:text-white hover:bg-slate-900'
           }`}
         >
           <Award className="w-4 h-4" />
-          <span>{lang === 'ar' ? 'تعريف بالقبيلة والشروط' : 'Overview & Rules'}</span>
+          <span>{lang === 'ar' ? 'تعريف بالقبيلة' : 'Overview & Rules'}</span>
         </button>
 
         <button
@@ -347,31 +351,33 @@ export const ClanView: React.FC<ClanViewProps> = ({
             }
             setActiveTab('chat');
           }}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-2xl font-black transition-all cursor-pointer ${
+          className={`flex items-center gap-2 px-3.5 sm:px-5 py-2 sm:py-2.5 rounded-xl sm:rounded-2xl font-black whitespace-nowrap transition-all cursor-pointer ${
             activeTab === 'chat'
               ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-lg shadow-cyan-500/10'
               : 'text-slate-400 hover:text-white hover:bg-slate-900'
           } ${!canAccessChat ? 'opacity-60' : ''}`}
         >
           <MessageSquare className="w-4 h-4" />
-          <span>{lang === 'ar' ? 'الدردشة الجماعية للقبيلة' : 'Group Chat'}</span>
-          {!canAccessChat && (
+          <span>{lang === 'ar' ? 'الدردشة الجماعية 🔥' : 'Group Chat'}</span>
+          {!canAccessChat ? (
             <span className="text-[10px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded-full">
-              {lang === 'ar' ? 'خاص بالأعضاء' : 'Members only'}
+              {lang === 'ar' ? 'خاص' : 'Locked'}
             </span>
+          ) : (
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
           )}
         </button>
 
         <button
           onClick={() => setActiveTab('members')}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-2xl font-black transition-all cursor-pointer ${
+          className={`flex items-center gap-2 px-3.5 sm:px-5 py-2 sm:py-2.5 rounded-xl sm:rounded-2xl font-black whitespace-nowrap transition-all cursor-pointer ${
             activeTab === 'members'
               ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40 shadow-lg shadow-purple-500/10'
               : 'text-slate-400 hover:text-white hover:bg-slate-900'
           }`}
         >
           <Users className="w-4 h-4" />
-          <span>{lang === 'ar' ? 'أعضاء القبيلة' : 'Members'} ({members.length})</span>
+          <span>{lang === 'ar' ? 'الأعضاء' : 'Members'} ({members.length})</span>
         </button>
       </div>
 
@@ -521,6 +527,7 @@ export const ClanView: React.FC<ClanViewProps> = ({
               messages={messages}
               stickers={stickers}
               isAdmin={isAdmin}
+              onCloseMobileChat={() => setActiveTab('overview')}
             />
           ) : (
             <div className="p-16 rounded-3xl bg-[#0f1420] border border-slate-800 text-center space-y-4 max-w-lg mx-auto">
