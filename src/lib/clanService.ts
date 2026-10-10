@@ -314,14 +314,10 @@ export function subscribeToClanMessages(callback: (messages: ClanMessage[]) => v
 
   const colRef = collection(db, 'clan_messages');
   return onSnapshot(colRef, (snap) => {
-    if (!snap.empty) {
-      const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as ClanMessage));
-      list.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
-      setCache('clan_messages_cache', list);
-      callback(list);
-    } else {
-      callback(cached);
-    }
+    const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as ClanMessage));
+    list.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+    setCache('clan_messages_cache', list);
+    callback(list);
   }, (err) => {
     console.warn('Firestore clan messages error:', err);
     callback(cached);
