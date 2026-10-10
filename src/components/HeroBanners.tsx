@@ -18,6 +18,7 @@ interface HeroBannersProps {
   onSelectQuickCategory: (catKey: string) => void;
   onOpenCustomDesignModal: () => void;
   siteSettings?: SiteSettings;
+  onOpenClan?: () => void;
 }
 
 export const HeroBanners: React.FC<HeroBannersProps> = ({
@@ -27,7 +28,8 @@ export const HeroBanners: React.FC<HeroBannersProps> = ({
   selectedCategory = 'all',
   onSelectQuickCategory,
   onOpenCustomDesignModal,
-  siteSettings
+  siteSettings,
+  onOpenClan
 }) => {
   const t = translations[lang];
   const [currentSlide, setCurrentSlide] = useState(0);
@@ -156,6 +158,42 @@ export const HeroBanners: React.FC<HeroBannersProps> = ({
           </div>
         )}
       </div>
+
+      {/* Featured Clan Quick Badge Banner */}
+      {onOpenClan && (
+        <div 
+          onClick={onOpenClan}
+          className="mt-3 p-3 sm:p-4 rounded-2xl bg-gradient-to-r from-amber-500/15 via-purple-500/15 to-cyan-500/15 border border-amber-500/40 hover:border-amber-400 hover:shadow-lg hover:shadow-amber-500/10 transition-all cursor-pointer flex items-center justify-between gap-3 group"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400 to-yellow-600 p-0.5 shadow-md shadow-amber-500/20 shrink-0">
+              <div className="w-full h-full rounded-xl bg-slate-950 flex items-center justify-center text-lg">
+                👑
+              </div>
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-xs sm:text-sm font-black text-white group-hover:text-amber-300 transition-colors">
+                  {lang === 'ar' ? '«قبيلة المصممين» - ملتقى نخبة مبدعي مؤثرات الهدايا' : '«Designers Clan» - VIP VFX Creators'}
+                </h3>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse">
+                  VIP
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-300 hidden sm:block">
+                {lang === 'ar' ? 'انضم إلى نخبة المصممين وشارك في الدردشة الجماعية الحصرية وتبادل الاستيكرات والملفات' : 'Join the exclusive creators community and live chat.'}
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 text-black font-extrabold text-xs shadow-md shadow-amber-500/20 group-hover:scale-105 transition-transform shrink-0"
+          >
+            {lang === 'ar' ? 'دخول القبيلة 🛡️' : 'Enter Clan'}
+          </button>
+        </div>
+      )}
     </section>
   );
 };

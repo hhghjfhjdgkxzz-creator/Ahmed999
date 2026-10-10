@@ -95,6 +95,203 @@ app.post('/api/upload', upload.single('file') as any, (req: Request, res: Respon
   });
 });
 
+// Dedicated Clan Media Directory in public/uploads/clan to strictly isolate Clan images from Gifts
+const CLAN_UPLOADS_DIR = path.resolve(process.cwd(), 'public/uploads/clan');
+if (!fs.existsSync(CLAN_UPLOADS_DIR)) {
+  fs.mkdirSync(CLAN_UPLOADS_DIR, { recursive: true });
+}
+
+// Clan Multer storage
+const clanStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => {
+    cb(null, CLAN_UPLOADS_DIR);
+  },
+  filename: (_req, file, cb) => {
+    const ext = path.extname(file.originalname) || '.jpg';
+    const safeName = file.originalname.replace(/[^a-zA-Z0-9_\-]/g, '_').replace(/\.[^/.]+$/, '');
+    const uniqueSuffix = `${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    cb(null, `clan_${safeName}_${uniqueSuffix}${ext}`);
+  }
+});
+
+const clanUpload = multer({
+  storage: clanStorage,
+  limits: { fileSize: 15 * 1024 * 1024 } // 15MB limit
+});
+
+// Clan File Upload (Multipart Form or Base64)
+app.post('/api/clan/upload', clanUpload.single('file') as any, (req: Request, res: Response) => {
+  try {
+    if (req.file) {
+      const filename = req.file.filename;
+      const fileUrl = `/uploads/clan/${filename}`;
+      const distClan = path.resolve(process.cwd(), 'dist/uploads/clan');
+      if (fs.existsSync(distClan)) {
+        try {
+          fs.copyFileSync(req.file.path, path.join(distClan, filename));
+        } catch (e) {}
+      }
+
+      return res.json({
+        success: true,
+        url: fileUrl,
+        filename,
+        size: req.file.size,
+        mimeType: req.file.mimetype
+      });
+    }
+
+    // Support Base64 Image upload directly
+    const { imageBase64, filename: customName } = req.body || {};
+    if (imageBase64 && typeof imageBase64 === 'string') {
+      const matches = imageBase64.match(/^data:image\/([a-zA-Z0-9]+);base64,(.+)$/);
+      if (matches) {
+        const ext = matches[1] === 'jpeg' ? 'jpg' : matches[1];
+        const buffer = Buffer.from(matches[2], 'base64');
+        const safeBase = (customName || 'img').replace(/[^a-zA-Z0-9_-]/g, '_');
+        const filename = `clan_${safeBase}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}.${ext}`;
+        const targetPath = path.join(CLAN_UPLOADS_DIR, filename);
+        fs.writeFileSync(targetPath, buffer);
+
+        const distClan = path.resolve(process.cwd(), 'dist/uploads/clan');
+        if (fs.existsSync(distClan)) {
+          try {
+            fs.writeFileSync(path.join(distClan, filename), buffer);
+          } catch (e) {}
+        }
+
+        return res.json({
+          success: true,
+          url: `/uploads/clan/${filename}`,
+          filename,
+          size: buffer.length,
+          mimeType: `image/${ext}`
+        });
+      }
+    }
+
+    return res.status(400).json({ error: 'No file or valid base64 image provided' });
+  } catch (err: any) {
+    console.error('Error in /api/clan/upload:', err);
+    res.status(500).json({ error: err?.message || 'Failed to upload clan image' });
+  }
+});
+
+// Clan Storage Stats: Get count of clan images and total size in bytes
+app.get('/api/clan/stats', (_req: Request, res: Response) => {
+  try {
+    if (!fs.existsSync(CLAN_UPLOADS_DIR)) {
+      return res.json({ success: true, count: 0, totalBytes: 0, formattedSize: '0 KB', files: [] });
+    }
+
+    const files = fs.readdirSync(CLAN_UPLOADS_DIR);
+    let totalBytes = 0;
+    const fileDetails: any[] = [];
+
+    files.forEach((file) => {
+      try {
+        const filePath = path.join(CLAN_UPLOADS_DIR, file);
+        const stat = fs.statSync(filePath);
+        if (stat.isFile()) {
+          totalBytes += stat.size;
+          fileDetails.push({
+            name: file,
+            url: `/uploads/clan/${file}`,
+            size: stat.size,
+            mtime: stat.mtime
+          });
+        }
+      } catch (e) {}
+    });
+
+    const formattedSize = totalBytes > 1024 * 1024
+      ? `${(totalBytes / (1024 * 1024)).toFixed(2)} MB`
+      : `${(totalBytes / 1024).toFixed(1)} KB`;
+
+    res.json({
+      success: true,
+      count: fileDetails.length,
+      totalBytes,
+      formattedSize,
+      files: fileDetails
+    });
+  } catch (err: any) {
+    console.error('Error in /api/clan/stats:', err);
+    res.status(500).json({ error: err?.message || 'Failed to read clan stats' });
+  }
+});
+
+// Clan Image Deletion Endpoint (Safe deletion strictly isolated to CLAN_UPLOADS_DIR)
+app.post('/api/clan/delete-images', express.json(), (req: Request, res: Response) => {
+  try {
+    const { mode, days = 30, fileUrls = [] } = req.body || {};
+    if (!fs.existsSync(CLAN_UPLOADS_DIR)) {
+      return res.json({ success: true, deletedCount: 0, freedBytes: 0, message: 'مجلد الصور فارغ بالفعل' });
+    }
+
+    let deletedCount = 0;
+    let freedBytes = 0;
+    const now = Date.now();
+    const cutoffTime = now - Number(days) * 24 * 60 * 60 * 1000;
+
+    const files = fs.readdirSync(CLAN_UPLOADS_DIR);
+
+    if (mode === 'all') {
+      // Delete ALL files in CLAN_UPLOADS_DIR only
+      files.forEach((file) => {
+        try {
+          const filePath = path.join(CLAN_UPLOADS_DIR, file);
+          const stat = fs.statSync(filePath);
+          if (stat.isFile()) {
+            freedBytes += stat.size;
+            fs.unlinkSync(filePath);
+            deletedCount++;
+          }
+        } catch (e) {}
+      });
+    } else if (mode === 'older_than') {
+      // Delete files older than specified days
+      files.forEach((file) => {
+        try {
+          const filePath = path.join(CLAN_UPLOADS_DIR, file);
+          const stat = fs.statSync(filePath);
+          if (stat.isFile() && stat.mtimeMs < cutoffTime) {
+            freedBytes += stat.size;
+            fs.unlinkSync(filePath);
+            deletedCount++;
+          }
+        } catch (e) {}
+      });
+    } else if (Array.isArray(fileUrls) && fileUrls.length > 0) {
+      // Delete specific files from URLs
+      fileUrls.forEach((url: string) => {
+        try {
+          const baseName = path.basename(url);
+          const filePath = path.join(CLAN_UPLOADS_DIR, baseName);
+          if (fs.existsSync(filePath)) {
+            const stat = fs.statSync(filePath);
+            freedBytes += stat.size;
+            fs.unlinkSync(filePath);
+            deletedCount++;
+          }
+        } catch (e) {}
+      });
+    }
+
+    res.json({
+      success: true,
+      deletedCount,
+      freedBytes,
+      freedSizeFormatted: freedBytes > 1024 * 1024 ? `${(freedBytes / (1024 * 1024)).toFixed(2)} MB` : `${(freedBytes / 1024).toFixed(1)} KB`,
+      message: `تم حذف ${deletedCount} صورة بنجاح وتوفير المساحة المطلوبة`
+    });
+  } catch (err: any) {
+    console.error('Error in /api/clan/delete-images:', err);
+    res.status(500).json({ error: err?.message || 'Failed to delete clan images' });
+  }
+});
+
+
 // Endpoint to permanently persist gifts, snapshots, posters, and video links into codebase files & disk
 app.post('/api/gifts/persist-code', express.json({ limit: '50mb' }), (req: Request, res: Response) => {
   try {

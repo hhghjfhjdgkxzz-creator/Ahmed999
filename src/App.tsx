@@ -21,6 +21,26 @@ import { QuickCoverSnapshotModal } from './components/QuickCoverSnapshotModal';
 import { Footer } from './components/Footer';
 import { Check } from 'lucide-react';
 import { seedDatabase, subscribeToGifts, subscribeToDeliveries, subscribeToEmployees, subscribeToBanners, addDelivery, purgeDummyGifts, isDummyGift } from './lib/firebaseService';
+import { ClanView } from './components/clan/ClanView';
+import { 
+  ClanSettings, 
+  ClanMember, 
+  ClanJoinRequest, 
+  ClanMessage, 
+  ClanSticker, 
+  ClanAuditLog 
+} from './types';
+import { 
+  DEFAULT_CLAN_SETTINGS, 
+  INITIAL_CLAN_MEMBERS, 
+  INITIAL_CLAN_STICKERS,
+  subscribeToClanSettings,
+  subscribeToClanMembers,
+  subscribeToClanRequests,
+  subscribeToClanMessages,
+  subscribeToClanStickers,
+  subscribeToClanAuditLogs
+} from './lib/clanService';
 
 export default function App() {
   // Language (Default to Arabic with instant RTL toggle)
@@ -32,8 +52,34 @@ export default function App() {
     document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
   }, [lang]);
 
-  // Main View: Storefront vs Admin Dashboard
-  const [currentView, setCurrentView] = useState<'store' | 'dashboard'>('store');
+  // Main View: Storefront vs Admin Dashboard vs Clan
+  const [currentView, setCurrentView] = useState<'store' | 'dashboard' | 'clan'>('store');
+
+  // Clan System State
+  const [clanSettings, setClanSettings] = useState<ClanSettings>(DEFAULT_CLAN_SETTINGS);
+  const [clanMembers, setClanMembers] = useState<ClanMember[]>(INITIAL_CLAN_MEMBERS);
+  const [clanRequests, setClanRequests] = useState<ClanJoinRequest[]>([]);
+  const [clanMessages, setClanMessages] = useState<ClanMessage[]>([]);
+  const [clanStickers, setClanStickers] = useState<ClanSticker[]>(INITIAL_CLAN_STICKERS);
+  const [clanAuditLogs, setClanAuditLogs] = useState<ClanAuditLog[]>([]);
+
+  useEffect(() => {
+    const unsubSettings = subscribeToClanSettings(setClanSettings);
+    const unsubMembers = subscribeToClanMembers(setClanMembers);
+    const unsubRequests = subscribeToClanRequests(setClanRequests);
+    const unsubMessages = subscribeToClanMessages(setClanMessages);
+    const unsubStickers = subscribeToClanStickers(setClanStickers);
+    const unsubLogs = subscribeToClanAuditLogs(setClanAuditLogs);
+
+    return () => {
+      unsubSettings();
+      unsubMembers();
+      unsubRequests();
+      unsubMessages();
+      unsubStickers();
+      unsubLogs();
+    };
+  }, []);
 
   // Gifts State with Firebase persistence - loads real gifts immediately on frame 1 with ZERO delay!
   const [gifts, setGifts] = useState<GiftItem[]>(() => {
@@ -544,6 +590,7 @@ ID الحساب: ${user.id}` : ''}
         siteSettings={siteSettings}
         onResetFilters={handleResetFilters}
         onOpenSiteSettings={() => setIsSiteSettingsOpen(true)}
+        onOpenClan={() => setCurrentView('clan')}
       />
 
       {/* 2. Main Body Content */}
@@ -556,6 +603,7 @@ ID الحساب: ${user.id}` : ''}
             onSelectQuickCategory={handleQuickCategorySelect}
             onOpenCustomDesignModal={() => setIsSupportOpen(true)}
             siteSettings={siteSettings}
+            onOpenClan={() => setCurrentView('clan')}
           />
 
           {/* Horizontal Scrollable Categories Bar */}
@@ -625,6 +673,19 @@ ID الحساب: ${user.id}` : ''}
             )}
           </section>
         </main>
+      ) : currentView === 'clan' ? (
+        <ClanView
+          lang={lang}
+          currentUser={user}
+          onOpenAuth={() => setIsAuthOpen(true)}
+          onBackToStore={() => setCurrentView('store')}
+          clanSettings={clanSettings}
+          members={clanMembers}
+          requests={clanRequests}
+          messages={clanMessages}
+          stickers={clanStickers}
+          isAdmin={Boolean(user && (user.role === 'admin' || user.role === 'employee' || user.role === 'designer'))}
+        />
       ) : (
         /* DASHBOARD VIEW (Admin / Staff with Full Permissions Strictly) */
         <main className="flex-1 w-full">
@@ -685,6 +746,13 @@ ID الحساب: ${user.id}` : ''}
               categories={categories}
               siteSettings={siteSettings}
               onOpenSiteSettingsModal={() => setIsSiteSettingsOpen(true)}
+              clanSettings={clanSettings}
+              setClanSettings={setClanSettings}
+              clanMembers={clanMembers}
+              clanRequests={clanRequests}
+              clanMessages={clanMessages}
+              clanStickers={clanStickers}
+              clanAuditLogs={clanAuditLogs}
             />
           )}
         </main>

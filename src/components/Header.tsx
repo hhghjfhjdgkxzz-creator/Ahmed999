@@ -27,8 +27,8 @@ export interface HeaderProps {
   searchQuery: string;
   setSearchQuery: (query: string) => void;
   onSearch: () => void;
-  currentView: 'store' | 'dashboard';
-  setCurrentView: (view: 'store' | 'dashboard') => void;
+  currentView: 'store' | 'dashboard' | 'clan';
+  setCurrentView: (view: 'store' | 'dashboard' | 'clan') => void;
   cartItems: CartItem[];
   setIsCartOpen: (open: boolean) => void;
   setIsAuthOpen: (open: boolean) => void;
@@ -40,6 +40,7 @@ export interface HeaderProps {
   siteSettings?: SiteSettings;
   onResetFilters?: () => void;
   onOpenSiteSettings?: () => void;
+  onOpenClan?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -60,7 +61,8 @@ export const Header: React.FC<HeaderProps> = ({
   user,
   siteSettings,
   onResetFilters,
-  onOpenSiteSettings
+  onOpenSiteSettings,
+  onOpenClan
 }) => {
   const t = translations[lang];
   const [isAboutOpen, setIsAboutOpen] = useState(false);
@@ -199,6 +201,29 @@ export const Header: React.FC<HeaderProps> = ({
 
             {/* System Shortcuts */}
             <div className="flex items-center gap-1 sm:gap-2 shrink-0">
+              {/* Clan Button (قبيلة المصممين) - Visible to all users */}
+              <button
+                onClick={() => {
+                  if (onOpenClan) {
+                    onOpenClan();
+                  } else {
+                    setCurrentView('clan');
+                  }
+                }}
+                className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-black border transition-all cursor-pointer shadow-sm ${
+                  currentView === 'clan'
+                    ? 'bg-gradient-to-r from-amber-500/30 to-yellow-500/30 border-amber-400 text-amber-300 shadow-amber-500/20'
+                    : 'bg-gradient-to-r from-amber-500/10 via-purple-500/10 to-cyan-500/10 hover:from-amber-500/25 hover:to-yellow-500/25 border-amber-500/50 hover:border-amber-400 text-amber-300'
+                }`}
+                title={lang === 'ar' ? 'قبيلة المصممين' : 'Designers Clan'}
+              >
+                <span className="text-xs sm:text-sm">👑</span>
+                <span className="font-extrabold tracking-wide text-[11px] sm:text-xs">
+                  {lang === 'ar' ? 'قبيلة المصممين' : 'Designers Clan'}
+                </span>
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse hidden md:inline-block"></span>
+              </button>
+
               {/* Language Selector */}
               <button
                 onClick={() => setIsLangOpen(true)}

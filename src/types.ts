@@ -660,6 +660,95 @@ export interface SVGAFileExtended {
   [key: string]: any;
 }
 
+// ================= Clan System Interfaces (نظام قبيلة المصممين) =================
+export type ClanRole = 'leader' | 'deputy' | 'master' | 'member';
+
+export interface ClanMember {
+  id: string;
+  userId: string;
+  userName: string;
+  userAvatar?: string;
+  userRole: UserRole;
+  clanRole: ClanRole;
+  joinedAt: string;
+  addedBy?: string;
+  status: 'active' | 'suspended';
+  title?: string;
+}
+
+export interface ClanJoinRequest {
+  id: string;
+  userId: string;
+  userName: string;
+  userEmail?: string;
+  userAvatar?: string;
+  userRole: UserRole;
+  whatsapp: string;
+  portfolioUrl?: string;
+  note: string;
+  status: 'pending' | 'approved' | 'rejected';
+  reviewedBy?: string;
+  reviewedAt?: string;
+  rejectionReason?: string;
+  createdAt: string;
+}
+
+export interface ClanSticker {
+  id: string;
+  name: string;
+  url: string;
+  category: string;
+  createdBy?: string;
+  createdAt: string;
+}
+
+export interface ClanMessageReader {
+  userId: string;
+  userName: string;
+  userAvatar?: string;
+  readAt: string;
+}
+
+export interface ClanMessage {
+  id: string;
+  senderId: string;
+  senderName: string;
+  senderAvatar?: string;
+  senderClanRole: ClanRole;
+  content: string;
+  type: 'text' | 'image' | 'sticker' | 'system';
+  mediaUrl?: string;
+  mediaStoragePath?: string;
+  mediaSize?: number;
+  createdAt: string;
+  readBy: ClanMessageReader[];
+}
+
+export interface ClanSettings {
+  id: string;
+  name: string;
+  description: string;
+  icon?: string;
+  bannerUrl?: string;
+  isOpenForRequests: boolean;
+  allowMemberImages: boolean;
+  allowMemberStickers: boolean;
+  allowMemberMessages: boolean;
+  autoDeleteImagesDays: number;
+  maxImageSizeBytes: number;
+  updatedAt?: string;
+}
+
+export interface ClanAuditLog {
+  id: string;
+  action: string;
+  details: string;
+  adminId: string;
+  adminName: string;
+  timestamp: string;
+}
+
+
 
 
 

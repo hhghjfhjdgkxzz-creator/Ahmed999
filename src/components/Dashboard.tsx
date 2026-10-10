@@ -24,6 +24,7 @@ import {
   Printer,
   FileText,
   Award,
+  Crown,
   Package,
   Plus,
   User,
@@ -102,6 +103,8 @@ import { DeleteAllGiftsModal } from './DeleteAllGiftsModal';
 import { ImageShapeEditorModal } from './ImageShapeEditorModal';
 import { QuickCoverSnapshotModal } from './QuickCoverSnapshotModal';
 import { SELECTABLE_GIFT_CATEGORIES } from '../data/categories';
+import { ClanAdminTab } from './clan/ClanAdminTab';
+import { ClanSettings, ClanMember, ClanJoinRequest, ClanMessage, ClanSticker, ClanAuditLog } from '../types';
 
 interface DashboardProps {
   lang: Language;
@@ -122,6 +125,13 @@ interface DashboardProps {
   categories?: { id: string; name: string }[];
   siteSettings?: SiteSettings;
   onOpenSiteSettingsModal?: () => void;
+  clanSettings?: ClanSettings;
+  setClanSettings?: React.Dispatch<React.SetStateAction<ClanSettings>>;
+  clanMembers?: ClanMember[];
+  clanRequests?: ClanJoinRequest[];
+  clanMessages?: ClanMessage[];
+  clanStickers?: ClanSticker[];
+  clanAuditLogs?: ClanAuditLog[];
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({
@@ -142,11 +152,18 @@ export const Dashboard: React.FC<DashboardProps> = ({
   currentUser,
   categories = [],
   siteSettings: propSiteSettings,
-  onOpenSiteSettingsModal
+  onOpenSiteSettingsModal,
+  clanSettings,
+  setClanSettings,
+  clanMembers = [],
+  clanRequests = [],
+  clanMessages = [],
+  clanStickers = [],
+  clanAuditLogs = []
 }) => {
   const t = translations[lang];
 
-  const [activeTab, setActiveTab] = useState<'create' | 'list' | 'orders' | 'staff' | 'banners' | 'guide' | 'settings' | 'categories' | 'optimizer'>('create');
+  const [activeTab, setActiveTab] = useState<'create' | 'list' | 'orders' | 'staff' | 'banners' | 'guide' | 'settings' | 'categories' | 'optimizer' | 'clan'>('create');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isDeleteAllModalOpen, setIsDeleteAllModalOpen] = useState(false);
   const [isSiteSettingsModalOpen, setIsSiteSettingsModalOpen] = useState(false);
@@ -1860,6 +1877,24 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 </button>
               </>
             )}
+
+            {/* Clan Management Tab Button (إدارة القبيلة) */}
+            <button
+              onClick={() => setActiveTab('clan')}
+              className={`flex items-center gap-1.5 px-4 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap font-bold ${
+                activeTab === 'clan'
+                  ? 'bg-gradient-to-r from-amber-500/30 to-yellow-500/30 text-amber-300 border border-amber-400 shadow-md shadow-amber-500/20'
+                  : 'bg-amber-500/10 text-amber-300 border border-amber-500/30 hover:bg-amber-500/20'
+              }`}
+            >
+              <Crown className="w-4 h-4 text-amber-400" />
+              <span>{lang === 'ar' ? 'إدارة القبيلة' : 'Clan Management'}</span>
+              {(clanRequests?.filter(r => r.status === 'pending').length || 0) > 0 && (
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-amber-500 text-black font-extrabold animate-pulse">
+                  {clanRequests.filter(r => r.status === 'pending').length}
+                </span>
+              )}
+            </button>
           </>
         )}
       </div>
@@ -5725,6 +5760,22 @@ export const Dashboard: React.FC<DashboardProps> = ({
           }}
         />
       )}
+
+      {/* TAB 9: CLAN ADMINISTRATION (إدارة قبيلة المصممين) */}
+      {activeTab === 'clan' && clanSettings && (
+        <ClanAdminTab
+          lang={lang}
+          currentUser={currentUser as any}
+          clanSettings={clanSettings}
+          setClanSettings={setClanSettings!}
+          members={clanMembers}
+          requests={clanRequests}
+          messages={clanMessages}
+          stickers={clanStickers}
+          auditLogs={clanAuditLogs}
+        />
+      )}
+
 
       {/* Delete All Uploaded Products Modal */}
       <DeleteAllGiftsModal

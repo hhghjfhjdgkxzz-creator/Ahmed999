@@ -100,5 +100,42 @@ service cloud.firestore {
         incoming().sha256Hash is string;
       allow delete: if isValidId(videoId);
     }
+
+    // 10. Clan Settings Collection
+    match /clan_settings/{clanId} {
+      allow read: if isValidId(clanId);
+      allow create, update, delete: if isValidId(clanId);
+    }
+
+    // 11. Clan Members Collection
+    match /clan_members/{memberId} {
+      allow read: if isValidId(memberId);
+      allow create, update, delete: if isValidId(memberId);
+    }
+
+    // 12. Clan Join Requests Collection
+    match /clan_requests/{requestId} {
+      allow read: if isValidId(requestId);
+      allow create, update, delete: if isValidId(requestId);
+    }
+
+    // 13. Clan Messages Collection
+    match /clan_messages/{messageId} {
+      allow read: if isValidId(messageId);
+      allow create, update, delete: if isValidId(messageId);
+    }
+
+    // 14. Clan Stickers Collection
+    match /clan_stickers/{stickerId} {
+      allow read: if isValidId(stickerId);
+      allow create, update, delete: if isValidId(stickerId);
+    }
+
+    // 15. Clan Audit Logs Collection
+    match /clan_audit_logs/{logId} {
+      allow read: if isValidId(logId);
+      allow create, update, delete: if isValidId(logId);
+    }
   }
 }
+
