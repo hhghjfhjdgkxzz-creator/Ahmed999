@@ -26,6 +26,17 @@ const CATALOG_DIR = path.join(STORAGE_ROOT, 'catalog');
 const CATALOG_FILE_PATH = path.join(CATALOG_DIR, 'gifts.json');
 const ADMIN_AUTH_FILE_PATH = path.join(CATALOG_DIR, 'admin-auth.json');
 
+// Public folder directories (ensuring files are permanently baked into codebase & bundle)
+const PUBLIC_ROOT = path.resolve(process.cwd(), 'public');
+const PUBLIC_GIFTS_DIR = path.join(PUBLIC_ROOT, 'gifts');
+const PUBLIC_ORIGINALS_DIR = path.join(PUBLIC_GIFTS_DIR, 'originals');
+const PUBLIC_THUMBNAILS_DIR = path.join(PUBLIC_GIFTS_DIR, 'thumbnails');
+const PUBLIC_PREVIEWS_DIR = path.join(PUBLIC_GIFTS_DIR, 'previews');
+const PUBLIC_CATALOG_JSON_PATH = path.join(PUBLIC_ROOT, 'gifts_catalog.json');
+const PUBLIC_STORE_JSON_PATH = path.join(PUBLIC_ROOT, 'gifts_store.json');
+const DATA_CATALOG_JSON_PATH = path.resolve(process.cwd(), 'data', 'gifts.json');
+const PERSISTED_GIFTS_CODE_PATH = path.resolve(process.cwd(), 'src', 'data', 'persistedGifts.ts');
+
 export class AsyncMutex {
   private queue: Promise<void> = Promise.resolve();
 
@@ -89,6 +100,11 @@ export async function ensureStorageDirectories(): Promise<void> {
   await fs.mkdir(THUMBNAILS_DIR, { recursive: true });
   await fs.mkdir(PREVIEWS_DIR, { recursive: true });
   await fs.mkdir(CATALOG_DIR, { recursive: true });
+  await fs.mkdir(PUBLIC_ORIGINALS_DIR, { recursive: true });
+  await fs.mkdir(PUBLIC_THUMBNAILS_DIR, { recursive: true });
+  await fs.mkdir(PUBLIC_PREVIEWS_DIR, { recursive: true });
+  await fs.mkdir(path.dirname(DATA_CATALOG_JSON_PATH), { recursive: true });
+  await fs.mkdir(path.dirname(PERSISTED_GIFTS_CODE_PATH), { recursive: true });
 }
 
 async function syncCatalogToGitHubIfConfigured(catalog: CatalogIndex): Promise<void> {
@@ -159,6 +175,36 @@ export async function readCatalogIndex(): Promise<CatalogIndex> {
     const raw = await fs.readFile(CATALOG_FILE_PATH, 'utf8');
     return JSON.parse(raw) as CatalogIndex;
   } catch {
+    // Fall back to PERSISTED_GIFTS in src/data/persistedGifts.ts if available
+    try {
+      const persistedGifts = (await import('../src/data/persistedGifts.ts')).PERSISTED_GIFTS;
+      if (Array.isArray(persistedGifts) && persistedGifts.length > 0) {
+        const now = new Date().toISOString();
+        const catalog: CatalogIndex = {
+          version: 1,
+          updatedAt: now,
+          totalCount: persistedGifts.length,
+          totalBytes: persistedGifts.reduce((acc, g) => acc + (Number(g.sizeBytes) || 0), 0),
+          items: persistedGifts,
+          unindexedFiles: [],
+          auditLogs: [
+            {
+              id: crypto.randomUUID(),
+              timestamp: now,
+              action: 'seed',
+              fileName: 'src/data/persistedGifts.ts',
+              status: 'success',
+              message: 'تم استعادة الفهرس من الكود البرمجي (PERSISTED_GIFTS).',
+            },
+          ],
+        };
+        await writeCatalogIndexInternal(catalog);
+        return catalog;
+      }
+    } catch {
+      // Continue to fallback
+    }
+
     const now = new Date().toISOString();
     const initialItems = INITIAL_DEMO_GIFTS;
     const totalBytes = initialItems.reduce((sum, item) => sum + item.sizeBytes, 0);
@@ -191,6 +237,16 @@ async function writeCatalogIndexInternal(catalog: CatalogIndex): Promise<void> {
   catalog.totalBytes = catalog.items.reduce((acc, item) => acc + (Number(item.sizeBytes) || 0), 0);
   catalog.updatedAt = new Date().toISOString();
 
+  // Normalize URLs to prefer /gifts/ so they are served directly from public/
+  for (const item of catalog.items) {
+    if (item.originalUrl && item.originalUrl.startsWith('/storage/gifts/')) {
+      item.originalUrl = item.originalUrl.replace('/storage/gifts/', '/gifts/');
+    }
+    if (item.thumbnailUrl && item.thumbnailUrl.startsWith('/storage/gifts/')) {
+      item.thumbnailUrl = item.thumbnailUrl.replace('/storage/gifts/', '/gifts/');
+    }
+  }
+
   // Keep audit logs bounded to latest 150 entries
   if (catalog.auditLogs.length > 150) {
     catalog.auditLogs = catalog.auditLogs.slice(0, 150);
@@ -200,6 +256,35 @@ async function writeCatalogIndexInternal(catalog: CatalogIndex): Promise<void> {
   const tempPath = `${CATALOG_FILE_PATH}.${crypto.randomUUID()}.tmp`;
   await fs.writeFile(tempPath, serialized, 'utf8');
   await fs.rename(tempPath, CATALOG_FILE_PATH);
+
+  // 1. Bake directly into codebase TypeScript file (PERSISTED_GIFTS in src/data/persistedGifts.ts)
+  try {
+    const tsCode = `import type { GiftItem } from '../utils/catalogLogic.ts';\n\n/**\n * Persisted Gifts Database — Baked directly into the source code repository.\n * Every uploaded, updated, or deleted gift is automatically synced here as code,\n * ensuring zero data loss and instant display across all users, previews, and deployments.\n */\nexport const PERSISTED_GIFTS: GiftItem[] = ${JSON.stringify(catalog.items, null, 2)};\n`;
+    await fs.writeFile(PERSISTED_GIFTS_CODE_PATH, tsCode, 'utf8');
+  } catch (err) {
+    console.error('Failed to bake gifts into src/data/persistedGifts.ts:', err);
+  }
+
+  // 2. Bake into public/gifts_catalog.json and public/gifts_store.json
+  try {
+    await fs.writeFile(PUBLIC_CATALOG_JSON_PATH, serialized, 'utf8');
+    await fs.writeFile(PUBLIC_STORE_JSON_PATH, JSON.stringify(catalog.items, null, 2), 'utf8');
+  } catch (err) {
+    console.error('Failed to sync public catalog files:', err);
+  }
+
+  // 3. Bake into data/gifts.json
+  try {
+    const dataCatalog = {
+      version: catalog.version,
+      updatedAt: catalog.updatedAt,
+      totalCount: catalog.totalCount,
+      gifts: catalog.items,
+    };
+    await fs.writeFile(DATA_CATALOG_JSON_PATH, JSON.stringify(dataCatalog, null, 2), 'utf8');
+  } catch (err) {
+    console.error('Failed to sync data/gifts.json:', err);
+  }
 
   const r2 = getR2Config();
   if (r2) {
@@ -271,16 +356,27 @@ export async function storeAssetBuffer(params: {
   const storageKey = `gifts/${params.folder}/${fileName}`;
   const checksum = crypto.createHash('sha256').update(params.buffer).digest('hex').slice(0, 16);
 
-  // Always write to local persistent mirror first
+  // 1. Write to public web root (permanent build asset)
+  const publicTargetDir =
+    params.folder === 'originals'
+      ? PUBLIC_ORIGINALS_DIR
+      : params.folder === 'thumbnails'
+      ? PUBLIC_THUMBNAILS_DIR
+      : PUBLIC_PREVIEWS_DIR;
+  const publicFilePath = path.join(publicTargetDir, fileName);
+  await fs.writeFile(publicFilePath, params.buffer);
+
+  // 2. Also write to local storage mirror
   const localTargetDir =
     params.folder === 'originals'
       ? ORIGINALS_DIR
       : params.folder === 'thumbnails'
       ? THUMBNAILS_DIR
       : PREVIEWS_DIR;
-
   const localFilePath = path.join(localTargetDir, fileName);
   await fs.writeFile(localFilePath, params.buffer);
+
+  const publicUrl = `/gifts/${params.folder}/${fileName}`;
 
   const r2 = getR2Config();
   if (r2) {
@@ -295,13 +391,9 @@ export async function storeAssetBuffer(params: {
       })
     );
 
-    const publicUrl = r2.publicBaseUrl
-      ? `${r2.publicBaseUrl}/${storageKey}`
-      : `/storage/${storageKey}`;
-
     return {
       storageKey,
-      publicUrl,
+      publicUrl: r2.publicBaseUrl ? `${r2.publicBaseUrl}/${storageKey}` : publicUrl,
       sizeBytes: params.buffer.byteLength,
       checksum,
     };
@@ -309,7 +401,7 @@ export async function storeAssetBuffer(params: {
 
   return {
     storageKey,
-    publicUrl: `/storage/${storageKey}`,
+    publicUrl,
     sizeBytes: params.buffer.byteLength,
     checksum,
   };
@@ -319,10 +411,16 @@ export async function deleteStoredAsset(storageKey?: string): Promise<void> {
   if (!storageKey || !storageKey.startsWith('gifts/')) return;
   const normalized = path.normalize(storageKey).replace(/^(\.\.(\/|\\|$))+/, '');
   const localPath = path.join(STORAGE_ROOT, normalized);
+  const publicPath = path.join(PUBLIC_ROOT, normalized);
   try {
     await fs.unlink(localPath);
   } catch {
     // Ignore if already removed locally
+  }
+  try {
+    await fs.unlink(publicPath);
+  } catch {
+    // Ignore if already removed from public
   }
 
   const r2 = getR2Config();

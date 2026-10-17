@@ -1,9 +1,31 @@
 {
-  "version": 15,
-  "updatedAt": "2026-10-17T11:05:15.315Z",
-  "totalCount": 6,
-  "totalBytes": 19248600,
+  "version": 17,
+  "updatedAt": "2026-10-17T11:13:08.176Z",
+  "totalCount": 7,
+  "totalBytes": 21657854,
   "items": [
+    {
+      "id": "gift_1792235588173_3ef38c",
+      "name": "717 edited",
+      "category": "gifts",
+      "description": "فيديو عالي الدقة MP4 مع دعم كامل للمؤثرات الصوتية وجودة 4K.",
+      "originalUrl": "/gifts/originals/1792235588150_86a768c9_717_edited.mp4",
+      "thumbnailUrl": "/gifts/thumbnails/1792235588167_19a7ba83_Joy_animation_1_Cover.png",
+      "format": "MP4",
+      "sizeBytes": 2409254,
+      "quality": "Original",
+      "hasAudio": true,
+      "hasAlpha": false,
+      "isAnimated": true,
+      "displayOrder": 1,
+      "published": true,
+      "allowDownload": true,
+      "uploadedAt": "2026-10-17T11:13:08.173Z",
+      "updatedAt": "2026-10-17T11:13:08.173Z",
+      "storageKey": "gifts/originals/1792235588150_86a768c9_717_edited.mp4",
+      "thumbnailKey": "gifts/thumbnails/1792235588167_19a7ba83_Joy_animation_1_Cover.png",
+      "checksum": "252b3e7447293a37"
+    },
     {
       "id": "gift-royal-dragon-svga",
       "name": "تنين الإمبراطور الذهبي",
@@ -127,6 +149,23 @@
   ],
   "unindexedFiles": [],
   "auditLogs": [
+    {
+      "id": "57fca49d-9283-4b10-afb5-05edcbbfdf88",
+      "timestamp": "2026-10-17T11:13:08.175Z",
+      "action": "upload",
+      "fileName": "717_edited.mp4",
+      "giftId": "gift_1792235588173_3ef38c",
+      "status": "success",
+      "message": "تم رفع وحفظ الهدية \"717 edited\" (MP4) وتحديث الفهرس المركزي بنجاح."
+    },
+    {
+      "id": "23c85cbc-203d-4031-af82-78c0baa19bd0",
+      "timestamp": "2026-10-17T11:12:27.123Z",
+      "action": "login",
+      "fileName": "Admin Session",
+      "status": "success",
+      "message": "تم تسجيل دخول المدير إلى لوحة التحكم بنجاح."
+    },
     {
       "id": "112d5262-5e33-4db4-bd14-83127bab6f5e",
       "timestamp": "2026-10-17T11:05:15.314Z",

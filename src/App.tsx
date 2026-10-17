@@ -24,6 +24,7 @@ import { GiftCard } from './components/GiftCard';
 import { GiftPlayerModal } from './components/GiftPlayerModal';
 import { FormatCenterSection } from './components/FormatCenterSection';
 import { AdminDashboard } from './components/AdminDashboard';
+import { PERSISTED_GIFTS } from './data/persistedGifts';
 
 export default function App() {
   // Route state supporting both pathname (/admin) and clean client transitions
@@ -37,13 +38,24 @@ export default function App() {
     return 'gallery';
   });
 
-  // Central Catalog State
-  const [gifts, setGifts] = useState<GiftItem[]>([]);
-  const [catalogVersion, setCatalogVersion] = useState<number>(0);
+  // Central Catalog State - permanently seeded from codebase (PERSISTED_GIFTS)
+  const [gifts, setGifts] = useState<GiftItem[]>(() => {
+    try {
+      const cached = localStorage.getItem('gift_gallery_persisted_cache');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {
+      // ignore JSON parse error
+    }
+    return PERSISTED_GIFTS;
+  });
+  const [catalogVersion, setCatalogVersion] = useState<number>(1);
   const [unindexedFiles, setUnindexedFiles] = useState<UnindexedFileRecord[]>([]);
   const [auditLogs, setAuditLogs] = useState<AdminAuditLog[]>([]);
   const [storageStatus, setStorageStatus] = useState<StorageStatusInfo | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
   // Admin Auth State
@@ -93,47 +105,74 @@ export default function App() {
   }
 
   const fetchCatalogAndStatus = useCallback(async (showSpinner = false) => {
-    if (showSpinner) setIsLoading(true);
+    if (showSpinner && gifts.length === 0) setIsLoading(true);
     setFetchError(null);
     try {
-      const [catRes, statusRes, sessionRes] = await Promise.all([
+      const [catResult, statusResult, sessionResult] = await Promise.allSettled([
         fetch('/api/catalog', { cache: 'no-store', headers: getAuthHeaders() }),
         fetch('/api/storage/status', { cache: 'no-store' }),
         fetch('/api/admin/session', { cache: 'no-store', headers: getAuthHeaders() }),
       ]);
 
-      if (!catRes.ok) {
-        throw new Error('تعذر قراءة فهرس الهدايا المركزي (gifts.json).');
+      let loadedCatalog = false;
+
+      if (catResult.status === 'fulfilled' && catResult.value.ok) {
+        try {
+          const catData = await catResult.value.json();
+          if (!catData.notModified && Array.isArray(catData.items) && catData.items.length > 0) {
+            setGifts(catData.items);
+            setCatalogVersion(catData.version || 1);
+            try {
+              localStorage.setItem('gift_gallery_persisted_cache', JSON.stringify(catData.items));
+            } catch {}
+            if (Array.isArray(catData.unindexedFiles)) {
+              setUnindexedFiles(catData.unindexedFiles);
+            }
+            if (Array.isArray(catData.auditLogs)) {
+              setAuditLogs(catData.auditLogs);
+            }
+            loadedCatalog = true;
+          }
+        } catch {}
       }
 
-      const catData = await catRes.json();
-      if (!catData.notModified && Array.isArray(catData.items)) {
-        setGifts(catData.items);
-        setCatalogVersion(catData.version || 1);
-        if (Array.isArray(catData.unindexedFiles)) {
-          setUnindexedFiles(catData.unindexedFiles);
-        }
-        if (Array.isArray(catData.auditLogs)) {
-          setAuditLogs(catData.auditLogs);
-        }
+      // If /api/catalog was unreachable or errored, try static /gifts_catalog.json
+      if (!loadedCatalog) {
+        try {
+          const staticRes = await fetch('/gifts_catalog.json', { cache: 'no-store' });
+          if (staticRes.ok) {
+            const staticData = await staticRes.json();
+            if (Array.isArray(staticData.items) && staticData.items.length > 0) {
+              setGifts(staticData.items);
+              setCatalogVersion(staticData.version || 1);
+              loadedCatalog = true;
+            }
+          }
+        } catch {}
       }
 
-      if (statusRes.ok) {
-        const statusData = (await statusRes.json()) as StorageStatusInfo;
-        setStorageStatus(statusData);
+      if (statusResult.status === 'fulfilled' && statusResult.value.ok) {
+        try {
+          const statusData = (await statusResult.value.json()) as StorageStatusInfo;
+          setStorageStatus(statusData);
+        } catch {}
       }
 
-      if (sessionRes.ok) {
-        const sessionData = await sessionRes.json();
-        setIsAdminAuthenticated(Boolean(sessionData.authenticated));
-        setIsDefaultPassword(Boolean(sessionData.isDefaultPassword));
+      if (sessionResult.status === 'fulfilled' && sessionResult.value.ok) {
+        try {
+          const sessionData = await sessionResult.value.json();
+          setIsAdminAuthenticated(Boolean(sessionData.authenticated));
+          setIsDefaultPassword(Boolean(sessionData.isDefaultPassword));
+        } catch {}
       }
     } catch (err) {
-      setFetchError((err as Error).message);
+      if (gifts.length === 0) {
+        setFetchError((err as Error).message);
+      }
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [gifts.length]);
 
   // Initial fetch + SSE real-time synchronization + periodic freshness verification
   useEffect(() => {

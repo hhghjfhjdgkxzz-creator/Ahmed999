@@ -25,6 +25,7 @@ import {
   type UnindexedFileRecord,
 } from './src/utils/catalogLogic.ts';
 import { LOTTIE_CROWN_JSON, ROYAL_DRAGON_SVG } from './src/utils/demoGifts.ts';
+import { PERSISTED_GIFTS } from './src/data/persistedGifts.ts';
 
 const PORT = 3000;
 const SESSION_COOKIE_NAME = 'gift_gallery_admin_session';
@@ -176,8 +177,31 @@ async function startServer() {
   const app = express();
   app.use(express.json({ limit: '10mb' }));
 
-  // Serve persistent local mirror files under /storage/gifts/* and /storage/catalog/gifts.json
+  // Serve gifts from public/gifts and storage/gifts
   const storageRoot = path.resolve(process.cwd(), 'storage');
+  const publicRoot = path.resolve(process.cwd(), 'public');
+
+  app.use(
+    '/gifts',
+    express.static(path.join(publicRoot, 'gifts'), {
+      maxAge: '365d',
+      immutable: true,
+    })
+  );
+  app.use(
+    '/gifts',
+    express.static(path.join(storageRoot, 'gifts'), {
+      maxAge: '365d',
+      immutable: true,
+    })
+  );
+  app.use(
+    '/storage/gifts',
+    express.static(path.join(publicRoot, 'gifts'), {
+      maxAge: '365d',
+      immutable: true,
+    })
+  );
   app.use(
     '/storage/gifts',
     express.static(path.join(storageRoot, 'gifts'), {
@@ -186,15 +210,20 @@ async function startServer() {
     })
   );
 
-  // Public raw JSON catalog endpoint (no cache so clients always validate freshness)
-  app.get('/storage/catalog/gifts.json', async (_req, res) => {
+  // Public raw JSON catalog endpoints (no cache so clients always validate freshness)
+  app.get(['/storage/catalog/gifts.json', '/gifts_catalog.json'], async (_req, res) => {
     try {
       const catalog = await readCatalogIndex();
       res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
       res.setHeader('ETag', `"v${catalog.version}"`);
       res.json(catalog);
-    } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+    } catch {
+      res.json({
+        version: 1,
+        updatedAt: new Date().toISOString(),
+        totalCount: PERSISTED_GIFTS.length,
+        items: PERSISTED_GIFTS,
+      });
     }
   });
 
@@ -265,8 +294,15 @@ async function startServer() {
             }
           : {}),
       });
-    } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+    } catch (_err) {
+      const visible = PERSISTED_GIFTS.filter((item) => item.published);
+      res.json({
+        version: 1,
+        updatedAt: new Date().toISOString(),
+        totalCount: visible.length,
+        totalBytes: visible.reduce((sum, i) => sum + (Number(i.sizeBytes) || 0), 0),
+        items: visible,
+      });
     }
   });
 
@@ -277,6 +313,50 @@ async function startServer() {
       res.json(status);
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  // Health endpoint
+  app.get('/api/health', async (_req, res) => {
+    try {
+      const catalog = await readCatalogIndex();
+      const sha = crypto.createHash('sha256').update(JSON.stringify(catalog.items)).digest('hex');
+      res.json({
+        ok: true,
+        version: catalog.version,
+        giftsCount: catalog.items.length,
+        sha,
+      });
+    } catch {
+      const sha = crypto.createHash('sha256').update(JSON.stringify(PERSISTED_GIFTS)).digest('hex');
+      res.json({
+        ok: true,
+        version: 1,
+        giftsCount: PERSISTED_GIFTS.length,
+        sha,
+      });
+    }
+  });
+
+  // Compatibility /api/gifts endpoint
+  app.get('/api/gifts', async (_req, res) => {
+    try {
+      const catalog = await readCatalogIndex();
+      const sha = crypto.createHash('sha256').update(JSON.stringify(catalog.items)).digest('hex');
+      res.json({
+        version: catalog.version,
+        updatedAt: catalog.updatedAt,
+        gifts: catalog.items,
+        sha,
+      });
+    } catch {
+      const sha = crypto.createHash('sha256').update(JSON.stringify(PERSISTED_GIFTS)).digest('hex');
+      res.json({
+        version: 1,
+        updatedAt: new Date().toISOString(),
+        gifts: PERSISTED_GIFTS,
+        sha,
+      });
     }
   });
 
