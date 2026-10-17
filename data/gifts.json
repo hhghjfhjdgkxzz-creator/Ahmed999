@@ -1,0 +1,123 @@
+{
+  "version": 1,
+  "updatedAt": "2026-10-17T08:50:00.000Z",
+  "settings": {
+    "heroTitle": "كل هدية تروي حكاية من الفخامة",
+    "heroSubtitle": "مجموعة منتقاة من الهدايا الرقمية المتحركة والإطارات الملكية ومؤثرات الدخول المصممة بعناية لتجربة عرض استثنائية.",
+    "categories": ["هدايا", "إطارات", "دخوليات", "ملكي"]
+  },
+  "gifts": [
+    {
+      "id": "demo-crown",
+      "title": "التاج الإمبراطوري الذهبي",
+      "category": "ملكي",
+      "type": "image",
+      "description": "تاج ملكي مرصع بالياقوت الأحمر والألماس مع هالة ضوئية ذهبية متحركة.",
+      "assetUrl": "/assets/royal-crown.svg",
+      "featured": true,
+      "published": true,
+      "order": 1,
+      "price": 49.99,
+      "emoji": "👑",
+      "createdAt": "2026-10-17T08:00:00.000Z"
+    },
+    {
+      "id": "demo-rose",
+      "title": "وردة الذهب والياقوت",
+      "category": "هدايا",
+      "type": "image",
+      "description": "وردة مخملية حمراء بساق من الذهب الخالص داخل قبة بلورية فاخرة.",
+      "assetUrl": "/assets/golden-rose.svg",
+      "featured": true,
+      "published": true,
+      "order": 2,
+      "price": 19.99,
+      "emoji": "🌹",
+      "createdAt": "2026-10-17T08:01:00.000Z"
+    },
+    {
+      "id": "demo-diamond",
+      "title": "ماسة القصر الملكي",
+      "category": "هدايا",
+      "type": "image",
+      "description": "ماسة مقطوعة بدقة هندسية تنشر انعكاسات ضوئية زرقاء وذهبية ساحرة.",
+      "assetUrl": "/assets/diamond-chest.svg",
+      "featured": true,
+      "published": true,
+      "order": 3,
+      "price": 29.99,
+      "emoji": "💎",
+      "createdAt": "2026-10-17T08:02:00.000Z"
+    },
+    {
+      "id": "demo-car",
+      "title": "سيارة النخبة الذهبية",
+      "category": "ملكي",
+      "type": "image",
+      "description": "سيارة رياضية فارهة مطلية بالذهب مع إضاءة أمامية ديناميكية.",
+      "assetUrl": "/assets/luxury-car.svg",
+      "featured": false,
+      "published": true,
+      "order": 4,
+      "price": 89.99,
+      "emoji": "🏎️",
+      "createdAt": "2026-10-17T08:03:00.000Z"
+    },
+    {
+      "id": "demo-frame-gold",
+      "title": "الإطار الفيكتوري الإمبراطوري",
+      "category": "إطارات",
+      "type": "image",
+      "description": "إطار دائري مزخرف بنقوش الذهب الملكي وتاج علوي يمنح الحساب حضوراً متفرداً.",
+      "assetUrl": "/assets/imperial-frame.svg",
+      "featured": true,
+      "published": true,
+      "order": 5,
+      "price": 14.99,
+      "emoji": "▣",
+      "createdAt": "2026-10-17T08:06:00.000Z"
+    },
+    {
+      "id": "demo-frame-stars",
+      "title": "إطار المدار النجمي",
+      "category": "إطارات",
+      "type": "image",
+      "description": "إطار متوهج محاط بمدار من النجوم الذهبية والفضية الدوارة.",
+      "assetUrl": "/assets/starlight-frame.svg",
+      "featured": true,
+      "published": true,
+      "order": 6,
+      "price": 9.99,
+      "emoji": "✨",
+      "createdAt": "2026-10-17T08:07:00.000Z"
+    },
+    {
+      "id": "demo-entry-royal",
+      "title": "دخولية البساط الملكي",
+      "category": "دخوليات",
+      "type": "image",
+      "description": "قوس نصر ذهبي مع بساط أحمر ملكي ونجمة متوهجة للإعلان عن حضور كبار الشخصيات.",
+      "assetUrl": "/assets/royal-procession.svg",
+      "featured": true,
+      "published": true,
+      "order": 7,
+      "price": 59.99,
+      "emoji": "✦",
+      "createdAt": "2026-10-17T08:10:00.000Z"
+    },
+    {
+      "id": "demo-entry-phoenix",
+      "title": "دخولية تحليق الفينيق الذهبي",
+      "category": "دخوليات",
+      "type": "image",
+      "description": "طائر الفينيق الأسطوري يفرد جناحيه من الذهب واللهب في مشهد مهيب.",
+      "assetUrl": "/assets/phoenix-entry.svg",
+      "featured": true,
+      "published": true,
+      "order": 8,
+      "price": 79.99,
+      "emoji": "🦅",
+      "createdAt": "2026-10-17T08:11:00.000Z"
+    }
+  ]
+}

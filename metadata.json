@@ -1,6 +1,6 @@
 {
-  "name": "Jiawei Effects Clone & Gifts Dashboard",
-  "description": "Full replica of the live-streaming gift VFX platform with Arabic support, simplified interface, gift and order upload dashboard, external video CDN links, instant delivery boxes, and comprehensive printing for tax invoices and license certificates.",
+  "name": "Gift Gallery — معرض الهدايا الصوتية",
+  "description": "منصة احترافية لإدارة وعرض هدايا التطبيقات الصوتية المتحركة بصيغ SVGA, VAP, MP4, Lottie, GIF مع تخزين مركزي دائم في Cloudflare R2 بدون قاعدة بيانات.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

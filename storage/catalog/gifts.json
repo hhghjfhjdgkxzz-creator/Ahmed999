@@ -1,0 +1,251 @@
+{
+  "version": 15,
+  "updatedAt": "2026-10-17T11:05:15.315Z",
+  "totalCount": 6,
+  "totalBytes": 19248600,
+  "items": [
+    {
+      "id": "gift-royal-dragon-svga",
+      "name": "تنين الإمبراطور الذهبي",
+      "category": "entrances",
+      "description": "دخولية ملكية ثلاثية الأبعاد لغرف الدردشة الصوتية مع مؤثرات اللهب الذهبي وزئير التنين.",
+      "originalUrl": "data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20600%20600%22%20width%3D%22600%22%20height%3D%22600%22%3E%0A%20%20%3Cdefs%3E%0A%20%20%20%20%3CradialGradient%20id%3D%22bgGlow%22%20cx%3D%2250%25%22%20cy%3D%2250%25%22%20r%3D%2250%25%22%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%23D4AF37%22%20stop-opacity%3D%220.35%22%2F%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%2255%25%22%20stop-color%3D%22%237C3AED%22%20stop-opacity%3D%220.15%22%2F%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%2308060E%22%20stop-opacity%3D%220%22%2F%3E%0A%20%20%20%20%3C%2FradialGradient%3E%0A%20%20%20%20%3ClinearGradient%20id%3D%22goldGrad%22%20x1%3D%220%25%22%20y1%3D%220%25%22%20x2%3D%22100%25%22%20y2%3D%22100%25%22%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%23FFF3B0%22%2F%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%2245%25%22%20stop-color%3D%22%23D4AF37%22%2F%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%238A640F%22%2F%3E%0A%20%20%20%20%3C%2FlinearGradient%3E%0A%20%20%20%20%3ClinearGradient%20id%3D%22purpleGrad%22%20x1%3D%220%25%22%20y1%3D%22100%25%22%20x2%3D%22100%25%22%20y2%3D%220%25%22%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%233B0764%22%2F%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%2250%25%22%20stop-color%3D%22%237C3AED%22%2F%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%23C084FC%22%2F%3E%0A%20%20%20%20%3C%2FlinearGradient%3E%0A%20%20%3C%2Fdefs%3E%0A%20%20%3Crect%20width%3D%22600%22%20height%3D%22600%22%20fill%3D%22url(%23bgGlow)%22%2F%3E%0A%20%20%3Cg%20transform%3D%22translate(300%2C300)%22%3E%0A%20%20%20%20%3Ccircle%20r%3D%22210%22%20fill%3D%22none%22%20stroke%3D%22url(%23goldGrad)%22%20stroke-width%3D%222%22%20stroke-dasharray%3D%2212%208%22%20opacity%3D%220.6%22%3E%0A%20%20%20%20%20%20%3CanimateTransform%20attributeName%3D%22transform%22%20type%3D%22rotate%22%20from%3D%220%22%20to%3D%22360%22%20dur%3D%2218s%22%20repeatCount%3D%22indefinite%22%2F%3E%0A%20%20%20%20%3C%2Fcircle%3E%0A%20%20%20%20%3Ccircle%20r%3D%22175%22%20fill%3D%22none%22%20stroke%3D%22url(%23purpleGrad)%22%20stroke-width%3D%223%22%20stroke-dasharray%3D%2240%2015%22%20opacity%3D%220.8%22%3E%0A%20%20%20%20%20%20%3CanimateTransform%20attributeName%3D%22transform%22%20type%3D%22rotate%22%20from%3D%22360%22%20to%3D%220%22%20dur%3D%2212s%22%20repeatCount%3D%22indefinite%22%2F%3E%0A%20%20%20%20%3C%2Fcircle%3E%0A%20%20%20%20%3Cg%3E%0A%20%20%20%20%20%20%3CanimateTransform%20attributeName%3D%22transform%22%20type%3D%22scale%22%20values%3D%220.96%3B1.04%3B0.96%22%20dur%3D%223.2s%22%20repeatCount%3D%22indefinite%22%2F%3E%0A%20%20%20%20%20%20%3Cpolygon%20points%3D%220%2C-135%2045%2C-35%20140%2C-55%2085%2C45%20110%2C120%200%2C85%20-110%2C120%20-85%2C45%20-140%2C-55%20-45%2C-35%22%20fill%3D%22url(%23purpleGrad)%22%20stroke%3D%22url(%23goldGrad)%22%20stroke-width%3D%224%22%2F%3E%0A%20%20%20%20%20%20%3Cpolygon%20points%3D%220%2C-115%2032%2C-25%2098%2C-40%2058%2C32%200%2C65%20-58%2C32%20-98%2C-40%20-32%2C-25%22%20fill%3D%22url(%23goldGrad)%22%20opacity%3D%220.9%22%2F%3E%0A%20%20%20%20%20%20%3Ccircle%20cx%3D%22-28%22%20cy%3D%22-10%22%20r%3D%228%22%20fill%3D%22%2308060E%22%2F%3E%0A%20%20%20%20%20%20%3Ccircle%20cx%3D%2228%22%20cy%3D%22-10%22%20r%3D%228%22%20fill%3D%22%2308060E%22%2F%3E%0A%20%20%20%20%20%20%3Ccircle%20cx%3D%220%22%20cy%3D%22-75%22%20r%3D%2214%22%20fill%3D%22%23F43F5E%22%3E%0A%20%20%20%20%20%20%20%20%3Canimate%20attributeName%3D%22opacity%22%20values%3D%220.6%3B1%3B0.6%22%20dur%3D%221.5s%22%20repeatCount%3D%22indefinite%22%2F%3E%0A%20%20%20%20%20%20%3C%2Fcircle%3E%0A%20%20%20%20%3C%2Fg%3E%0A%20%20%20%20%3Ctext%20y%3D%22195%22%20text-anchor%3D%22middle%22%20fill%3D%22%23FFF3B0%22%20font-family%3D%22sans-serif%22%20font-weight%3D%22bold%22%20font-size%3D%2222%22%20letter-spacing%3D%223%22%3EROYAL%20EMPEROR%3C%2Ftext%3E%0A%20%20%3C%2Fg%3E%0A%3C%2Fsvg%3E",
+      "thumbnailUrl": "data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20600%20600%22%20width%3D%22600%22%20height%3D%22600%22%3E%0A%20%20%3Cdefs%3E%0A%20%20%20%20%3CradialGradient%20id%3D%22bgGlow%22%20cx%3D%2250%25%22%20cy%3D%2250%25%22%20r%3D%2250%25%22%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%23D4AF37%22%20stop-opacity%3D%220.35%22%2F%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%2255%25%22%20stop-color%3D%22%237C3AED%22%20stop-opacity%3D%220.15%22%2F%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%2308060E%22%20stop-opacity%3D%220%22%2F%3E%0A%20%20%20%20%3C%2FradialGradient%3E%0A%20%20%20%20%3ClinearGradient%20id%3D%22goldGrad%22%20x1%3D%220%25%22%20y1%3D%220%25%22%20x2%3D%22100%25%22%20y2%3D%22100%25%22%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%23FFF3B0%22%2F%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%2245%25%22%20stop-color%3D%22%23D4AF37%22%2F%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%238A640F%22%2F%3E%0A%20%20%20%20%3C%2FlinearGradient%3E%0A%20%20%20%20%3ClinearGradient%20id%3D%22purpleGrad%22%20x1%3D%220%25%22%20y1%3D%22100%25%22%20x2%3D%22100%25%22%20y2%3D%220%25%22%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%233B0764%22%2F%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%2250%25%22%20stop-color%3D%22%237C3AED%22%2F%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%23C084FC%22%2F%3E%0A%20%20%20%20%3C%2FlinearGradient%3E%0A%20%20%3C%2Fdefs%3E%0A%20%20%3Crect%20width%3D%22600%22%20height%3D%22600%22%20fill%3D%22url(%23bgGlow)%22%2F%3E%0A%20%20%3Cg%20transform%3D%22translate(300%2C300)%22%3E%0A%20%20%20%20%3Ccircle%20r%3D%22210%22%20fill%3D%22none%22%20stroke%3D%22url(%23goldGrad)%22%20stroke-width%3D%222%22%20stroke-dasharray%3D%2212%208%22%20opacity%3D%220.6%22%3E%0A%20%20%20%20%20%20%3CanimateTransform%20attributeName%3D%22transform%22%20type%3D%22rotate%22%20from%3D%220%22%20to%3D%22360%22%20dur%3D%2218s%22%20repeatCount%3D%22indefinite%22%2F%3E%0A%20%20%20%20%3C%2Fcircle%3E%0A%20%20%20%20%3Ccircle%20r%3D%22175%22%20fill%3D%22none%22%20stroke%3D%22url(%23purpleGrad)%22%20stroke-width%3D%223%22%20stroke-dasharray%3D%2240%2015%22%20opacity%3D%220.8%22%3E%0A%20%20%20%20%20%20%3CanimateTransform%20attributeName%3D%22transform%22%20type%3D%22rotate%22%20from%3D%22360%22%20to%3D%220%22%20dur%3D%2212s%22%20repeatCount%3D%22indefinite%22%2F%3E%0A%20%20%20%20%3C%2Fcircle%3E%0A%20%20%20%20%3Cg%3E%0A%20%20%20%20%20%20%3CanimateTransform%20attributeName%3D%22transform%22%20type%3D%22scale%22%20values%3D%220.96%3B1.04%3B0.96%22%20dur%3D%223.2s%22%20repeatCount%3D%22indefinite%22%2F%3E%0A%20%20%20%20%20%20%3Cpolygon%20points%3D%220%2C-135%2045%2C-35%20140%2C-55%2085%2C45%20110%2C120%200%2C85%20-110%2C120%20-85%2C45%20-140%2C-55%20-45%2C-35%22%20fill%3D%22url(%23purpleGrad)%22%20stroke%3D%22url(%23goldGrad)%22%20stroke-width%3D%224%22%2F%3E%0A%20%20%20%20%20%20%3Cpolygon%20points%3D%220%2C-115%2032%2C-25%2098%2C-40%2058%2C32%200%2C65%20-58%2C32%20-98%2C-40%20-32%2C-25%22%20fill%3D%22url(%23goldGrad)%22%20opacity%3D%220.9%22%2F%3E%0A%20%20%20%20%20%20%3Ccircle%20cx%3D%22-28%22%20cy%3D%22-10%22%20r%3D%228%22%20fill%3D%22%2308060E%22%2F%3E%0A%20%20%20%20%20%20%3Ccircle%20cx%3D%2228%22%20cy%3D%22-10%22%20r%3D%228%22%20fill%3D%22%2308060E%22%2F%3E%0A%20%20%20%20%20%20%3Ccircle%20cx%3D%220%22%20cy%3D%22-75%22%20r%3D%2214%22%20fill%3D%22%23F43F5E%22%3E%0A%20%20%20%20%20%20%20%20%3Canimate%20attributeName%3D%22opacity%22%20values%3D%220.6%3B1%3B0.6%22%20dur%3D%221.5s%22%20repeatCount%3D%22indefinite%22%2F%3E%0A%20%20%20%20%20%20%3C%2Fcircle%3E%0A%20%20%20%20%3C%2Fg%3E%0A%20%20%20%20%3Ctext%20y%3D%22195%22%20text-anchor%3D%22middle%22%20fill%3D%22%23FFF3B0%22%20font-family%3D%22sans-serif%22%20font-weight%3D%22bold%22%20font-size%3D%2222%22%20letter-spacing%3D%223%22%3EROYAL%20EMPEROR%3C%2Ftext%3E%0A%20%20%3C%2Fg%3E%0A%3C%2Fsvg%3E",
+      "format": "SVGA",
+      "sizeBytes": 4820400,
+      "quality": "4K",
+      "hasAudio": true,
+      "hasAlpha": true,
+      "isAnimated": true,
+      "displayOrder": 1,
+      "published": true,
+      "allowDownload": true,
+      "uploadedAt": "2026-10-16T18:00:00.000Z",
+      "updatedAt": "2026-10-16T18:00:00.000Z",
+      "storageKey": "gifts/originals/royal_emperor_dragon.svga"
+    },
+    {
+      "id": "gift-vip10-crown-lottie",
+      "name": "وسام الملوك VIP 10 المتوهج",
+      "category": "vip",
+      "description": "شعار ملكي متحرك بصيغة Lottie JSON قابل للتكبير اللانهائي بجودة Vector مع تدرجات ذهبية وبنفسجية.",
+      "originalUrl": "/api/catalog/demo-lottie/gift-vip10-crown-lottie",
+      "thumbnailUrl": "data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20600%20600%22%20width%3D%22600%22%20height%3D%22600%22%3E%0A%20%20%3Cdefs%3E%0A%20%20%20%20%3ClinearGradient%20id%3D%22frameGold%22%20x1%3D%220%25%22%20y1%3D%220%25%22%20x2%3D%22100%25%22%20y2%3D%22100%25%22%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%23FDE68A%22%2F%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%2250%25%22%20stop-color%3D%22%23D4AF37%22%2F%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%2392400E%22%2F%3E%0A%20%20%20%20%3C%2FlinearGradient%3E%0A%20%20%20%20%3ClinearGradient%20id%3D%22gemPurple%22%20x1%3D%220%25%22%20y1%3D%220%25%22%20x2%3D%220%25%22%20y2%3D%22100%25%22%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%23E879F9%22%2F%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%236B21A8%22%2F%3E%0A%20%20%20%20%3C%2FlinearGradient%3E%0A%20%20%3C%2Fdefs%3E%0A%20%20%3Cg%20transform%3D%22translate(300%2C300)%22%3E%0A%20%20%20%20%3Ccircle%20r%3D%22195%22%20fill%3D%22none%22%20stroke%3D%22url(%23frameGold)%22%20stroke-width%3D%2218%22%20opacity%3D%220.25%22%3E%0A%20%20%20%20%20%20%3Canimate%20attributeName%3D%22r%22%20values%3D%22190%3B205%3B190%22%20dur%3D%222.5s%22%20repeatCount%3D%22indefinite%22%2F%3E%0A%20%20%20%20%3C%2Fcircle%3E%0A%20%20%20%20%3Cg%3E%0A%20%20%20%20%20%20%3CanimateTransform%20attributeName%3D%22transform%22%20type%3D%22rotate%22%20from%3D%220%22%20to%3D%22360%22%20dur%3D%2224s%22%20repeatCount%3D%22indefinite%22%2F%3E%0A%20%20%20%20%20%20%3Ccircle%20r%3D%22175%22%20fill%3D%22none%22%20stroke%3D%22url(%23frameGold)%22%20stroke-width%3D%2212%22%20stroke-dasharray%3D%2230%2014%22%2F%3E%0A%20%20%20%20%20%20%3Ccircle%20cx%3D%220%22%20cy%3D%22-175%22%20r%3D%2216%22%20fill%3D%22url(%23gemPurple)%22%20stroke%3D%22%23FDE68A%22%20stroke-width%3D%223%22%2F%3E%0A%20%20%20%20%20%20%3Ccircle%20cx%3D%22175%22%20cy%3D%220%22%20r%3D%2216%22%20fill%3D%22url(%23gemPurple)%22%20stroke%3D%22%23FDE68A%22%20stroke-width%3D%223%22%2F%3E%0A%20%20%20%20%20%20%3Ccircle%20cx%3D%220%22%20cy%3D%22175%22%20r%3D%2216%22%20fill%3D%22url(%23gemPurple)%22%20stroke%3D%22%23FDE68A%22%20stroke-width%3D%223%22%2F%3E%0A%20%20%20%20%20%20%3Ccircle%20cx%3D%22-175%22%20cy%3D%220%22%20r%3D%2216%22%20fill%3D%22url(%23gemPurple)%22%20stroke%3D%22%23FDE68A%22%20stroke-width%3D%223%22%2F%3E%0A%20%20%20%20%3C%2Fg%3E%0A%20%20%20%20%3Ccircle%20r%3D%22145%22%20fill%3D%22%23130F24%22%20stroke%3D%22url(%23frameGold)%22%20stroke-width%3D%226%22%2F%3E%0A%20%20%20%20%3Cpath%20d%3D%22M-55%2C-145%20L-30%2C-195%20L0%2C-165%20L30%2C-195%20L55%2C-145%20Z%22%20fill%3D%22url(%23frameGold)%22%20stroke%3D%22%23FFF%22%20stroke-width%3D%222%22%3E%0A%20%20%20%20%20%20%3CanimateTransform%20attributeName%3D%22transform%22%20type%3D%22translate%22%20values%3D%220%2C0%3B%200%2C-6%3B%200%2C0%22%20dur%3D%222s%22%20repeatCount%3D%22indefinite%22%2F%3E%0A%20%20%20%20%3C%2Fpath%3E%0A%20%20%20%20%3Ctext%20y%3D%228%22%20text-anchor%3D%22middle%22%20fill%3D%22%23FDE68A%22%20font-family%3D%22sans-serif%22%20font-weight%3D%22bold%22%20font-size%3D%2234%22%3EVIP%2010%3C%2Ftext%3E%0A%20%20%20%20%3Ctext%20y%3D%2242%22%20text-anchor%3D%22middle%22%20fill%3D%22%23C084FC%22%20font-family%3D%22sans-serif%22%20font-size%3D%2216%22%20letter-spacing%3D%222%22%3EMIC%20FRAME%3C%2Ftext%3E%0A%20%20%3C%2Fg%3E%0A%3C%2Fsvg%3E",
+      "format": "Lottie",
+      "sizeBytes": 148200,
+      "quality": "Vector",
+      "hasAudio": false,
+      "hasAlpha": true,
+      "isAnimated": true,
+      "displayOrder": 2,
+      "published": true,
+      "allowDownload": true,
+      "uploadedAt": "2026-10-16T19:30:00.000Z",
+      "updatedAt": "2026-10-16T19:30:00.000Z",
+      "storageKey": "gifts/originals/vip10_royal_crest.json"
+    },
+    {
+      "id": "gift-mic-frame-apng",
+      "name": "إطار مايك السيادة الملكية",
+      "category": "frames",
+      "description": "إطار صورة رمزية (Avatar Frame) شفاف بدقة 24-bit يدور بسلاسة حول المتحدث في الغرف الصوتية.",
+      "originalUrl": "data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20600%20600%22%20width%3D%22600%22%20height%3D%22600%22%3E%0A%20%20%3Cdefs%3E%0A%20%20%20%20%3ClinearGradient%20id%3D%22frameGold%22%20x1%3D%220%25%22%20y1%3D%220%25%22%20x2%3D%22100%25%22%20y2%3D%22100%25%22%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%23FDE68A%22%2F%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%2250%25%22%20stop-color%3D%22%23D4AF37%22%2F%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%2392400E%22%2F%3E%0A%20%20%20%20%3C%2FlinearGradient%3E%0A%20%20%20%20%3ClinearGradient%20id%3D%22gemPurple%22%20x1%3D%220%25%22%20y1%3D%220%25%22%20x2%3D%220%25%22%20y2%3D%22100%25%22%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%23E879F9%22%2F%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%236B21A8%22%2F%3E%0A%20%20%20%20%3C%2FlinearGradient%3E%0A%20%20%3C%2Fdefs%3E%0A%20%20%3Cg%20transform%3D%22translate(300%2C300)%22%3E%0A%20%20%20%20%3Ccircle%20r%3D%22195%22%20fill%3D%22none%22%20stroke%3D%22url(%23frameGold)%22%20stroke-width%3D%2218%22%20opacity%3D%220.25%22%3E%0A%20%20%20%20%20%20%3Canimate%20attributeName%3D%22r%22%20values%3D%22190%3B205%3B190%22%20dur%3D%222.5s%22%20repeatCount%3D%22indefinite%22%2F%3E%0A%20%20%20%20%3C%2Fcircle%3E%0A%20%20%20%20%3Cg%3E%0A%20%20%20%20%20%20%3CanimateTransform%20attributeName%3D%22transform%22%20type%3D%22rotate%22%20from%3D%220%22%20to%3D%22360%22%20dur%3D%2224s%22%20repeatCount%3D%22indefinite%22%2F%3E%0A%20%20%20%20%20%20%3Ccircle%20r%3D%22175%22%20fill%3D%22none%22%20stroke%3D%22url(%23frameGold)%22%20stroke-width%3D%2212%22%20stroke-dasharray%3D%2230%2014%22%2F%3E%0A%20%20%20%20%20%20%3Ccircle%20cx%3D%220%22%20cy%3D%22-175%22%20r%3D%2216%22%20fill%3D%22url(%23gemPurple)%22%20stroke%3D%22%23FDE68A%22%20stroke-width%3D%223%22%2F%3E%0A%20%20%20%20%20%20%3Ccircle%20cx%3D%22175%22%20cy%3D%220%22%20r%3D%2216%22%20fill%3D%22url(%23gemPurple)%22%20stroke%3D%22%23FDE68A%22%20stroke-width%3D%223%22%2F%3E%0A%20%20%20%20%20%20%3Ccircle%20cx%3D%220%22%20cy%3D%22175%22%20r%3D%2216%22%20fill%3D%22url(%23gemPurple)%22%20stroke%3D%22%23FDE68A%22%20stroke-width%3D%223%22%2F%3E%0A%20%20%20%20%20%20%3Ccircle%20cx%3D%22-175%22%20cy%3D%220%22%20r%3D%2216%22%20fill%3D%22url(%23gemPurple)%22%20stroke%3D%22%23FDE68A%22%20stroke-width%3D%223%22%2F%3E%0A%20%20%20%20%3C%2Fg%3E%0A%20%20%20%20%3Ccircle%20r%3D%22145%22%20fill%3D%22%23130F24%22%20stroke%3D%22url(%23frameGold)%22%20stroke-width%3D%226%22%2F%3E%0A%20%20%20%20%3Cpath%20d%3D%22M-55%2C-145%20L-30%2C-195%20L0%2C-165%20L30%2C-195%20L55%2C-145%20Z%22%20fill%3D%22url(%23frameGold)%22%20stroke%3D%22%23FFF%22%20stroke-width%3D%222%22%3E%0A%20%20%20%20%20%20%3CanimateTransform%20attributeName%3D%22transform%22%20type%3D%22translate%22%20values%3D%220%2C0%3B%200%2C-6%3B%200%2C0%22%20dur%3D%222s%22%20repeatCount%3D%22indefinite%22%2F%3E%0A%20%20%20%20%3C%2Fpath%3E%0A%20%20%20%20%3Ctext%20y%3D%228%22%20text-anchor%3D%22middle%22%20fill%3D%22%23FDE68A%22%20font-family%3D%22sans-serif%22%20font-weight%3D%22bold%22%20font-size%3D%2234%22%3EVIP%2010%3C%2Ftext%3E%0A%20%20%20%20%3Ctext%20y%3D%2242%22%20text-anchor%3D%22middle%22%20fill%3D%22%23C084FC%22%20font-family%3D%22sans-serif%22%20font-size%3D%2216%22%20letter-spacing%3D%222%22%3EMIC%20FRAME%3C%2Ftext%3E%0A%20%20%3C%2Fg%3E%0A%3C%2Fsvg%3E",
+      "thumbnailUrl": "data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20600%20600%22%20width%3D%22600%22%20height%3D%22600%22%3E%0A%20%20%3Cdefs%3E%0A%20%20%20%20%3ClinearGradient%20id%3D%22frameGold%22%20x1%3D%220%25%22%20y1%3D%220%25%22%20x2%3D%22100%25%22%20y2%3D%22100%25%22%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%23FDE68A%22%2F%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%2250%25%22%20stop-color%3D%22%23D4AF37%22%2F%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%2392400E%22%2F%3E%0A%20%20%20%20%3C%2FlinearGradient%3E%0A%20%20%20%20%3ClinearGradient%20id%3D%22gemPurple%22%20x1%3D%220%25%22%20y1%3D%220%25%22%20x2%3D%220%25%22%20y2%3D%22100%25%22%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%23E879F9%22%2F%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%236B21A8%22%2F%3E%0A%20%20%20%20%3C%2FlinearGradient%3E%0A%20%20%3C%2Fdefs%3E%0A%20%20%3Cg%20transform%3D%22translate(300%2C300)%22%3E%0A%20%20%20%20%3Ccircle%20r%3D%22195%22%20fill%3D%22none%22%20stroke%3D%22url(%23frameGold)%22%20stroke-width%3D%2218%22%20opacity%3D%220.25%22%3E%0A%20%20%20%20%20%20%3Canimate%20attributeName%3D%22r%22%20values%3D%22190%3B205%3B190%22%20dur%3D%222.5s%22%20repeatCount%3D%22indefinite%22%2F%3E%0A%20%20%20%20%3C%2Fcircle%3E%0A%20%20%20%20%3Cg%3E%0A%20%20%20%20%20%20%3CanimateTransform%20attributeName%3D%22transform%22%20type%3D%22rotate%22%20from%3D%220%22%20to%3D%22360%22%20dur%3D%2224s%22%20repeatCount%3D%22indefinite%22%2F%3E%0A%20%20%20%20%20%20%3Ccircle%20r%3D%22175%22%20fill%3D%22none%22%20stroke%3D%22url(%23frameGold)%22%20stroke-width%3D%2212%22%20stroke-dasharray%3D%2230%2014%22%2F%3E%0A%20%20%20%20%20%20%3Ccircle%20cx%3D%220%22%20cy%3D%22-175%22%20r%3D%2216%22%20fill%3D%22url(%23gemPurple)%22%20stroke%3D%22%23FDE68A%22%20stroke-width%3D%223%22%2F%3E%0A%20%20%20%20%20%20%3Ccircle%20cx%3D%22175%22%20cy%3D%220%22%20r%3D%2216%22%20fill%3D%22url(%23gemPurple)%22%20stroke%3D%22%23FDE68A%22%20stroke-width%3D%223%22%2F%3E%0A%20%20%20%20%20%20%3Ccircle%20cx%3D%220%22%20cy%3D%22175%22%20r%3D%2216%22%20fill%3D%22url(%23gemPurple)%22%20stroke%3D%22%23FDE68A%22%20stroke-width%3D%223%22%2F%3E%0A%20%20%20%20%20%20%3Ccircle%20cx%3D%22-175%22%20cy%3D%220%22%20r%3D%2216%22%20fill%3D%22url(%23gemPurple)%22%20stroke%3D%22%23FDE68A%22%20stroke-width%3D%223%22%2F%3E%0A%20%20%20%20%3C%2Fg%3E%0A%20%20%20%20%3Ccircle%20r%3D%22145%22%20fill%3D%22%23130F24%22%20stroke%3D%22url(%23frameGold)%22%20stroke-width%3D%226%22%2F%3E%0A%20%20%20%20%3Cpath%20d%3D%22M-55%2C-145%20L-30%2C-195%20L0%2C-165%20L30%2C-195%20L55%2C-145%20Z%22%20fill%3D%22url(%23frameGold)%22%20stroke%3D%22%23FFF%22%20stroke-width%3D%222%22%3E%0A%20%20%20%20%20%20%3CanimateTransform%20attributeName%3D%22transform%22%20type%3D%22translate%22%20values%3D%220%2C0%3B%200%2C-6%3B%200%2C0%22%20dur%3D%222s%22%20repeatCount%3D%22indefinite%22%2F%3E%0A%20%20%20%20%3C%2Fpath%3E%0A%20%20%20%20%3Ctext%20y%3D%228%22%20text-anchor%3D%22middle%22%20fill%3D%22%23FDE68A%22%20font-family%3D%22sans-serif%22%20font-weight%3D%22bold%22%20font-size%3D%2234%22%3EVIP%2010%3C%2Ftext%3E%0A%20%20%20%20%3Ctext%20y%3D%2242%22%20text-anchor%3D%22middle%22%20fill%3D%22%23C084FC%22%20font-family%3D%22sans-serif%22%20font-size%3D%2216%22%20letter-spacing%3D%222%22%3EMIC%20FRAME%3C%2Ftext%3E%0A%20%20%3C%2Fg%3E%0A%3C%2Fsvg%3E",
+      "format": "APNG",
+      "sizeBytes": 1940000,
+      "quality": "FHD",
+      "hasAudio": false,
+      "hasAlpha": true,
+      "isAnimated": true,
+      "displayOrder": 3,
+      "published": true,
+      "allowDownload": true,
+      "uploadedAt": "2026-10-16T20:15:00.000Z",
+      "updatedAt": "2026-10-16T20:15:00.000Z",
+      "storageKey": "gifts/originals/sovereign_mic_frame.apng"
+    },
+    {
+      "id": "gift-luxury-yacht-vap",
+      "name": "يخت المحيط الماسي VAP",
+      "category": "entrances",
+      "description": "دخولية يخت فاخر بصيغة VAP (Video Animation Player) مع قناة شفافية Alpha ومؤثرات أمواج صوتية.",
+      "originalUrl": "data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20600%20600%22%20width%3D%22600%22%20height%3D%22600%22%3E%0A%20%20%3Cdefs%3E%0A%20%20%20%20%3ClinearGradient%20id%3D%22hullGrad%22%20x1%3D%220%25%22%20y1%3D%220%25%22%20x2%3D%22100%25%22%20y2%3D%220%25%22%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%23D4AF37%22%2F%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%2250%25%22%20stop-color%3D%22%23FEF08A%22%2F%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%23A16207%22%2F%3E%0A%20%20%20%20%3C%2FlinearGradient%3E%0A%20%20%20%20%3ClinearGradient%20id%3D%22waveGrad%22%20x1%3D%220%25%22%20y1%3D%220%25%22%20x2%3D%220%25%22%20y2%3D%22100%25%22%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%2338BDF8%22%20stop-opacity%3D%220.7%22%2F%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%231E1B4B%22%20stop-opacity%3D%220.1%22%2F%3E%0A%20%20%20%20%3C%2FlinearGradient%3E%0A%20%20%3C%2Fdefs%3E%0A%20%20%3Cg%20transform%3D%22translate(300%2C310)%22%3E%0A%20%20%20%20%3Cg%3E%0A%20%20%20%20%20%20%3CanimateTransform%20attributeName%3D%22transform%22%20type%3D%22translate%22%20values%3D%220%2C-8%3B%200%2C8%3B%200%2C-8%22%20dur%3D%223s%22%20repeatCount%3D%22indefinite%22%2F%3E%0A%20%20%20%20%20%20%3Cpolygon%20points%3D%22-210%2C30%20220%2C30%20165%2C95%20-175%2C95%22%20fill%3D%22url(%23hullGrad)%22%20stroke%3D%22%23FFF%22%20stroke-width%3D%222%22%2F%3E%0A%20%20%20%20%20%20%3Cpolygon%20points%3D%22-130%2C30%20130%2C30%2095%2C-35%20-95%2C-35%22%20fill%3D%22%231E1B4B%22%20stroke%3D%22%23D4AF37%22%20stroke-width%3D%223%22%2F%3E%0A%20%20%20%20%20%20%3Cpolygon%20points%3D%22-70%2C-35%2075%2C-35%2045%2C-85%20-40%2C-85%22%20fill%3D%22%23311042%22%20stroke%3D%22%23FDE047%22%20stroke-width%3D%222%22%2F%3E%0A%20%20%20%20%20%20%3Cline%20x1%3D%220%22%20y1%3D%22-85%22%20x2%3D%220%22%20y2%3D%22-145%22%20stroke%3D%22%23FDE047%22%20stroke-width%3D%224%22%2F%3E%0A%20%20%20%20%20%20%3Cpolygon%20points%3D%220%2C-145%2055%2C-125%200%2C-105%22%20fill%3D%22%23A855F7%22%2F%3E%0A%20%20%20%20%3C%2Fg%3E%0A%20%20%20%20%3Cellipse%20cx%3D%220%22%20cy%3D%22105%22%20rx%3D%22230%22%20ry%3D%2228%22%20fill%3D%22url(%23waveGrad)%22%3E%0A%20%20%20%20%20%20%3Canimate%20attributeName%3D%22rx%22%20values%3D%22215%3B245%3B215%22%20dur%3D%223s%22%20repeatCount%3D%22indefinite%22%2F%3E%0A%20%20%20%20%3C%2Fellipse%3E%0A%20%20%3C%2Fg%3E%0A%3C%2Fsvg%3E",
+      "thumbnailUrl": "data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20600%20600%22%20width%3D%22600%22%20height%3D%22600%22%3E%0A%20%20%3Cdefs%3E%0A%20%20%20%20%3ClinearGradient%20id%3D%22hullGrad%22%20x1%3D%220%25%22%20y1%3D%220%25%22%20x2%3D%22100%25%22%20y2%3D%220%25%22%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%23D4AF37%22%2F%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%2250%25%22%20stop-color%3D%22%23FEF08A%22%2F%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%23A16207%22%2F%3E%0A%20%20%20%20%3C%2FlinearGradient%3E%0A%20%20%20%20%3ClinearGradient%20id%3D%22waveGrad%22%20x1%3D%220%25%22%20y1%3D%220%25%22%20x2%3D%220%25%22%20y2%3D%22100%25%22%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%2338BDF8%22%20stop-opacity%3D%220.7%22%2F%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%231E1B4B%22%20stop-opacity%3D%220.1%22%2F%3E%0A%20%20%20%20%3C%2FlinearGradient%3E%0A%20%20%3C%2Fdefs%3E%0A%20%20%3Cg%20transform%3D%22translate(300%2C310)%22%3E%0A%20%20%20%20%3Cg%3E%0A%20%20%20%20%20%20%3CanimateTransform%20attributeName%3D%22transform%22%20type%3D%22translate%22%20values%3D%220%2C-8%3B%200%2C8%3B%200%2C-8%22%20dur%3D%223s%22%20repeatCount%3D%22indefinite%22%2F%3E%0A%20%20%20%20%20%20%3Cpolygon%20points%3D%22-210%2C30%20220%2C30%20165%2C95%20-175%2C95%22%20fill%3D%22url(%23hullGrad)%22%20stroke%3D%22%23FFF%22%20stroke-width%3D%222%22%2F%3E%0A%20%20%20%20%20%20%3Cpolygon%20points%3D%22-130%2C30%20130%2C30%2095%2C-35%20-95%2C-35%22%20fill%3D%22%231E1B4B%22%20stroke%3D%22%23D4AF37%22%20stroke-width%3D%223%22%2F%3E%0A%20%20%20%20%20%20%3Cpolygon%20points%3D%22-70%2C-35%2075%2C-35%2045%2C-85%20-40%2C-85%22%20fill%3D%22%23311042%22%20stroke%3D%22%23FDE047%22%20stroke-width%3D%222%22%2F%3E%0A%20%20%20%20%20%20%3Cline%20x1%3D%220%22%20y1%3D%22-85%22%20x2%3D%220%22%20y2%3D%22-145%22%20stroke%3D%22%23FDE047%22%20stroke-width%3D%224%22%2F%3E%0A%20%20%20%20%20%20%3Cpolygon%20points%3D%220%2C-145%2055%2C-125%200%2C-105%22%20fill%3D%22%23A855F7%22%2F%3E%0A%20%20%20%20%3C%2Fg%3E%0A%20%20%20%20%3Cellipse%20cx%3D%220%22%20cy%3D%22105%22%20rx%3D%22230%22%20ry%3D%2228%22%20fill%3D%22url(%23waveGrad)%22%3E%0A%20%20%20%20%20%20%3Canimate%20attributeName%3D%22rx%22%20values%3D%22215%3B245%3B215%22%20dur%3D%223s%22%20repeatCount%3D%22indefinite%22%2F%3E%0A%20%20%20%20%3C%2Fellipse%3E%0A%20%20%3C%2Fg%3E%0A%3C%2Fsvg%3E",
+      "format": "VAP",
+      "sizeBytes": 6350000,
+      "quality": "4K",
+      "hasAudio": true,
+      "hasAlpha": true,
+      "isAnimated": true,
+      "displayOrder": 4,
+      "published": true,
+      "allowDownload": true,
+      "uploadedAt": "2026-10-16T21:00:00.000Z",
+      "updatedAt": "2026-10-16T21:00:00.000Z",
+      "storageKey": "gifts/originals/diamond_ocean_yacht.vap"
+    },
+    {
+      "id": "gift-nebula-stage-webm",
+      "name": "مؤثر عاصفة المجرة الكونية",
+      "category": "effects",
+      "description": "مؤثر ملء الشاشة (Full-Screen Room Effect) يضيء خلفية الغرفة الصوتية بالكامل عند إرسال الهدايا الكبرى.",
+      "originalUrl": "data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20600%20600%22%20width%3D%22600%22%20height%3D%22600%22%3E%0A%20%20%3Cdefs%3E%0A%20%20%20%20%3CradialGradient%20id%3D%22nebula%22%20cx%3D%2250%25%22%20cy%3D%2250%25%22%20r%3D%2250%25%22%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%23C084FC%22%20stop-opacity%3D%220.5%22%2F%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%2260%25%22%20stop-color%3D%22%234C1D95%22%20stop-opacity%3D%220.2%22%2F%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%2308060E%22%20stop-opacity%3D%220%22%2F%3E%0A%20%20%20%20%3C%2FradialGradient%3E%0A%20%20%3C%2Fdefs%3E%0A%20%20%3Ccircle%20cx%3D%22300%22%20cy%3D%22300%22%20r%3D%22260%22%20fill%3D%22url(%23nebula)%22%2F%3E%0A%20%20%3Cg%20transform%3D%22translate(300%2C300)%22%3E%0A%20%20%20%20%3Cg%3E%0A%20%20%20%20%20%20%3CanimateTransform%20attributeName%3D%22transform%22%20type%3D%22rotate%22%20from%3D%220%22%20to%3D%22360%22%20dur%3D%2215s%22%20repeatCount%3D%22indefinite%22%2F%3E%0A%20%20%20%20%20%20%3Cpolygon%20points%3D%220%2C-210%2018%2C-40%20190%2C-95%2045%2C10%20135%2C165%200%2C55%20-135%2C165%20-45%2C10%20-190%2C-95%20-18%2C-40%22%20fill%3D%22none%22%20stroke%3D%22%23D4AF37%22%20stroke-width%3D%223%22%20opacity%3D%220.7%22%2F%3E%0A%20%20%20%20%3C%2Fg%3E%0A%20%20%20%20%3Ccircle%20r%3D%2285%22%20fill%3D%22%237C3AED%22%20opacity%3D%220.35%22%3E%0A%20%20%20%20%20%20%3Canimate%20attributeName%3D%22r%22%20values%3D%2270%3B110%3B70%22%20dur%3D%222.2s%22%20repeatCount%3D%22indefinite%22%2F%3E%0A%20%20%20%20%3C%2Fcircle%3E%0A%20%20%20%20%3Cpolygon%20points%3D%220%2C-110%2028%2C-28%20110%2C0%2028%2C28%200%2C110%20-28%2C28%20-110%2C0%20-28%2C-28%22%20fill%3D%22%23FDE68A%22%3E%0A%20%20%20%20%20%20%3CanimateTransform%20attributeName%3D%22transform%22%20type%3D%22scale%22%20values%3D%220.85%3B1.15%3B0.85%22%20dur%3D%221.8s%22%20repeatCount%3D%22indefinite%22%2F%3E%0A%20%20%20%20%3C%2Fpolygon%3E%0A%20%20%3C%2Fg%3E%0A%3C%2Fsvg%3E",
+      "thumbnailUrl": "data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20600%20600%22%20width%3D%22600%22%20height%3D%22600%22%3E%0A%20%20%3Cdefs%3E%0A%20%20%20%20%3CradialGradient%20id%3D%22nebula%22%20cx%3D%2250%25%22%20cy%3D%2250%25%22%20r%3D%2250%25%22%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%23C084FC%22%20stop-opacity%3D%220.5%22%2F%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%2260%25%22%20stop-color%3D%22%234C1D95%22%20stop-opacity%3D%220.2%22%2F%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%2308060E%22%20stop-opacity%3D%220%22%2F%3E%0A%20%20%20%20%3C%2FradialGradient%3E%0A%20%20%3C%2Fdefs%3E%0A%20%20%3Ccircle%20cx%3D%22300%22%20cy%3D%22300%22%20r%3D%22260%22%20fill%3D%22url(%23nebula)%22%2F%3E%0A%20%20%3Cg%20transform%3D%22translate(300%2C300)%22%3E%0A%20%20%20%20%3Cg%3E%0A%20%20%20%20%20%20%3CanimateTransform%20attributeName%3D%22transform%22%20type%3D%22rotate%22%20from%3D%220%22%20to%3D%22360%22%20dur%3D%2215s%22%20repeatCount%3D%22indefinite%22%2F%3E%0A%20%20%20%20%20%20%3Cpolygon%20points%3D%220%2C-210%2018%2C-40%20190%2C-95%2045%2C10%20135%2C165%200%2C55%20-135%2C165%20-45%2C10%20-190%2C-95%20-18%2C-40%22%20fill%3D%22none%22%20stroke%3D%22%23D4AF37%22%20stroke-width%3D%223%22%20opacity%3D%220.7%22%2F%3E%0A%20%20%20%20%3C%2Fg%3E%0A%20%20%20%20%3Ccircle%20r%3D%2285%22%20fill%3D%22%237C3AED%22%20opacity%3D%220.35%22%3E%0A%20%20%20%20%20%20%3Canimate%20attributeName%3D%22r%22%20values%3D%2270%3B110%3B70%22%20dur%3D%222.2s%22%20repeatCount%3D%22indefinite%22%2F%3E%0A%20%20%20%20%3C%2Fcircle%3E%0A%20%20%20%20%3Cpolygon%20points%3D%220%2C-110%2028%2C-28%20110%2C0%2028%2C28%200%2C110%20-28%2C28%20-110%2C0%20-28%2C-28%22%20fill%3D%22%23FDE68A%22%3E%0A%20%20%20%20%20%20%3CanimateTransform%20attributeName%3D%22transform%22%20type%3D%22scale%22%20values%3D%220.85%3B1.15%3B0.85%22%20dur%3D%221.8s%22%20repeatCount%3D%22indefinite%22%2F%3E%0A%20%20%20%20%3C%2Fpolygon%3E%0A%20%20%3C%2Fg%3E%0A%3C%2Fsvg%3E",
+      "format": "WebM",
+      "sizeBytes": 3210000,
+      "quality": "FHD",
+      "hasAudio": true,
+      "hasAlpha": true,
+      "isAnimated": true,
+      "displayOrder": 5,
+      "published": true,
+      "allowDownload": true,
+      "uploadedAt": "2026-10-16T22:10:00.000Z",
+      "updatedAt": "2026-10-16T22:10:00.000Z",
+      "storageKey": "gifts/originals/cosmic_nebula_storm.webm"
+    },
+    {
+      "id": "gift-golden-mic-drop-mp4",
+      "name": "مايك الألماس الذهبي",
+      "category": "gifts",
+      "description": "هدية غرفة صوتية تفاعلية مع موجات صوتية ذهبية متوهجة وتأثير احتفالي للمغنين والمذيعين.",
+      "originalUrl": "data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20600%20600%22%20width%3D%22600%22%20height%3D%22600%22%3E%0A%20%20%3Cdefs%3E%0A%20%20%20%20%3ClinearGradient%20id%3D%22micGold%22%20x1%3D%220%25%22%20y1%3D%220%25%22%20x2%3D%22100%25%22%20y2%3D%22100%25%22%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%23FEF08A%22%2F%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%2250%25%22%20stop-color%3D%22%23D4AF37%22%2F%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%2378350F%22%2F%3E%0A%20%20%20%20%3C%2FlinearGradient%3E%0A%20%20%3C%2Fdefs%3E%0A%20%20%3Cg%20transform%3D%22translate(300%2C300)%22%3E%0A%20%20%20%20%3Ccircle%20r%3D%22170%22%20fill%3D%22none%22%20stroke%3D%22%23A855F7%22%20stroke-width%3D%224%22%20opacity%3D%220.4%22%3E%0A%20%20%20%20%20%20%3Canimate%20attributeName%3D%22r%22%20values%3D%22140%3B210%22%20dur%3D%222s%22%20repeatCount%3D%22indefinite%22%2F%3E%0A%20%20%20%20%20%20%3Canimate%20attributeName%3D%22opacity%22%20values%3D%220.7%3B0%22%20dur%3D%222s%22%20repeatCount%3D%22indefinite%22%2F%3E%0A%20%20%20%20%3C%2Fcircle%3E%0A%20%20%20%20%3Crect%20x%3D%22-50%22%20y%3D%22-140%22%20width%3D%22100%22%20height%3D%22150%22%20rx%3D%2250%22%20fill%3D%22url(%23micGold)%22%20stroke%3D%22%23FFF%22%20stroke-width%3D%223%22%2F%3E%0A%20%20%20%20%3Cline%20x1%3D%22-50%22%20y1%3D%22-90%22%20x2%3D%2250%22%20y2%3D%22-90%22%20stroke%3D%22%2378350F%22%20stroke-width%3D%224%22%2F%3E%0A%20%20%20%20%3Cline%20x1%3D%22-50%22%20y1%3D%22-60%22%20x2%3D%2250%22%20y2%3D%22-60%22%20stroke%3D%22%2378350F%22%20stroke-width%3D%224%22%2F%3E%0A%20%20%20%20%3Cline%20x1%3D%22-50%22%20y1%3D%22-30%22%20x2%3D%2250%22%20y2%3D%22-30%22%20stroke%3D%22%2378350F%22%20stroke-width%3D%224%22%2F%3E%0A%20%20%20%20%3Cpath%20d%3D%22M-80%2C-40%20A80%2C80%200%200%2C0%2080%2C-40%22%20fill%3D%22none%22%20stroke%3D%22url(%23micGold)%22%20stroke-width%3D%2212%22%20stroke-linecap%3D%22round%22%2F%3E%0A%20%20%20%20%3Cline%20x1%3D%220%22%20y1%3D%2240%22%20x2%3D%220%22%20y2%3D%22130%22%20stroke%3D%22url(%23micGold)%22%20stroke-width%3D%2214%22%2F%3E%0A%20%20%20%20%3Crect%20x%3D%22-65%22%20y%3D%22130%22%20width%3D%22130%22%20height%3D%2222%22%20rx%3D%2211%22%20fill%3D%22url(%23micGold)%22%2F%3E%0A%20%20%3C%2Fg%3E%0A%3C%2Fsvg%3E",
+      "thumbnailUrl": "data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20600%20600%22%20width%3D%22600%22%20height%3D%22600%22%3E%0A%20%20%3Cdefs%3E%0A%20%20%20%20%3ClinearGradient%20id%3D%22micGold%22%20x1%3D%220%25%22%20y1%3D%220%25%22%20x2%3D%22100%25%22%20y2%3D%22100%25%22%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%23FEF08A%22%2F%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%2250%25%22%20stop-color%3D%22%23D4AF37%22%2F%3E%0A%20%20%20%20%20%20%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%2378350F%22%2F%3E%0A%20%20%20%20%3C%2FlinearGradient%3E%0A%20%20%3C%2Fdefs%3E%0A%20%20%3Cg%20transform%3D%22translate(300%2C300)%22%3E%0A%20%20%20%20%3Ccircle%20r%3D%22170%22%20fill%3D%22none%22%20stroke%3D%22%23A855F7%22%20stroke-width%3D%224%22%20opacity%3D%220.4%22%3E%0A%20%20%20%20%20%20%3Canimate%20attributeName%3D%22r%22%20values%3D%22140%3B210%22%20dur%3D%222s%22%20repeatCount%3D%22indefinite%22%2F%3E%0A%20%20%20%20%20%20%3Canimate%20attributeName%3D%22opacity%22%20values%3D%220.7%3B0%22%20dur%3D%222s%22%20repeatCount%3D%22indefinite%22%2F%3E%0A%20%20%20%20%3C%2Fcircle%3E%0A%20%20%20%20%3Crect%20x%3D%22-50%22%20y%3D%22-140%22%20width%3D%22100%22%20height%3D%22150%22%20rx%3D%2250%22%20fill%3D%22url(%23micGold)%22%20stroke%3D%22%23FFF%22%20stroke-width%3D%223%22%2F%3E%0A%20%20%20%20%3Cline%20x1%3D%22-50%22%20y1%3D%22-90%22%20x2%3D%2250%22%20y2%3D%22-90%22%20stroke%3D%22%2378350F%22%20stroke-width%3D%224%22%2F%3E%0A%20%20%20%20%3Cline%20x1%3D%22-50%22%20y1%3D%22-60%22%20x2%3D%2250%22%20y2%3D%22-60%22%20stroke%3D%22%2378350F%22%20stroke-width%3D%224%22%2F%3E%0A%20%20%20%20%3Cline%20x1%3D%22-50%22%20y1%3D%22-30%22%20x2%3D%2250%22%20y2%3D%22-30%22%20stroke%3D%22%2378350F%22%20stroke-width%3D%224%22%2F%3E%0A%20%20%20%20%3Cpath%20d%3D%22M-80%2C-40%20A80%2C80%200%200%2C0%2080%2C-40%22%20fill%3D%22none%22%20stroke%3D%22url(%23micGold)%22%20stroke-width%3D%2212%22%20stroke-linecap%3D%22round%22%2F%3E%0A%20%20%20%20%3Cline%20x1%3D%220%22%20y1%3D%2240%22%20x2%3D%220%22%20y2%3D%22130%22%20stroke%3D%22url(%23micGold)%22%20stroke-width%3D%2214%22%2F%3E%0A%20%20%20%20%3Crect%20x%3D%22-65%22%20y%3D%22130%22%20width%3D%22130%22%20height%3D%2222%22%20rx%3D%2211%22%20fill%3D%22url(%23micGold)%22%2F%3E%0A%20%20%3C%2Fg%3E%0A%3C%2Fsvg%3E",
+      "format": "MP4",
+      "sizeBytes": 2780000,
+      "quality": "FHD",
+      "hasAudio": true,
+      "hasAlpha": false,
+      "isAnimated": true,
+      "displayOrder": 6,
+      "published": true,
+      "allowDownload": true,
+      "uploadedAt": "2026-10-17T01:00:00.000Z",
+      "updatedAt": "2026-10-17T01:00:00.000Z",
+      "storageKey": "gifts/originals/diamond_gold_mic.mp4"
+    }
+  ],
+  "unindexedFiles": [],
+  "auditLogs": [
+    {
+      "id": "112d5262-5e33-4db4-bd14-83127bab6f5e",
+      "timestamp": "2026-10-17T11:05:15.314Z",
+      "action": "login",
+      "fileName": "Admin Session",
+      "status": "success",
+      "message": "تم تسجيل دخول المدير إلى لوحة التحكم بنجاح."
+    },
+    {
+      "id": "944686ae-cb2e-404c-9e4b-50adcd91fc45",
+      "timestamp": "2026-10-17T10:56:51.287Z",
+      "action": "login",
+      "fileName": "Admin Session",
+      "status": "success",
+      "message": "تم تسجيل دخول المدير إلى لوحة التحكم بنجاح."
+    },
+    {
+      "id": "8fd9381e-e53d-47eb-8dce-0155accd749b",
+      "timestamp": "2026-10-17T10:55:59.439Z",
+      "action": "login",
+      "fileName": "Admin Session",
+      "status": "success",
+      "message": "تم تسجيل دخول المدير إلى لوحة التحكم بنجاح."
+    },
+    {
+      "id": "3dd6de4a-e115-440e-bd92-c4766c95189e",
+      "timestamp": "2026-10-17T10:55:52.111Z",
+      "action": "login",
+      "fileName": "Admin Session",
+      "status": "success",
+      "message": "تم تسجيل دخول المدير إلى لوحة التحكم بنجاح."
+    },
+    {
+      "id": "b96436d3-301e-41bd-8b03-a3d0f8bb835a",
+      "timestamp": "2026-10-17T10:55:51.953Z",
+      "action": "login",
+      "fileName": "Admin Session",
+      "status": "success",
+      "message": "تم تسجيل دخول المدير إلى لوحة التحكم بنجاح."
+    },
+    {
+      "id": "34bd06ed-4e38-4133-90f0-074ec1c6194a",
+      "timestamp": "2026-10-17T10:55:51.852Z",
+      "action": "login",
+      "fileName": "Admin Session",
+      "status": "success",
+      "message": "تم تسجيل دخول المدير إلى لوحة التحكم بنجاح."
+    },
+    {
+      "id": "2f07397f-0aef-48fe-a639-3f6ab22c49d1",
+      "timestamp": "2026-10-17T10:55:51.729Z",
+      "action": "login",
+      "fileName": "Admin Session",
+      "status": "success",
+      "message": "تم تسجيل دخول المدير إلى لوحة التحكم بنجاح."
+    },
+    {
+      "id": "20c8d9e9-da3d-4b26-97da-902313d2842c",
+      "timestamp": "2026-10-17T10:53:30.462Z",
+      "action": "login",
+      "fileName": "Admin Session",
+      "status": "success",
+      "message": "تم تسجيل دخول المدير إلى لوحة التحكم بنجاح."
+    },
+    {
+      "id": "2f7653e5-0741-4740-87e3-7f33990c6856",
+      "timestamp": "2026-10-17T10:52:04.552Z",
+      "action": "login",
+      "fileName": "Admin Session",
+      "status": "success",
+      "message": "تم تسجيل دخول المدير إلى لوحة التحكم بنجاح."
+    },
+    {
+      "id": "9bd2ab52-ef9e-48a4-b7dc-376d80210c83",
+      "timestamp": "2026-10-17T10:51:55.515Z",
+      "action": "login",
+      "fileName": "Admin Session",
+      "status": "error",
+      "message": "محاولة تسجيل دخول فاشلة بكلمة مرور غير صحيحة."
+    },
+    {
+      "id": "d4d99d70-b830-4ee9-999a-bfeda4eb4095",
+      "timestamp": "2026-10-17T10:51:47.880Z",
+      "action": "login",
+      "fileName": "Admin Session",
+      "status": "success",
+      "message": "تم تسجيل دخول المدير إلى لوحة التحكم بنجاح."
+    },
+    {
+      "id": "3f6aad71-09b7-485d-9629-5f02370da01d",
+      "timestamp": "2026-10-17T10:51:37.986Z",
+      "action": "login",
+      "fileName": "Admin Session",
+      "status": "success",
+      "message": "تم تسجيل دخول المدير إلى لوحة التحكم بنجاح."
+    },
+    {
+      "id": "44295747-f4a7-4bc9-9ad9-84a3e2d892a4",
+      "timestamp": "2026-10-17T10:51:30.796Z",
+      "action": "login",
+      "fileName": "Admin Session",
+      "status": "error",
+      "message": "محاولة تسجيل دخول فاشلة بكلمة مرور غير صحيحة."
+    },
+    {
+      "id": "3826b704-5ba6-45f8-aff7-4d7e3d13d38c",
+      "timestamp": "2026-10-17T10:51:18.607Z",
+      "action": "login",
+      "fileName": "Admin Session",
+      "status": "error",
+      "message": "محاولة تسجيل دخول فاشلة بكلمة مرور غير صحيحة."
+    },
+    {
+      "id": "e9fbc286-3433-4aae-90ec-48d2d537d38b",
+      "timestamp": "2026-10-17T10:50:04.470Z",
+      "action": "seed",
+      "fileName": "catalog/gifts.json",
+      "status": "success",
+      "message": "تم تهيئة الفهرس المركزي (gifts.json) بالهدايا الافتراضية الجاهزة للمعاينة."
+    }
+  ]
+}

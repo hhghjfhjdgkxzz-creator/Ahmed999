@@ -1,890 +1,714 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { GiftItem, Language, CartItem, DeliveryItem, EmployeeUser, AuthUser, HeroBannerItem, SiteSettings } from './types';
-import { INITIAL_EMPLOYEES } from './data/initialEmployees';
-import { INITIAL_BANNERS } from './data/initialBanners';
-import { REAL_GIFTS_CATALOG } from './data/realGiftsCatalog';
-import { Header } from './components/Header';
-import { HeroBanners } from './components/HeroBanners';
-import { CategoryBar } from './components/CategoryBar';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import {
+  Search,
+  Play,
+  Shield,
+  SlidersHorizontal,
+  Download,
+  RefreshCw,
+} from 'lucide-react';
+import {
+  type GiftItem,
+  type GiftCategory,
+  type GiftFormat,
+  type AdminAuditLog,
+  type UnindexedFileRecord,
+  type StorageStatusInfo,
+  CATEGORY_LABELS,
+  FORMAT_CAPABILITIES,
+  filterAndSortGifts,
+  formatBytes,
+  computeCatalogStats,
+} from './utils/catalogLogic';
 import { GiftCard } from './components/GiftCard';
-import { Pagination } from './components/Pagination';
-import { GiftModal } from './components/GiftModal';
-import { PurchaseModal } from './components/PurchaseModal';
-import { DeliveryBoxModal } from './components/DeliveryBoxModal';
-import { Dashboard } from './components/Dashboard';
-import { CartDrawer } from './components/CartDrawer';
-import { AuthModal } from './components/AuthModal';
-import { SupportModal } from './components/SupportModal';
-import { VipModal } from './components/VipModal';
-import { SiteSettingsModal } from './components/SiteSettingsModal';
-import { QuickCoverSnapshotModal } from './components/QuickCoverSnapshotModal';
-import { Footer } from './components/Footer';
-import { Check } from 'lucide-react';
-import { seedDatabase, subscribeToGifts, subscribeToDeliveries, subscribeToEmployees, subscribeToBanners, addDelivery, purgeDummyGifts, isDummyGift } from './lib/firebaseService';
-import { ClanView } from './components/clan/ClanView';
-import { 
-  ClanSettings, 
-  ClanMember, 
-  ClanJoinRequest, 
-  ClanMessage, 
-  ClanSticker, 
-  ClanAuditLog 
-} from './types';
-import { 
-  DEFAULT_CLAN_SETTINGS, 
-  INITIAL_CLAN_MEMBERS, 
-  INITIAL_CLAN_STICKERS,
-  subscribeToClanSettings,
-  subscribeToClanMembers,
-  subscribeToClanRequests,
-  subscribeToClanMessages,
-  subscribeToClanStickers,
-  subscribeToClanAuditLogs
-} from './lib/clanService';
+import { GiftPlayerModal } from './components/GiftPlayerModal';
+import { FormatCenterSection } from './components/FormatCenterSection';
+import { AdminDashboard } from './components/AdminDashboard';
 
 export default function App() {
-  // Language (Default to Arabic with instant RTL toggle)
-  const [lang, setLang] = useState<Language>('ar');
+  // Route state supporting both pathname (/admin) and clean client transitions
+  const [currentRoute, setCurrentRoute] = useState<'gallery' | 'admin'>(() => {
+    if (
+      window.location.pathname.startsWith('/admin') ||
+      window.location.hash === '#/admin'
+    ) {
+      return 'admin';
+    }
+    return 'gallery';
+  });
 
-  // Sync HTML document direction and language dynamically
+  // Central Catalog State
+  const [gifts, setGifts] = useState<GiftItem[]>([]);
+  const [catalogVersion, setCatalogVersion] = useState<number>(0);
+  const [unindexedFiles, setUnindexedFiles] = useState<UnindexedFileRecord[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AdminAuditLog[]>([]);
+  const [storageStatus, setStorageStatus] = useState<StorageStatusInfo | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+
+  // Admin Auth State
+  const [isAdminAuthenticated, setIsAdminAuthenticated] = useState<boolean>(false);
+  const [isDefaultPassword, setIsDefaultPassword] = useState<boolean>(false);
+
+  // Gallery Filtering, Sorting, and Pagination State
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [selectedCategory, setSelectedCategory] = useState<GiftCategory>('all');
+  const [selectedFormat, setSelectedFormat] = useState<GiftFormat | 'ALL'>('ALL');
+  const [sortBy, setSortBy] = useState<'order' | 'newest' | 'name' | 'size_desc' | 'category'>(
+    'order'
+  );
+  const [visibleLimit, setVisibleLimit] = useState<number>(12);
+
+  // Active Preview Modal Gift
+  const [activePreviewGift, setActivePreviewGift] = useState<GiftItem | null>(null);
+
+  const navigateTo = useCallback((route: 'gallery' | 'admin') => {
+    setCurrentRoute(route);
+    const nextUrl = route === 'admin' ? '/admin' : '/';
+    window.history.pushState({}, '', nextUrl);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, []);
+
   useEffect(() => {
-    document.documentElement.lang = lang === 'ar' ? 'ar' : lang === 'zh' ? 'zh-CN' : 'en';
-    document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
-  }, [lang]);
+    const handlePopState = () => {
+      if (
+        window.location.pathname.startsWith('/admin') ||
+        window.location.hash === '#/admin'
+      ) {
+        setCurrentRoute('admin');
+      } else {
+        setCurrentRoute('gallery');
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
 
-  // Main View: Storefront vs Admin Dashboard vs Clan
-  const [currentView, setCurrentView] = useState<'store' | 'dashboard' | 'clan'>('store');
+  function getAuthHeaders(): Record<string, string> {
+    const token = localStorage.getItem('gift_gallery_admin_token');
+    if (token) {
+      return { Authorization: `Bearer ${token}` };
+    }
+    return {};
+  }
 
-  // Clan System State
-  const [clanSettings, setClanSettings] = useState<ClanSettings>(DEFAULT_CLAN_SETTINGS);
-  const [clanMembers, setClanMembers] = useState<ClanMember[]>(INITIAL_CLAN_MEMBERS);
-  const [clanRequests, setClanRequests] = useState<ClanJoinRequest[]>([]);
-  const [clanMessages, setClanMessages] = useState<ClanMessage[]>([]);
-  const [clanStickers, setClanStickers] = useState<ClanSticker[]>(INITIAL_CLAN_STICKERS);
-  const [clanAuditLogs, setClanAuditLogs] = useState<ClanAuditLog[]>([]);
+  const fetchCatalogAndStatus = useCallback(async (showSpinner = false) => {
+    if (showSpinner) setIsLoading(true);
+    setFetchError(null);
+    try {
+      const [catRes, statusRes, sessionRes] = await Promise.all([
+        fetch('/api/catalog', { cache: 'no-store', headers: getAuthHeaders() }),
+        fetch('/api/storage/status', { cache: 'no-store' }),
+        fetch('/api/admin/session', { cache: 'no-store', headers: getAuthHeaders() }),
+      ]);
 
+      if (!catRes.ok) {
+        throw new Error('تعذر قراءة فهرس الهدايا المركزي (gifts.json).');
+      }
+
+      const catData = await catRes.json();
+      if (!catData.notModified && Array.isArray(catData.items)) {
+        setGifts(catData.items);
+        setCatalogVersion(catData.version || 1);
+        if (Array.isArray(catData.unindexedFiles)) {
+          setUnindexedFiles(catData.unindexedFiles);
+        }
+        if (Array.isArray(catData.auditLogs)) {
+          setAuditLogs(catData.auditLogs);
+        }
+      }
+
+      if (statusRes.ok) {
+        const statusData = (await statusRes.json()) as StorageStatusInfo;
+        setStorageStatus(statusData);
+      }
+
+      if (sessionRes.ok) {
+        const sessionData = await sessionRes.json();
+        setIsAdminAuthenticated(Boolean(sessionData.authenticated));
+        setIsDefaultPassword(Boolean(sessionData.isDefaultPassword));
+      }
+    } catch (err) {
+      setFetchError((err as Error).message);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  // Initial fetch + SSE real-time synchronization + periodic freshness verification
   useEffect(() => {
-    const unsubSettings = subscribeToClanSettings(setClanSettings);
-    const unsubMembers = subscribeToClanMembers(setClanMembers);
-    const unsubRequests = subscribeToClanRequests(setClanRequests);
-    const unsubMessages = subscribeToClanMessages(setClanMessages);
-    const unsubStickers = subscribeToClanStickers(setClanStickers);
-    const unsubLogs = subscribeToClanAuditLogs(setClanAuditLogs);
+    void fetchCatalogAndStatus(true);
+
+    const eventSource = new EventSource('/api/events');
+    eventSource.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data);
+        if (payload.type === 'catalog:updated') {
+          void fetchCatalogAndStatus(false);
+        }
+      } catch {
+        // ignore invalid event payload
+      }
+    };
+
+    // Fallback freshness poll every 20 seconds
+    const interval = setInterval(() => {
+      void fetchCatalogAndStatus(false);
+    }, 20000);
 
     return () => {
-      unsubSettings();
-      unsubMembers();
-      unsubRequests();
-      unsubMessages();
-      unsubStickers();
-      unsubLogs();
+      eventSource.close();
+      clearInterval(interval);
     };
-  }, []);
+  }, [fetchCatalogAndStatus]);
 
-  // Gifts State with Firebase persistence - loads real gifts immediately on frame 1 with ZERO delay!
-  const [gifts, setGifts] = useState<GiftItem[]>(() => {
-    try {
-      const cached = localStorage.getItem('jiawei_custom_gifts_v1');
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed)) {
-          const clean = parsed.filter(g => !isDummyGift(g));
-          if (clean.length > 0) return clean;
-        }
-      }
-    } catch(e) {}
-    return REAL_GIFTS_CATALOG.filter(g => !isDummyGift(g));
-  });
-
-  useEffect(() => {
-    // Purge any dummy test gifts immediately on app mount
-    purgeDummyGifts().catch(() => {});
-
-    // Save clean real catalog to localStorage for persistent offline/instant loads
-    try {
-      const current = localStorage.getItem('jiawei_custom_gifts_v1');
-      if (!current || JSON.parse(current).length === 0) {
-        localStorage.setItem('jiawei_custom_gifts_v1', JSON.stringify(REAL_GIFTS_CATALOG));
-      }
-    } catch(e) {}
-
-    // Real-time synchronization in background without blinking or skeleton
-    const unsubscribe = subscribeToGifts((newGifts) => {
-      if (newGifts && newGifts.length > 0) {
-        setGifts(newGifts.filter(g => !isDummyGift(g)));
-      }
-    });
-    return () => unsubscribe();
-  }, []);
-
-  // Purchased Deliveries History
-  const [deliveries, setDeliveries] = useState<DeliveryItem[]>([]);
-
-  useEffect(() => {
-    const unsubscribe = subscribeToDeliveries((newDeliveries) => {
-      setDeliveries(newDeliveries);
-    });
-    return () => unsubscribe();
-  }, []);
-
-  // Employees / Creators State with Firebase persistence
-  const [employees, setEmployees] = useState<EmployeeUser[]>(INITIAL_EMPLOYEES);
-
-  useEffect(() => {
-    let currentEmployees: EmployeeUser[] = [];
-    let currentUsers: EmployeeUser[] = [];
-
-    const updateCombined = () => {
-      const combined = [...currentEmployees, ...currentUsers];
-      const unique = Array.from(new Map(combined.map(item => [item.id, item])).values());
-      if (unique.length > 0) {
-        setEmployees(unique);
-      } else {
-        setEmployees(INITIAL_EMPLOYEES);
-      }
-    };
-
-    import('./lib/firebaseService').then(({ subscribeToEmployees, subscribeToUsers }) => {
-      const unsubEmployees = subscribeToEmployees((newEmployees) => {
-        currentEmployees = newEmployees;
-        updateCombined();
-      });
-      const unsubUsers = subscribeToUsers((newUsers) => {
-        currentUsers = newUsers;
-        updateCombined();
-      });
-      return () => {
-        unsubEmployees();
-        unsubUsers();
-      };
-    });
-  }, []);
-
-  // Hero Banners State
-  const [banners, setBanners] = useState<HeroBannerItem[]>(INITIAL_BANNERS);
-
-  useEffect(() => {
-    const unsubscribe = subscribeToBanners((newBanners) => {
-      if (newBanners && newBanners.length > 0) {
-        setBanners(newBanners);
-      }
-    });
-    return () => unsubscribe();
-  }, []);
-
-  const [activeEmployeeId, setActiveEmployeeId] = useState<string>(() => {
-    const savedEmp = localStorage.getItem('jiawei_active_emp_id');
-    const savedUserStr = localStorage.getItem('jiawei_current_user_v1');
-    if (savedUserStr) {
-      try {
-        const u = JSON.parse(savedUserStr);
-        if (u && ['admin', 'designer', 'employee'].includes(u.role)) {
-          if (!savedEmp || savedEmp === 'EMP-001') {
-            return u.employeeId || u.id;
-          }
-        }
-      } catch(e) {}
-    }
-    return savedEmp || 'EMP-001';
-  });
-
-  useEffect(() => {
-    localStorage.setItem('jiawei_active_emp_id', activeEmployeeId);
-  }, [activeEmployeeId]);
-
-  // Seed database once on mount if empty
-  useEffect(() => {
-    seedDatabase();
-  }, []);
-
-  // Cart State
-  const [cartItems, setCartItems] = useState<CartItem[]>([]);
-
-  // User Authentication State
-  const [user, setUser] = useState<AuthUser | null>(() => {
-    const saved = localStorage.getItem('jiawei_current_user_v1');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {
-        return null;
-      }
-    }
-    return null;
-  });
-
-  // Permission check for managing gifts (admin, staff, designer strictly - NEVER for ordinary buyers or guests)
-  const canManageGifts = Boolean(
-    user && 
-    user.role !== 'buyer' && 
-    (
-      user.role === 'admin' || 
-      user.role === 'employee' || 
-      user.role === 'designer' || 
-      user.permissions?.giftUploadAndPublish === true
-    )
-  );
-  const [pinToastMessage, setPinToastMessage] = useState<string | null>(null);
-
-  const handleTogglePinGift = async (gift: GiftItem) => {
-    const isNowPinned = !gift.pinnedTop;
-    const updatedGift: GiftItem = {
-      ...gift,
-      pinnedTop: isNowPinned,
-      pinnedAt: isNowPinned ? new Date().toISOString() : undefined,
-    };
-
-    setGifts((prev) => prev.map((g) => (g.id === gift.id ? updatedGift : g)));
-
-    setPinToastMessage(
-      isNowPinned
-        ? (lang === 'ar' ? `✓ تم تمييز الهدية (${gift.titleAr || gift.title}) بشعار (جديد) وتثبيتها في الصفحة الأولى بنجاح!` : `✓ 已成功为礼物 (${gift.title}) 启用 (新品/NEW) 置顶徽章！`)
-        : (lang === 'ar' ? `تم إلغاء شعار جديد من الهدية (${gift.titleAr || gift.title}).` : `已取消礼物 (${gift.title}) 的新品置顶。`)
-    );
-    setTimeout(() => setPinToastMessage(null), 3500);
-
-    try {
-      const { updateGift } = await import('./lib/firebaseService');
-      await updateGift(updatedGift);
-    } catch (err) {
-      console.error('Failed to update gift pin status in Firestore:', err);
-    }
+  const handleLogout = async () => {
+    localStorage.removeItem('gift_gallery_admin_token');
+    await fetch('/api/admin/logout', { method: 'POST', headers: getAuthHeaders() });
+    setIsAdminAuthenticated(false);
+    await fetchCatalogAndStatus(false);
   };
 
-  // Dynamic Categories & Site Settings State
-  const [categories, setCategories] = useState<{ id: string; name: string; nameAr?: string; nameEn?: string }[]>([]);
-  const [siteSettings, setSiteSettings] = useState<SiteSettings>(() => {
-    const cached = localStorage.getItem('jiawei_site_settings');
-    if (cached) {
-      try {
-        return JSON.parse(cached);
-      } catch (e) {}
-    }
-    return {
-      siteName: 'Destroy KING Designer',
-      primaryPhone: '+923400700013',
-      whatsapp: '+923400700013',
-      primaryPhoneLabel: 'WhatsApp',
-      secondaryPhone: '',
-      secondaryPhoneLabel: 'WhatsApp 2'
-    };
-  });
-  const [isSiteSettingsOpen, setIsSiteSettingsOpen] = useState(false);
-
-  useEffect(() => {
-    import('./lib/firebaseService').then(({ subscribeToCategories, subscribeToSiteSettings }) => {
-      const unsubCategories = subscribeToCategories((newCategories) => {
-        setCategories(newCategories);
-      });
-      const unsubSettings = subscribeToSiteSettings((settings) => {
-        if (settings) setSiteSettings(settings);
-      });
-      return () => {
-        unsubCategories();
-        unsubSettings();
-      };
-    });
-  }, []);
-
-  useEffect(() => {
-    if (user) {
-      localStorage.setItem('jiawei_current_user_v1', JSON.stringify(user));
-    } else {
-      localStorage.removeItem('jiawei_current_user_v1');
-    }
-  }, [user]);
-
-  // Search & Filters
-  const [searchQuery, setSearchQuery] = useState('');
-  const [category, setCategory] = useState('all');
-
-  // Modals & Purchase Gate
-  const [selectedGift, setSelectedGift] = useState<GiftItem | null>(null);
-  const [inspectedGift, setInspectedGift] = useState<GiftItem | null>(null);
-  const [purchaseGift, setPurchaseGift] = useState<GiftItem | null>(null);
-  const [pendingPurchaseGift, setPendingPurchaseGift] = useState<GiftItem | null>(null);
-  const [activeDelivery, setActiveDelivery] = useState<DeliveryItem | null>(null);
-  const [isCartOpen, setIsCartOpen] = useState(false);
-  const [isAuthOpen, setIsAuthOpen] = useState(false);
-  const [authInitialRole, setAuthInitialRole] = useState<'buyer' | 'staff'>('buyer');
-  const [isDeliveriesOpen, setIsDeliveriesOpen] = useState(false);
-  const [isSupportOpen, setIsSupportOpen] = useState(false);
-  const [isVipOpen, setIsVipOpen] = useState(false);
-  const [quickCoverGift, setQuickCoverGift] = useState<GiftItem | null>(null);
-
-  const handleCoverSaved = (updatedGift: GiftItem) => {
-    setGifts((prev) => prev.map((g) => (g.id === updatedGift.id ? updatedGift : g)));
-    if (selectedGift && selectedGift.id === updatedGift.id) {
-      setSelectedGift(updatedGift);
-    }
-    if (inspectedGift && inspectedGift.id === updatedGift.id) {
-      setInspectedGift(updatedGift);
-    }
-  };
-
-  // Pagination State: Configurable from Dashboard siteSettings (default 26)!
-  const ITEMS_PER_PAGE = Math.max(1, siteSettings?.giftsPerPage || 26);
-  const [currentPage, setCurrentPage] = useState(1);
-
-  // Deduplicate and stable-sort gifts (newest first, avoids duplicates across pages)
-  const uniqueGifts = useMemo(() => {
-    const map = new Map<string, GiftItem>();
-    (Array.isArray(gifts) ? gifts : []).forEach((g) => {
-      if (g && g.id && !map.has(g.id)) {
-        map.set(g.id, g);
-      }
-    });
-    const list = Array.from(map.values());
-    list.sort((a, b) => {
-      // 1. PINNED GIFTS ALWAYS COME FIRST (Page 1 and top rows)
-      const aPinned = Boolean(a.pinnedTop);
-      const bPinned = Boolean(b.pinnedTop);
-      if (aPinned !== bPinned) {
-        return aPinned ? -1 : 1;
-      }
-      if (aPinned && bPinned) {
-        const pinTimeA = a.pinnedAt ? new Date(a.pinnedAt).getTime() : 0;
-        const pinTimeB = b.pinnedAt ? new Date(b.pinnedAt).getTime() : 0;
-        if (pinTimeA && pinTimeB && pinTimeA !== pinTimeB) return pinTimeB - pinTimeA;
-      }
-
-      // 2. Standard chronological order (newest first)
-      const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-      const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-      if (timeA && timeB && timeA !== timeB) return timeB - timeA;
-      return (b.id || '').localeCompare(a.id || '');
-    });
-    return list;
-  }, [gifts]);
-
-  // Filter Logic
+  // Filtered and Sorted Gifts for the Public Gallery
   const filteredGifts = useMemo(() => {
-    return (uniqueGifts || []).filter((gift) => {
-      if (!gift) return false;
-
-      // Search
-      if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase();
-        const matchTitle = (gift.title || '').toLowerCase().includes(q);
-        const matchAr = (gift.titleAr || '').toLowerCase().includes(q);
-        const matchEn = (gift.titleEn || '').toLowerCase().includes(q);
-        const matchId = (gift.id || '').toLowerCase().includes(q);
-        const matchTheme = (gift.theme || '').toLowerCase().includes(q);
-        const matchFormat = gift.formats?.some(f => (f.name || '').toLowerCase().includes(q));
-        if (!matchTitle && !matchAr && !matchEn && !matchId && !matchTheme && !matchFormat) return false;
-      }
-
-      // Category matching
-      if (category !== 'all') {
-        const giftCat = (gift.category || '').toLowerCase();
-        const selectedCat = category.toLowerCase();
-        
-        if (selectedCat === 'new') {
-          if (!gift.pinnedTop) return false;
-        } else if (selectedCat === 'frames') {
-          if (giftCat !== 'frames' && !giftCat.includes('frame') && !gift.title?.includes('إطار') && !gift.titleAr?.includes('إطار')) return false;
-        } else if (selectedCat === 'luxury_frame') {
-          if (giftCat !== 'luxury_frame' && !(giftCat.includes('luxury') && giftCat.includes('frame')) && !gift.titleAr?.includes('إطار فاخر')) return false;
-        } else if (selectedCat === 'medals') {
-          if (giftCat !== 'medals' && !giftCat.includes('medal') && !giftCat.includes('badge') && !gift.titleAr?.includes('وسام') && !gift.titleAr?.includes('شارة')) return false;
-        } else if (selectedCat === 'chat_bubbles') {
-          if (giftCat !== 'chat_bubbles' && !giftCat.includes('bubble') && !giftCat.includes('chat') && !gift.titleAr?.includes('فقاع')) return false;
-        } else if (selectedCat === 'luxury') {
-          if (giftCat !== 'luxury' && !giftCat.includes('luxury') && !gift.titleAr?.includes('فاخر')) return false;
-        } else if (selectedCat === 'levels') {
-          if (giftCat !== 'levels' && !giftCat.includes('level') && !gift.titleAr?.includes('مستوى')) return false;
-        } else if (selectedCat === 'banners') {
-          if (giftCat !== 'banners' && !giftCat.includes('banner') && !gift.titleAr?.includes('بانر')) return false;
-        } else if (selectedCat === 'management') {
-          if (giftCat !== 'management' && !giftCat.includes('manage') && !gift.titleAr?.includes('إدارة')) return false;
-        } else if (selectedCat === 'romance') {
-          if (giftCat !== 'romance' && !giftCat.includes('roman') && !gift.titleAr?.includes('رومانسي') && !gift.titleAr?.includes('عشاق')) return false;
-        } else if (selectedCat === 'tech') {
-          if (giftCat !== 'tech' && !giftCat.includes('tech') && !giftCat.includes('sci') && !gift.titleAr?.includes('ميكا')) return false;
-        } else {
-          if (giftCat !== selectedCat) return false;
-        }
-      }
-
-      return true;
+    return filterAndSortGifts(gifts, {
+      searchQuery,
+      category: selectedCategory,
+      format: selectedFormat,
+      sortBy,
+      includeUnpublished: false,
     });
-  }, [uniqueGifts, searchQuery, category]);
+  }, [gifts, searchQuery, selectedCategory, selectedFormat, sortBy]);
 
-  // Reset pagination when filter or search changes
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [category, searchQuery]);
+  const displayedGifts = useMemo(() => {
+    return filteredGifts.slice(0, visibleLimit);
+  }, [filteredGifts, visibleLimit]);
 
-  // Set default inspected gift
-  useEffect(() => {
-    if (!inspectedGift && (filteredGifts?.length || 0) > 0) {
-      setInspectedGift(filteredGifts[0]);
-    }
-  }, [filteredGifts, inspectedGift]);
+  const catalogStats = useMemo(() => computeCatalogStats(gifts), [gifts]);
 
-  // Paginated gifts slice: Exactly 26 items per page!
-  const totalPages = Math.max(1, Math.ceil((filteredGifts?.length || 0) / ITEMS_PER_PAGE));
-
-  // Automatically clamp currentPage if totalPages shrinks
-  useEffect(() => {
-    if (currentPage > totalPages) {
-      setCurrentPage(totalPages);
-    }
-  }, [totalPages, currentPage]);
-
-  const paginatedGifts = useMemo(() => {
-    const list = Array.isArray(filteredGifts) ? filteredGifts : [];
-    const start = (currentPage - 1) * ITEMS_PER_PAGE;
-    return list.slice(start, start + ITEMS_PER_PAGE);
-  }, [filteredGifts, currentPage, ITEMS_PER_PAGE]);
-
-  const handleResetFilters = () => {
-    setCategory('all');
-    setSearchQuery('');
-    setCurrentPage(1);
-  };
-
-  const generateWhatsAppLink = (gift: GiftItem, quantity: number = 1) => {
-    const phone = siteSettings?.whatsapp || gift.author?.whatsapp || '+923400700013';
-    const total = gift.price * quantity;
-    
-    const messageAr = `مرحبًا، أريد شراء هذا التصميم من الموقع.
-
-اسم التصميم: ${gift.titleAr || gift.title}
-كود الهدية ID: ${gift.id}
-السعر: $${gift.price} USD
-الصيغة: ${gift.formats?.[0]?.name || 'SVGA'}
-الكمية: ${quantity}
-الإجمالي: $${total} USD
-${user ? `
-اسم الحساب: ${user.name}
-ID الحساب: ${user.id}` : ''}
-`;
-
-    const encodedMessage = encodeURIComponent(messageAr);
-    return `https://wa.me/${phone.replace(/[^0-9]/g, '')}?text=${encodedMessage}`;
-  };
-
-  const handleAddToCart = (gift: GiftItem) => {
-    window.open(generateWhatsAppLink(gift, 1), '_blank');
-  };
-
-  const handleRemoveFromCart = (index: number) => {
-    setCartItems((prev) => prev.filter((_, i) => i !== index));
-  };
-
-  const handleInitiatePurchase = (gift: GiftItem) => {
-    window.open(generateWhatsAppLink(gift, 1), '_blank');
-  };
-
-  const handleCheckoutAll = () => {
-    if (cartItems.length === 0) return;
-    const phone = siteSettings?.whatsapp || '+923400700013';
-    let totalAll = 0;
-    let messageAr = `مرحبًا، أريد شراء هذه التصاميم من الموقع.\n\n`;
-    
-    cartItems.forEach((item, index) => {
-      totalAll += item.price;
-      messageAr += `${index + 1}. ${item.gift.titleAr || item.gift.title} (ID: ${item.gift.id}) - $${item.price} USD\n`;
-    });
-    
-    messageAr += `\nالإجمالي الكلي: $${totalAll} USD\n`;
-    if (user) {
-      messageAr += `\nاسم الحساب: ${user.name}\nID الحساب: ${user.id}\n`;
-    }
-
-    const encodedMessage = encodeURIComponent(messageAr);
-    window.open(`https://wa.me/${phone.replace(/[^0-9]/g, '')}?text=${encodedMessage}`, '_blank');
-    setIsCartOpen(false);
-    setCartItems([]);
-  };
-
-  const handleAuthSuccess = (authUser: AuthUser) => {
-    setUser(authUser);
-    localStorage.setItem('jiawei_current_user_v1', JSON.stringify(authUser));
-    setIsAuthOpen(false);
-
-    if (pendingPurchaseGift) {
-      setPurchaseGift(pendingPurchaseGift);
-      setPendingPurchaseGift(null);
-    } else if (['admin', 'designer', 'employee'].includes(authUser.role)) {
-      if (authUser.employeeId) {
-        setActiveEmployeeId(authUser.employeeId);
-      } else {
-        setActiveEmployeeId(authUser.id);
-      }
-      setCurrentView('dashboard');
-    }
-  };
-
-  const handleLogout = () => {
-    setUser(null);
-    localStorage.removeItem('jiawei_current_user_v1');
-    if (currentView === 'dashboard') {
-      setCurrentView('store');
-    }
-  };
-
-  const handleStaffLogin = (emp: EmployeeUser) => {
-    const staffUser: AuthUser = {
-      id: emp.id,
-      name: emp.name,
-      email: emp.email,
-      role: emp.role,
-      status: emp.status || 'active',
-      permissions: emp.permissions || {
-        giftUploadAndPublish: emp.role === 'admin' || emp.role === 'designer',
-        manageAccounts: emp.role === 'admin',
-        manageBanners: emp.role === 'admin',
-        viewOrders: true
-      },
-      avatar: emp.avatar,
-      whatsapp: emp.whatsapp,
-      employeeId: emp.id,
-      isTrial: false,
-      lastLogin: new Date().toISOString()
-    };
-    setUser(staffUser);
-    localStorage.setItem('jiawei_current_user_v1', JSON.stringify(staffUser));
-    setActiveEmployeeId(emp.id);
-  };
-
-  const handlePaymentSuccess = async (newDelivery: DeliveryItem) => {
-    await addDelivery(newDelivery);
-    setPurchaseGift(null);
-    setSelectedGift(null);
-    setActiveDelivery(newDelivery);
-  };
-
-  const handleQuickCategorySelect = (key: string) => {
-    if (key === 'vip') setIsVipOpen(true);
-    if (key === 'featured') {
-      setCategory('all');
-    } else {
-      setCategory(key);
-    }
-  };
+  const featuredGift = useMemo(() => {
+    return filteredGifts[0] || gifts.find((g) => g.published) || null;
+  }, [filteredGifts, gifts]);
 
   return (
-    <div className={`min-h-screen flex flex-col bg-[#07090e] text-slate-100 font-sans selection:bg-cyan-500 selection:text-black ${lang === 'ar' ? 'rtl font-[Cairo]' : 'ltr'}`}>
-      {/* 1. Header (Mobile First, Exactly Like Reference Video) */}
-      <Header
-        lang={lang}
-        setLang={setLang}
-        searchQuery={searchQuery}
-        setSearchQuery={setSearchQuery}
-        onSearch={() => {}}
-        currentView={currentView}
-        setCurrentView={setCurrentView}
-        cartItems={cartItems}
-        setIsCartOpen={setIsCartOpen}
-        setIsAuthOpen={setIsAuthOpen}
-        onOpenStaffAuth={() => {
-          setAuthInitialRole('staff');
-          setIsAuthOpen(true);
-        }}
-        onLogout={handleLogout}
-        setIsDeliveriesOpen={setIsDeliveriesOpen}
-        setIsSupportOpen={setIsSupportOpen}
-        user={user}
-        siteSettings={siteSettings}
-        onResetFilters={handleResetFilters}
-        onOpenSiteSettings={() => setIsSiteSettingsOpen(true)}
-        onOpenClan={() => setCurrentView('clan')}
-      />
+    <div className="min-h-screen flex flex-col bg-[#08060E] text-[#F8FAFC]">
+      {/* Strict 3-Zone Top Bar Contract */}
+      <header className="sticky top-0 z-40 flex items-center justify-between gap-8 px-4 sm:px-8 py-4 bg-[#08060E]/90 backdrop-blur-md border-b border-white/10">
+        {/* Zone 1: Single text element wordmark */}
+        <a
+          href="/"
+          onClick={(e) => {
+            e.preventDefault();
+            navigateTo('gallery');
+          }}
+          className="text-lg sm:text-xl font-extrabold tracking-tight text-white hover:text-[#D4AF37] transition-colors whitespace-nowrap shrink-0"
+        >
+          Gift Gallery
+        </a>
 
-      {/* 2. Main Body Content */}
-      {currentView === 'store' ? (
-        <main className="flex-1 w-full max-w-[1720px] mx-auto px-3 sm:px-4 md:px-6 lg:px-8 py-2 sm:py-4 flex flex-col min-w-0 overflow-x-hidden">
-          {/* Gallery Title, Subtitle & Featured Banner */}
-          <HeroBanners
-            lang={lang}
-            banners={banners}
-            onSelectQuickCategory={handleQuickCategorySelect}
-            onOpenCustomDesignModal={() => setIsSupportOpen(true)}
-            siteSettings={siteSettings}
-            onOpenClan={() => setCurrentView('clan')}
+        {/* Zone 2: 4–5 clean single-line text navigation links */}
+        <nav
+          aria-label="التنقل الرئيسي"
+          className="hidden md:flex items-center gap-6 text-sm font-medium text-slate-300"
+        >
+          <a
+            href="#gallery-grid"
+            onClick={(e) => {
+              e.preventDefault();
+              if (currentRoute !== 'gallery') navigateTo('gallery');
+              setSelectedCategory('all');
+              setTimeout(() => {
+                document.getElementById('gallery-grid')?.scrollIntoView({ behavior: 'smooth' });
+              }, 50);
+            }}
+            className="hover:text-[#D4AF37] transition-colors whitespace-nowrap shrink-0"
+          >
+            معرض الهدايا
+          </a>
+          <a
+            href="#entrances"
+            onClick={(e) => {
+              e.preventDefault();
+              if (currentRoute !== 'gallery') navigateTo('gallery');
+              setSelectedCategory('entrances');
+              setTimeout(() => {
+                document.getElementById('gallery-grid')?.scrollIntoView({ behavior: 'smooth' });
+              }, 50);
+            }}
+            className="hover:text-[#D4AF37] transition-colors whitespace-nowrap shrink-0"
+          >
+            الدخوليات الملكية
+          </a>
+          <a
+            href="#frames"
+            onClick={(e) => {
+              e.preventDefault();
+              if (currentRoute !== 'gallery') navigateTo('gallery');
+              setSelectedCategory('frames');
+              setTimeout(() => {
+                document.getElementById('gallery-grid')?.scrollIntoView({ behavior: 'smooth' });
+              }, 50);
+            }}
+            className="hover:text-[#D4AF37] transition-colors whitespace-nowrap shrink-0"
+          >
+            إطارات المايك
+          </a>
+          <a
+            href="#formats-center"
+            onClick={(e) => {
+              e.preventDefault();
+              if (currentRoute !== 'gallery') navigateTo('gallery');
+              setTimeout(() => {
+                document.getElementById('formats-center')?.scrollIntoView({ behavior: 'smooth' });
+              }, 50);
+            }}
+            className="hover:text-[#D4AF37] transition-colors whitespace-nowrap shrink-0"
+          >
+            مركز الصيغ
+          </a>
+          <a
+            href="#storage-architecture"
+            onClick={(e) => {
+              e.preventDefault();
+              if (currentRoute !== 'gallery') navigateTo('gallery');
+              setTimeout(() => {
+                document
+                  .getElementById('storage-architecture')
+                  ?.scrollIntoView({ behavior: 'smooth' });
+              }, 50);
+            }}
+            className="hover:text-[#D4AF37] transition-colors whitespace-nowrap shrink-0"
+          >
+            التخزين الدائم
+          </a>
+        </nav>
+
+        {/* Zone 3: 1 primary action */}
+        <div className="flex items-center shrink-0">
+          <button
+            type="button"
+            onClick={() =>
+              navigateTo(currentRoute === 'admin' ? 'gallery' : 'admin')
+            }
+            className="px-4 py-2 text-xs font-bold text-[#08060E] bg-[#D4AF37] hover:bg-[#E5C158] rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer flex items-center gap-1.5 shadow-md shadow-[#D4AF37]/20"
+          >
+            <Shield className="w-3.5 h-3.5" />
+            <span>{currentRoute === 'admin' ? 'العودة للمعرض العام' : 'رفع الهدايا واللوحة (150150)'}</span>
+          </button>
+        </div>
+      </header>
+
+      {/* Main Content Area */}
+      <main className="flex-1">
+        {currentRoute === 'admin' ? (
+          <AdminDashboard
+            authenticated={isAdminAuthenticated}
+            isDefaultPassword={isDefaultPassword}
+            gifts={gifts}
+            unindexedFiles={unindexedFiles}
+            auditLogs={auditLogs}
+            storageStatus={storageStatus}
+            onLoginSuccess={(isDefault) => {
+              setIsAdminAuthenticated(true);
+              setIsDefaultPassword(isDefault);
+              void fetchCatalogAndStatus(false);
+            }}
+            onLogout={() => void handleLogout()}
+            onCatalogChanged={async () => {
+              await fetchCatalogAndStatus(false);
+            }}
+            onPreviewGift={(gift) => setActivePreviewGift(gift)}
+            onNavigateGallery={() => navigateTo('gallery')}
           />
+        ) : (
+          <>
+            {/* Storefront Hero Section */}
+            <section className="relative overflow-hidden pt-10 pb-14 border-b border-white/10 bg-[radial-gradient(ellipse_at_top,#261447_0%,#08060E_70%)]">
+              <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-stretch">
+                  {/* Hero Typography & Primary Action (7 cols) */}
+                  <div className="lg:col-span-7 flex flex-col justify-center">
+                    <div className="text-xs font-semibold text-[#D4AF37] mb-3">
+                      منصة الهدايا الصوتية المركزية · Cloudflare R2 & JSON Catalog
+                    </div>
 
-          {/* Horizontal Scrollable Categories Bar */}
-          <CategoryBar
-            selectedCategory={category}
-            onSelectCategory={setCategory}
-            categories={categories}
-            lang={lang}
-          />
-
-          {/* Design Cards Grid Section */}
-          <section id="gifts-gallery-section" className="w-full flex flex-col scroll-mt-20">
-            {(filteredGifts?.length || 0) === 0 ? (
-              <div className="py-20 text-center text-slate-500 space-y-3">
-                <p className="text-sm">
-                  {lang === 'ar' ? 'لم يتم العثور على تصاميم تطابق خيارات التصفية' : '未找到匹配的设计或动效'}
-                </p>
-                <button
-                  onClick={handleResetFilters}
-                  className="px-4 py-2 rounded-xl bg-slate-900 text-cyan-400 text-xs font-semibold border border-slate-800 cursor-pointer"
-                >
-                  {lang === 'ar' ? 'إعادة ضبط البحث' : '重置搜索与分类'}
-                </button>
-              </div>
-            ) : (
-              <>
-                {/* Clean Responsive Cards Grid */}
-                <div className="grid grid-cols-2 min-[480px]:grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-4 2xl:grid-cols-5 gap-3 sm:gap-4 md:gap-5 mt-4">
-                  {paginatedGifts.map((gift) => (
-                    <GiftCard
-                      key={gift.id}
-                      gift={gift}
-                      lang={lang}
-                      isSelected={inspectedGift?.id === gift.id}
-                      canPin={canManageGifts}
-                      onTogglePin={handleTogglePinGift}
-                      onSnapshot={canManageGifts ? (g) => setQuickCoverGift(g) : undefined}
-                      onSelectGift={(g) => {
-                        setInspectedGift(g);
-                        setSelectedGift(g);
+                    <h1
+                      className="font-extrabold text-white tracking-tight leading-[1.2] mb-5"
+                      style={{
+                        fontSize: 'clamp(2rem, 3.8vw, 3.35rem)',
+                        textWrap: 'balance',
                       }}
-                      onQuickBuy={(g) => handleInitiatePurchase(g)}
-                      onAddToCart={(g) => handleAddToCart(g)}
-                    />
-                  ))}
+                    >
+                      مكتبة احترافية لعرض وإدارة هدايا التطبيقات الصوتية بكل الصيغ الأصلية
+                    </h1>
+
+                    <p className="text-sm sm:text-base text-slate-300 leading-relaxed max-w-2xl mb-8">
+                      استعرض وعاين الهدايا المتحركة، دخوليات الـ VIP، وإطارات المايك بصيغ{' '}
+                      <span className="font-mono text-[#FDE68A]">
+                        SVGA, VAP, MP4, WebM, Lottie, APNG
+                      </span>{' '}
+                      بجودتها الأصلية مع الشفافية والصوت. أي هدية يرفعها المدير تُحفظ بشكل دائم وتظهر لجميع المستخدمين تلقائيًا دون قاعدة بيانات تقليدية.
+                    </p>
+
+                    <div className="flex flex-wrap items-center gap-3">
+                      <a
+                        href="#gallery-grid"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          document
+                            .getElementById('gallery-grid')
+                            ?.scrollIntoView({ behavior: 'smooth' });
+                        }}
+                        className="px-6 py-3 rounded-xl bg-[#D4AF37] hover:bg-[#E5C158] text-[#08060E] font-bold text-sm transition-colors whitespace-nowrap shrink-0"
+                      >
+                        استكشاف مكتبة الهدايا ({catalogStats.publishedCount})
+                      </a>
+
+                      <button
+                        type="button"
+                        onClick={() => navigateTo('admin')}
+                        className="px-5 py-3 rounded-xl bg-white/5 hover:bg-white/10 border border-white/15 text-slate-200 font-semibold text-sm flex items-center gap-2 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                      >
+                        <Shield className="w-4 h-4 text-[#D4AF37]" />
+                        <span>رفع هدايا جديدة من لوحة التحكم</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Interactive 3D Stage Showcase Card (5 cols) */}
+                  <div className="lg:col-span-5 flex">
+                    {featuredGift && (
+                      <div className="w-full rounded-2xl bg-[#120E1E]/90 border border-[#D4AF37]/30 p-6 flex flex-col justify-between shadow-2xl">
+                        <div className="flex items-center justify-between text-xs text-slate-400 mb-3">
+                          <span className="text-[#D4AF37] font-semibold">
+                            معاينة المسرح الصوتي المباشر
+                          </span>
+                          <span className="font-mono">
+                            {featuredGift.format} · {featuredGift.quality || '4K'}
+                          </span>
+                        </div>
+
+                        <div
+                          onClick={() => setActivePreviewGift(featuredGift)}
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              setActivePreviewGift(featuredGift);
+                            }
+                          }}
+                          className="relative aspect-square max-h-64 mx-auto w-full rounded-xl bg-[radial-gradient(circle_at_center,#321B59_0%,#0B0814_75%)] flex items-center justify-center p-4 cursor-pointer group overflow-hidden"
+                        >
+                          <img
+                            src={featuredGift.thumbnailUrl}
+                            alt={featuredGift.name}
+                            referrerPolicy="no-referrer"
+                            className="w-full h-full object-contain transition-transform duration-300 group-hover:scale-105"
+                          />
+                        </div>
+
+                        <div className="mt-4 pt-4 border-t border-white/10 flex items-center justify-between gap-3">
+                          <div>
+                            <h2 className="text-base font-bold text-white">
+                              {featuredGift.name}
+                            </h2>
+                            <p className="text-xs text-slate-400 tabular-nums mt-0.5">
+                              {CATEGORY_LABELS[featuredGift.category]?.labelAr} ·{' '}
+                              {formatBytes(featuredGift.sizeBytes)}
+                            </p>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => setActivePreviewGift(featuredGift)}
+                            className="px-4 py-2 rounded-lg bg-[#D4AF37] hover:bg-[#E5C158] text-[#08060E] font-bold text-xs flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                          >
+                            <Play className="w-3.5 h-3.5 fill-current" />
+                            <span>تشغيل العرض</span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
 
-                {/* Pagination Controls */}
-                <Pagination
-                  currentPage={currentPage}
-                  totalPages={totalPages}
-                  totalItems={filteredGifts.length}
-                  itemsPerPage={ITEMS_PER_PAGE}
-                  onPageChange={(page) => {
-                    setCurrentPage(page);
-                    const el = document.getElementById('gifts-gallery-section');
-                    if (el) {
-                      const y = el.getBoundingClientRect().top + window.pageYOffset - 85;
-                      window.scrollTo({ top: Math.max(0, y), behavior: 'smooth' });
-                    } else {
-                      window.scrollTo({ top: 250, behavior: 'smooth' });
-                    }
-                  }}
-                  lang={lang}
-                />
-              </>
-            )}
-          </section>
-        </main>
-      ) : currentView === 'clan' ? (
-        <ClanView
-          lang={lang}
-          currentUser={user}
-          onOpenAuth={() => setIsAuthOpen(true)}
-          onBackToStore={() => setCurrentView('store')}
-          clanSettings={clanSettings}
-          members={clanMembers}
-          requests={clanRequests}
-          messages={clanMessages}
-          stickers={clanStickers}
-          isAdmin={Boolean(user && (user.role === 'admin' || user.role === 'employee' || user.role === 'designer'))}
-        />
-      ) : (
-        /* DASHBOARD VIEW (Admin / Staff with Full Permissions Strictly) */
-        <main className="flex-1 w-full">
-          {(!user || user.role === 'buyer' || !canManageGifts) ? (
-            <div className="max-w-xl mx-auto my-16 p-8 rounded-3xl bg-[#111520] border border-slate-800 text-center space-y-5 shadow-2xl">
-              <div className="w-16 h-16 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center mx-auto text-cyan-400">
-                <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                </svg>
+                {/* Full-Width 4-Column KPI Strip Below Hero Split */}
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-10 pt-8 border-t border-white/10">
+                  <div>
+                    <span className="text-xs text-slate-400 block">إجمالي الهدايا المنشورة</span>
+                    <span className="text-2xl font-bold tabular-nums text-white mt-1 block">
+                      {catalogStats.publishedCount} هدية
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-xs text-slate-400 block">إجمالي حجم المكتبة</span>
+                    <span className="text-2xl font-bold tabular-nums text-[#D4AF37] mt-1 block">
+                      {formatBytes(catalogStats.totalBytes)}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-xs text-slate-400 block">الصيغ المدعومة بالأصل</span>
+                    <span className="text-2xl font-bold tabular-nums text-white mt-1 block">
+                      12 صيغة
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-xs text-slate-400 block">إصدار الفهرس المركزي</span>
+                    <span className="text-2xl font-bold tabular-nums text-emerald-400 mt-1 block">
+                      v{catalogVersion || 1} (مزامنة فورية)
+                    </span>
+                  </div>
+                </div>
               </div>
-              <div className="space-y-2">
-                <h3 className="text-lg font-black text-white">
-                  {lang === 'ar' ? 'منطقة لوحة التحكم خاصة بالمسؤولين والمصرح لهم فقط' : '管理后台仅对超级管理员或授权用户开放'}
-                </h3>
-                <p className="text-xs text-slate-400 leading-relaxed max-w-md mx-auto">
-                  {lang === 'ar'
-                    ? 'يتطلب الوصول إلى لوحة التحكم تسجيل الدخول بحساب معتمد بصلاحيات لإدارة ونشر الهدايا.'
-                    : '访问管理后台需要使用拥有完整权限的账号登录。'}
-                </p>
+            </section>
+
+            {/* Main Gift Gallery Section */}
+            <section id="gallery-grid" className="py-12">
+              <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                {/* Category Tabs + Search + Format & Sort Controls */}
+                <div className="space-y-4 mb-8">
+                  {/* Category Segmented Filter Bar */}
+                  <div className="flex items-center justify-between flex-wrap gap-4">
+                    <div
+                      role="tablist"
+                      aria-label="تصنيفات الهدايا"
+                      className="flex items-center gap-1.5 p-1.5 rounded-xl bg-[#120E1E] border border-white/10 overflow-x-auto max-w-full"
+                    >
+                      {(Object.keys(CATEGORY_LABELS) as GiftCategory[]).map((catKey) => {
+                        const active = selectedCategory === catKey;
+                        const count =
+                          catKey === 'all'
+                            ? catalogStats.publishedCount
+                            : gifts.filter((g) => g.published && g.category === catKey).length;
+                        return (
+                          <button
+                            key={catKey}
+                            role="tab"
+                            aria-selected={active}
+                            type="button"
+                            onClick={() => {
+                              setSelectedCategory(catKey);
+                              setVisibleLimit(12);
+                            }}
+                            className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                              active
+                                ? 'bg-[#D4AF37] text-[#08060E] shadow-xs'
+                                : 'text-slate-300 hover:text-white hover:bg-white/5'
+                            }`}
+                          >
+                            {CATEGORY_LABELS[catKey].labelAr} ({count})
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <div className="flex items-center gap-2 text-xs text-slate-400">
+                      <a
+                        href="/storage/catalog/gifts.json"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-3 py-2 rounded-xl bg-[#120E1E] border border-white/10 hover:border-[#D4AF37]/40 text-slate-300 hover:text-white flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0"
+                      >
+                        <Download className="w-3.5 h-3.5 text-[#D4AF37]" />
+                        <span>فهرس JSON المباشر</span>
+                      </a>
+                    </div>
+                  </div>
+
+                  {/* Search Input, Format Filter, and Sort Bar */}
+                  <div className="grid grid-cols-1 md:grid-cols-12 gap-3 bg-[#120E1E] border border-white/10 p-3.5 rounded-2xl">
+                    <div className="md:col-span-6 relative">
+                      <Search className="w-4 h-4 text-slate-400 absolute right-3.5 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="search"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        aria-label="ابحث عن هدية بالاسم أو الصيغة"
+                        placeholder="ابحث باسم الهدية، الدخولية، الإطار، أو الصيغة (SVGA, VAP, Lottie)..."
+                        className="w-full pr-10 pl-4 py-2.5 rounded-xl bg-[#08060E] border border-white/10 text-xs sm:text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-[#D4AF37] transition-colors"
+                      />
+                    </div>
+
+                    <div className="md:col-span-3 flex items-center gap-2">
+                      <SlidersHorizontal className="w-4 h-4 text-[#D4AF37] shrink-0 hidden sm:block" />
+                      <select
+                        value={selectedFormat}
+                        onChange={(e) =>
+                          setSelectedFormat(e.target.value as GiftFormat | 'ALL')
+                        }
+                        aria-label="فلترة حسب الصيغة"
+                        className="w-full px-3 py-2.5 rounded-xl bg-[#08060E] border border-white/10 text-xs text-slate-200 focus:outline-none focus:border-[#D4AF37]"
+                      >
+                        <option value="ALL">جميع الصيغ (All Formats)</option>
+                        {Object.keys(FORMAT_CAPABILITIES).map((fmt) => (
+                          <option key={fmt} value={fmt}>
+                            صيغة {fmt}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="md:col-span-3">
+                      <select
+                        value={sortBy}
+                        onChange={(e) =>
+                          setSortBy(
+                            e.target.value as
+                              | 'order'
+                              | 'newest'
+                              | 'name'
+                              | 'size_desc'
+                              | 'category'
+                          )
+                        }
+                        aria-label="ترتيب العرض"
+                        className="w-full px-3 py-2.5 rounded-xl bg-[#08060E] border border-white/10 text-xs text-slate-200 focus:outline-none focus:border-[#D4AF37]"
+                      >
+                        <option value="order">الترتيب المعتمد</option>
+                        <option value="newest">الأحدث إضافة</option>
+                        <option value="name">الاسم (أبجدي)</option>
+                        <option value="category">التصنيف</option>
+                        <option value="size_desc">الحجم (من الأكبر)</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Loading / Error / Empty / Populated States */}
+                {isLoading ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {Array.from({ length: 6 }).map((_, i) => (
+                      <div
+                        key={i}
+                        className="rounded-2xl bg-[#120E1E] border border-white/10 h-96 animate-pulse p-5 flex flex-col justify-between"
+                      >
+                        <div className="w-full h-56 bg-white/5 rounded-xl" />
+                        <div className="space-y-2">
+                          <div className="w-1/3 h-3 bg-white/10 rounded" />
+                          <div className="w-2/3 h-4 bg-white/10 rounded" />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : fetchError ? (
+                  <div className="rounded-2xl bg-rose-950/30 border border-rose-500/30 p-8 text-center max-w-lg mx-auto">
+                    <p className="text-sm font-bold text-rose-200 mb-2">{fetchError}</p>
+                    <button
+                      type="button"
+                      onClick={() => void fetchCatalogAndStatus(true)}
+                      className="px-4 py-2 rounded-xl bg-[#D4AF37] text-[#08060E] font-bold text-xs inline-flex items-center gap-1.5"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      <span>إعادة المحاولة</span>
+                    </button>
+                  </div>
+                ) : filteredGifts.length === 0 ? (
+                  <div className="rounded-2xl bg-[#120E1E] border border-white/10 p-12 text-center max-w-xl mx-auto">
+                    <h3 className="text-lg font-bold text-white mb-2">
+                      لا توجد هدايا مطابقة لمعايير البحث الحالية
+                    </h3>
+                    <p className="text-xs text-slate-400 mb-6">
+                      جرب تغيير التصنيف أو الصيغة المختارة، أو قم برفع هدية جديدة من لوحة التحكم.
+                    </p>
+                    <div className="flex items-center justify-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSearchQuery('');
+                          setSelectedCategory('all');
+                          setSelectedFormat('ALL');
+                        }}
+                        className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-xs font-semibold text-white"
+                      >
+                        إعادة ضبط الفلاتر
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => navigateTo('admin')}
+                        className="px-4 py-2 rounded-xl bg-[#D4AF37] text-[#08060E] text-xs font-bold"
+                      >
+                        رفع هدية جديدة
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div
+                      data-testid="gift-gallery-grid"
+                      className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6"
+                    >
+                      {displayedGifts.map((gift) => (
+                        <GiftCard
+                          key={gift.id}
+                          gift={gift}
+                          onPreview={(g) => setActivePreviewGift(g)}
+                        />
+                      ))}
+                    </div>
+
+                    {/* Progressive Pagination Load More */}
+                    {filteredGifts.length > visibleLimit && (
+                      <div className="mt-10 text-center">
+                        <button
+                          type="button"
+                          onClick={() => setVisibleLimit((prev) => prev + 12)}
+                          className="px-6 py-3 rounded-xl bg-[#120E1E] hover:bg-white/10 border border-white/15 text-xs font-bold text-[#D4AF37] transition-colors"
+                        >
+                          عرض المزيد من الهدايا ({filteredGifts.length - visibleLimit} متبقية)
+                        </button>
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
-              <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAuthInitialRole('staff');
-                    setIsAuthOpen(true);
-                  }}
-                  className="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-xs font-bold shadow-lg shadow-cyan-500/20"
-                >
-                  {lang === 'ar' ? 'تسجيل الدخول' : '管理员登录'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setCurrentView('store')}
-                  className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold border border-slate-700"
-                >
-                  {lang === 'ar' ? 'العودة للمتجر' : '返回素材商城'}
-                </button>
-              </div>
-            </div>
-          ) : (
-            <Dashboard
-              lang={lang}
-              gifts={gifts}
-              setGifts={setGifts}
-              onPreviewGift={(g) => setSelectedGift(g)}
-              deliveries={deliveries}
-              setDeliveries={setDeliveries}
-              onOpenDeliveryBox={(d) => setActiveDelivery(d)}
-              employees={employees}
-              setEmployees={setEmployees}
-              activeEmployeeId={activeEmployeeId}
-              setActiveEmployeeId={setActiveEmployeeId}
-              onStaffLogin={handleStaffLogin}
-              banners={banners}
-              setBanners={setBanners}
-              currentUser={user}
-              categories={categories}
-              siteSettings={siteSettings}
-              onOpenSiteSettingsModal={() => setIsSiteSettingsOpen(true)}
-              clanSettings={clanSettings}
-              setClanSettings={setClanSettings}
-              clanMembers={clanMembers}
-              clanRequests={clanRequests}
-              clanMessages={clanMessages}
-              clanStickers={clanStickers}
-              clanAuditLogs={clanAuditLogs}
+            </section>
+
+            {/* Multi-Format Capabilities & Cloudflare R2 Storage Section */}
+            <FormatCenterSection
+              storageStatus={storageStatus}
+              onSelectFormatFilter={(fmt) => {
+                setSelectedFormat(fmt);
+                setSelectedCategory('all');
+              }}
             />
-          )}
-        </main>
-      )}
+          </>
+        )}
+      </main>
 
-      {/* Footer */}
-      <Footer
-        lang={lang}
-        onOpenSupport={() => setIsSupportOpen(true)}
-        onOpenTool={() => setIsSupportOpen(true)}
-      />
-
-      {/* MODAL 1: Gift Details & Animation Specs Modal */}
-      <GiftModal
-        gift={selectedGift}
-        onClose={() => setSelectedGift(null)}
-        lang={lang}
-        onAddToCart={(g) => handleAddToCart(g)}
-        onOpenPurchase={(g) => handleInitiatePurchase(g)}
-        allGifts={gifts}
-        canPin={canManageGifts}
-        onTogglePin={(g) => {
-          handleTogglePinGift(g);
-          setSelectedGift(prev => prev && prev.id === g.id ? { ...prev, pinnedTop: !prev.pinnedTop } : prev);
-        }}
-        onSelectGift={(g) => {
-          setInspectedGift(g);
-          setSelectedGift(g);
-        }}
-        onCoverSaved={handleCoverSaved}
-      />
-
-      {/* MODAL 2: Purchase Box ("صندوق شراء") */}
-      <PurchaseModal
-        gift={purchaseGift}
-        onClose={() => setPurchaseGift(null)}
-        lang={lang}
-        onPaymentSuccess={handlePaymentSuccess}
-      />
-
-      {/* MODAL 3: Instant Delivery & Receiving Box ("صندوق استلام") */}
-      <DeliveryBoxModal
-        delivery={activeDelivery}
-        onClose={() => setActiveDelivery(null)}
-        lang={lang}
-        allDeliveries={deliveries}
-        onSelectDelivery={(del) => setActiveDelivery(del)}
-      />
-
-      {/* MODAL 4: Cart Drawer */}
-      <CartDrawer
-        isOpen={isCartOpen}
-        onClose={() => setIsCartOpen(false)}
-        lang={lang}
-        cartItems={cartItems}
-        onRemoveItem={handleRemoveFromCart}
-        onCheckoutAll={handleCheckoutAll}
-      />
-
-      {/* MODAL 5: Auth Modal */}
-      <AuthModal
-        isOpen={isAuthOpen}
-        onClose={() => {
-          setIsAuthOpen(false);
-          setPendingPurchaseGift(null);
-        }}
-        lang={lang}
-        employees={employees}
-        onAuthSuccess={handleAuthSuccess}
-        initialRole={authInitialRole}
-        pendingGift={pendingPurchaseGift}
-      />
-
-      {/* MODAL 6: Contact Us Modal (Exact match to reference video) */}
-      <SupportModal
-        isOpen={isSupportOpen}
-        onClose={() => setIsSupportOpen(false)}
-        lang={lang}
-        siteSettings={siteSettings}
-      />
-
-      {/* MODAL 7: VIP Club Upgrade */}
-      <VipModal
-        isOpen={isVipOpen}
-        onClose={() => setIsVipOpen(false)}
-        lang={lang}
-        onUpgrade={() => {
-          alert(lang === 'ar' ? 'مبروك! تم تفعيل عضوية VIP بنجاح.' : '恭喜！平台 VIP 黄金会员已成功激活。');
-        }}
-      />
-
-      {/* MODAL 8: My Deliveries Box Shortcut Modal */}
-      {isDeliveriesOpen && (
-        <DeliveryBoxModal
-          delivery={deliveries[0] || null}
-          onClose={() => setIsDeliveriesOpen(false)}
-          lang={lang}
-          allDeliveries={deliveries}
-          onSelectDelivery={(del) => setActiveDelivery(del)}
-        />
-      )}
-
-      {/* MODAL 9: Site Identity & Contact Numbers Modal */}
-      <SiteSettingsModal
-        isOpen={isSiteSettingsOpen}
-        onClose={() => setIsSiteSettingsOpen(false)}
-        lang={lang}
-        siteSettings={siteSettings}
-        onSettingsSaved={(newSettings) => setSiteSettings(newSettings)}
-      />
-
-      {/* MODAL 10: Quick Cover Snapshot Modal (Storefront Grid & Gallery) */}
-      <QuickCoverSnapshotModal
-        isOpen={Boolean(quickCoverGift)}
-        onClose={() => setQuickCoverGift(null)}
-        gift={quickCoverGift}
-        lang={lang}
-        onCoverSaved={(updatedGift) => {
-          handleCoverSaved(updatedGift);
-          setQuickCoverGift(null);
-        }}
-      />
-
-      {/* Real-time Pin Confirmation Toast */}
-      {pinToastMessage && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 px-5 py-3 rounded-2xl bg-slate-900/95 border border-emerald-500/60 text-white text-xs sm:text-sm font-bold shadow-2xl backdrop-blur-md flex items-center gap-2.5 animate-in fade-in slide-in-from-bottom-4 duration-300">
-          <div className="w-5 h-5 rounded-full bg-emerald-500/20 border border-emerald-400 flex items-center justify-center text-emerald-400">
-            <Check className="w-3.5 h-3.5 stroke-[3]" />
+      {/* Clean Editorial Footer */}
+      <footer className="border-t border-white/10 py-8 bg-[#08060E] text-xs text-slate-400">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div>
+            <span className="font-bold text-white">Gift Gallery</span>
+            <span className="mx-2">·</span>
+            <span>منصة عرض وإدارة هدايا التطبيقات الصوتية المتحركة</span>
           </div>
-          <span>{pinToastMessage}</span>
+          <div className="flex items-center gap-4">
+            <a
+              href="/storage/catalog/gifts.json"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:text-[#D4AF37] transition-colors font-mono"
+            >
+              catalog/gifts.json
+            </a>
+            <button
+              type="button"
+              onClick={() => navigateTo('admin')}
+              className="hover:text-[#D4AF37] transition-colors"
+            >
+              لوحة تحكم الإدارة
+            </button>
+          </div>
         </div>
-      )}
+      </footer>
+
+      {/* Multi-Format Interactive Preview Modal */}
+      <GiftPlayerModal
+        gift={activePreviewGift}
+        onClose={() => setActivePreviewGift(null)}
+      />
     </div>
   );
 }
