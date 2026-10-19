@@ -139,7 +139,6 @@ export const ExternalLinksManagerTab: React.FC<ExternalLinksManagerTabProps> = (
 
     const newLink: CustomExternalLink = {
       id: 'custom_link_' + Date.now(),
-      name: newLinkTitle.trim(),
       title: newLinkTitle.trim(),
       url: formattedUrl,
       enabled: true,

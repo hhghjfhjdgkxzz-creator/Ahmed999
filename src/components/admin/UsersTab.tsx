@@ -1,12 +1,23 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../../firebase';
 import { collection, doc, updateDoc, deleteDoc, onSnapshot, query, orderBy, getDocs, writeBatch, Timestamp, setDoc } from 'firebase/firestore';
-import { Trash2, Edit2, Coins, Image as ImageIcon, Search, Tag, Crown, Eye, EyeOff, Copy, Check, Key, Loader2, CheckCircle2, ShieldAlert, ShieldCheck, UserX, UserCheck } from 'lucide-react';
+import { 
+  Trash2, Edit2, Coins, Image as ImageIcon, Search, Tag, Crown, 
+  Eye, EyeOff, Copy, Check, Key, Loader2, CheckCircle2, ShieldAlert, 
+  ShieldCheck, UserX, UserCheck, UserPlus, Sparkles,
+  Calendar, Clock, AlertTriangle, AlertCircle, ArrowUpDown, Filter
+} from 'lucide-react';
+import { createRandomUserAccount, RandomUserAccount } from '../../services/userService';
+import { calculateSubscriptionInfo, parseDate } from '../../utils/subscriptionUtils';
+import { UserSubscriptionModal } from './UserSubscriptionModal';
 
 export default function UsersTab() {
   const [users, setUsers] = useState<any[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedUser, setSelectedUser] = useState<any>(null);
+  const [subscriptionModalUser, setSubscriptionModalUser] = useState<any>(null);
+  const [subStatusFilter, setSubStatusFilter] = useState<'all' | 'active' | 'expiring_soon' | 'expired' | 'no_subscription'>('all');
+  const [sortBy, setSortBy] = useState<'default' | 'expiry_asc' | 'expiry_desc' | 'created_desc'>('default');
   const [coinsAmount, setCoinsAmount] = useState('');
   const [avatarUrl, setAvatarUrl] = useState('');
   const [idIconUrl, setIdIconUrl] = useState('');
@@ -17,6 +28,27 @@ export default function UsersTab() {
   const [savingPassword, setSavingPassword] = useState(false);
   const [passwordSuccess, setPasswordSuccess] = useState(false);
 
+  // Random account generation state
+  const [isGeneratingAccount, setIsGeneratingAccount] = useState(false);
+  const [generatedAccountModal, setGeneratedAccountModal] = useState<RandomUserAccount | null>(null);
+  const [copiedAccountDetails, setCopiedAccountDetails] = useState(false);
+
+  const handleCreateRandomUser = async () => {
+    setIsGeneratingAccount(true);
+    try {
+      const account = await createRandomUserAccount({
+        role: 'user',
+        initialDiamonds: 10000,
+        isVIP: true
+      });
+      setGeneratedAccountModal(account);
+    } catch (err: any) {
+      alert('خطأ أثناء إنشاء الحساب العشوائي: ' + err.message);
+    } finally {
+      setIsGeneratingAccount(false);
+    }
+  };
+
   const handleToggleVip = async (user: any) => {
     try {
       const newVip = !user.isVIP;
@@ -26,27 +58,10 @@ export default function UsersTab() {
     }
   };
 
-  const handleToggleCacheAccess = async (user: any) => {
-    try {
-      const newAccess = !user.hasCacheAccess;
-      await updateDoc(doc(db, 'users', user.id), { 
-        hasCacheAccess: newAccess,
-        cachePermissions: {
-          view: true,
-          download: true,
-          copyLink: true,
-          delete: false,
-          manage: false
-        }
-      });
-    } catch (error: any) {
-      alert('خطأ في تغيير صلاحية الكاش: ' + error.message);
-    }
-  };
-
   const handleToggleBanUser = async (user: any) => {
-    if (user.role === 'admin' || user.email === 'iejehdgdig@gmail.com' || user.email === 'uhbijnokmpl098900@gmail.com') {
-      return alert('لا يمكن حظر حساب المدير العام');
+    const emailLower = (user.email || '').toLowerCase();
+    if (user.role === 'admin' || emailLower === 'ceo@design-svga.com' || emailLower === 'master@design-svga.com' || emailLower === 'sdsdfdfddsfdd@gmail.com' || emailLower === 'admin@streamgifts.com' || emailLower === 'aegy238@gmail.com' || emailLower === 'iejehdgdig@gmail.com' || emailLower === 'uhbijnokmpl098900@gmail.com') {
+      return alert('لا يمكن حظر حساب المدير العام والمالك');
     }
     const newStatus = user.status === 'banned' ? 'active' : 'banned';
     if (!confirm(`هل أنت متأكد من ${newStatus === 'banned' ? 'حظر' : 'فك حظر'} هذا المستخدم (${user.email || user.name})؟`)) return;
@@ -208,27 +223,199 @@ export default function UsersTab() {
     }
   };
 
-  const filteredUsers = users.filter(u => 
-    u.displayName?.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    u.email?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  // Subscription statistics for quick dashboard view
+  const subscriptionStats = React.useMemo(() => {
+    let active = 0;
+    let expiring = 0;
+    let expired = 0;
+    let noSub = 0;
+
+    users.forEach(u => {
+      const info = calculateSubscriptionInfo(u);
+      if (info.status === 'active' || info.status === 'lifetime') active++;
+      else if (info.status === 'expiring_soon') expiring++;
+      else if (info.status === 'expired') expired++;
+      else noSub++;
+    });
+
+    return { active, expiring, expired, noSub, total: users.length };
+  }, [users]);
+
+  const filteredUsers = users
+    .filter(u => {
+      const matchesSearch = 
+        (u.displayName || u.name || '').toLowerCase().includes(searchTerm.toLowerCase()) || 
+        (u.email || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (u.numericId || '').toString().includes(searchTerm);
+
+      if (!matchesSearch) return false;
+
+      if (subStatusFilter === 'all') return true;
+      const info = calculateSubscriptionInfo(u);
+      if (subStatusFilter === 'active') return info.status === 'active' || info.status === 'lifetime';
+      if (subStatusFilter === 'expiring_soon') return info.status === 'expiring_soon';
+      if (subStatusFilter === 'expired') return info.status === 'expired';
+      if (subStatusFilter === 'no_subscription') return info.status === 'no_subscription';
+      return true;
+    })
+    .sort((a, b) => {
+      if (sortBy === 'expiry_asc') {
+        const da = parseDate(a.subscriptionExpiry)?.getTime() || 9999999999999;
+        const db = parseDate(b.subscriptionExpiry)?.getTime() || 9999999999999;
+        return da - db;
+      }
+      if (sortBy === 'expiry_desc') {
+        const da = parseDate(a.subscriptionExpiry)?.getTime() || 0;
+        const db = parseDate(b.subscriptionExpiry)?.getTime() || 0;
+        return db - da;
+      }
+      if (sortBy === 'created_desc') {
+        const da = parseDate(a.createdAt)?.getTime() || 0;
+        const db = parseDate(b.createdAt)?.getTime() || 0;
+        return db - da;
+      }
+      return 0;
+    });
 
   return (
     <div className="space-y-6">
-      <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex gap-4 items-center">
-        <div className="relative flex-1">
+      {/* Expiring Soon Alert for Admin */}
+      {subscriptionStats.expiring > 0 && (
+        <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-2xl flex items-center justify-between gap-3 text-amber-900 shadow-sm animate-pulse">
+          <div className="flex items-center gap-3">
+            <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
+            <div className="text-xs sm:text-sm font-bold">
+              <span>⚠️ تنبيه الإدارة: يوجد </span>
+              <span className="font-black text-amber-700 underline mx-1">{subscriptionStats.expiring} مستخدمين</span>
+              <span>اقتربت اشتراكاتهم من الانتهاء خلال 7 أيام!</span>
+            </div>
+          </div>
+          <button
+            onClick={() => setSubStatusFilter('expiring_soon')}
+            className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-black transition-all shrink-0 shadow"
+          >
+            عرضهم الآن
+          </button>
+        </div>
+      )}
+
+      {/* Search & Actions Bar */}
+      <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex flex-col md:flex-row gap-3 items-center justify-between">
+        <div className="relative flex-1 w-full">
           <Search className="absolute right-3 top-3 text-gray-400" size={20} />
           <input
             type="text"
-            placeholder="بحث عن مستخدم بالاسم أو البريد..."
+            placeholder="بحث عن مستخدم بالاسم أو البريد أو الآي دي..."
             value={searchTerm}
             onChange={e => setSearchTerm(e.target.value)}
-            className="w-full pl-4 pr-10 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+            className="w-full pl-4 pr-10 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm"
           />
         </div>
-        <button onClick={handleResetDailySupport} className="bg-red-100 text-red-600 hover:bg-red-200 px-4 py-2 rounded-xl font-bold whitespace-nowrap transition-colors">
-          تصفير الدعم اليومي
-        </button>
+
+        <div className="flex items-center gap-2 w-full md:w-auto">
+          <button
+            type="button"
+            onClick={handleCreateRandomUser}
+            disabled={isGeneratingAccount}
+            className="bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-700 hover:from-indigo-500 hover:to-purple-500 text-white px-4 py-2 rounded-xl font-bold whitespace-nowrap transition-all shadow-md flex items-center justify-center gap-2 text-sm disabled:opacity-50"
+          >
+            {isGeneratingAccount ? (
+              <>
+                <Loader2 size={16} className="animate-spin" />
+                <span>جاري إنشاء الحساب العشوائي...</span>
+              </>
+            ) : (
+              <>
+                <UserPlus size={18} />
+                <span>✨ إنشاء حساب عشوائي تلقائياً</span>
+              </>
+            )}
+          </button>
+
+          <button onClick={handleResetDailySupport} className="bg-red-100 text-red-600 hover:bg-red-200 px-4 py-2 rounded-xl font-bold whitespace-nowrap transition-colors text-sm">
+            تصفير الدعم اليومي
+          </button>
+        </div>
+      </div>
+
+      {/* Subscription Filter & Sort Pills */}
+      <div className="bg-white p-3.5 rounded-2xl shadow-sm border border-gray-100 flex flex-wrap items-center justify-between gap-3 text-xs">
+        {/* Filters */}
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="font-bold text-gray-500 ml-1 flex items-center gap-1">
+            <Filter size={14} />
+            <span>فلترة الاشتراكات:</span>
+          </span>
+          <button
+            onClick={() => setSubStatusFilter('all')}
+            className={`px-3 py-1.5 rounded-xl font-bold transition-all ${
+              subStatusFilter === 'all'
+                ? 'bg-slate-900 text-white shadow-sm'
+                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+            }`}
+          >
+            الكل ({subscriptionStats.total})
+          </button>
+          <button
+            onClick={() => setSubStatusFilter('active')}
+            className={`px-3 py-1.5 rounded-xl font-bold transition-all flex items-center gap-1.5 ${
+              subStatusFilter === 'active'
+                ? 'bg-emerald-600 text-white shadow-sm'
+                : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+            }`}
+          >
+            <span className="w-2 h-2 rounded-full bg-emerald-400" />
+            <span>نشط ({subscriptionStats.active})</span>
+          </button>
+          <button
+            onClick={() => setSubStatusFilter('expiring_soon')}
+            className={`px-3 py-1.5 rounded-xl font-bold transition-all flex items-center gap-1.5 ${
+              subStatusFilter === 'expiring_soon'
+                ? 'bg-amber-500 text-white shadow-sm'
+                : 'bg-amber-50 text-amber-800 hover:bg-amber-100'
+            }`}
+          >
+            <AlertTriangle size={12} className={subStatusFilter === 'expiring_soon' ? 'text-white' : 'text-amber-500'} />
+            <span>قريب من الانتهاء ({subscriptionStats.expiring})</span>
+          </button>
+          <button
+            onClick={() => setSubStatusFilter('expired')}
+            className={`px-3 py-1.5 rounded-xl font-bold transition-all flex items-center gap-1.5 ${
+              subStatusFilter === 'expired'
+                ? 'bg-rose-600 text-white shadow-sm'
+                : 'bg-rose-50 text-rose-700 hover:bg-rose-100'
+            }`}
+          >
+            <span className="w-2 h-2 rounded-full bg-rose-500" />
+            <span>منتهي ({subscriptionStats.expired})</span>
+          </button>
+          <button
+            onClick={() => setSubStatusFilter('no_subscription')}
+            className={`px-3 py-1.5 rounded-xl font-bold transition-all ${
+              subStatusFilter === 'no_subscription'
+                ? 'bg-gray-700 text-white shadow-sm'
+                : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+            }`}
+          >
+            بدون اشتراك ({subscriptionStats.noSub})
+          </button>
+        </div>
+
+        {/* Sort Selector */}
+        <div className="flex items-center gap-2">
+          <ArrowUpDown size={14} className="text-gray-400" />
+          <span className="font-bold text-gray-500">ترتيب:</span>
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as any)}
+            className="border border-gray-200 rounded-xl px-2.5 py-1.5 text-xs text-gray-700 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-purple-500 font-bold"
+          >
+            <option value="default">الافتراضي</option>
+            <option value="expiry_asc">تاريخ الانتهاء: الأقرب انتهاءً أولاً</option>
+            <option value="expiry_desc">تاريخ الانتهاء: الأبعد انتهاءً أولاً</option>
+            <option value="created_desc">تاريخ التسجيل: الأحدث أولاً</option>
+          </select>
+        </div>
       </div>
 
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
@@ -243,7 +430,6 @@ export default function UsersTab() {
                 <th className="px-4 py-3 text-sm font-bold text-gray-700">الحالة / الحظر</th>
                 <th className="px-4 py-3 text-sm font-bold text-gray-700">الرصيد</th>
                 <th className="px-4 py-3 text-sm font-bold text-amber-600">عضوية VIP</th>
-                <th className="px-4 py-3 text-sm font-bold text-red-600">الكاش ☠️</th>
                 <th className="px-4 py-3 text-sm font-bold text-gray-700">تاريخ التسجيل</th>
                 <th className="px-4 py-3 text-sm font-bold text-gray-700">الإجراءات</th>
               </tr>
@@ -257,11 +443,6 @@ export default function UsersTab() {
                       <div>
                         <div className="flex items-center gap-2">
                           <span className="font-bold text-gray-800">{user.displayName || user.name || 'مستخدم'}</span>
-                          {user.hasCacheAccess && (
-                            <span className="px-2 py-0.5 rounded-lg text-[10px] font-black bg-gradient-to-r from-red-950 to-slate-900 text-red-400 border border-red-500/60 shadow-sm flex items-center gap-1">
-                              ☠️ CACHE
-                            </span>
-                          )}
                         </div>
                       </div>
                     </div>
@@ -340,25 +521,18 @@ export default function UsersTab() {
                       <span>{user.isVIP ? 'VIP 👑 مفعل' : 'تفعيل VIP'}</span>
                     </button>
                   </td>
-                  <td className="px-4 py-3">
-                    <button
-                      onClick={() => handleToggleCacheAccess(user)}
-                      className={`px-3 py-1 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 border shadow-sm ${
-                        user.hasCacheAccess
-                          ? 'bg-gradient-to-r from-red-950 via-slate-900 to-red-950 text-red-400 border-red-500 shadow-red-900/40 hover:brightness-125'
-                          : 'bg-gray-100 text-gray-400 border-gray-200 hover:bg-red-50 hover:text-red-500 hover:border-red-300'
-                      }`}
-                      title={user.hasCacheAccess ? 'الكاش مفعّل (اضغط للتعطيل والإخفاء)' : 'الكاش معطّل ومخفي (اضغط للتفعيل)'}
-                    >
-                      <span>☠️</span>
-                      <span>{user.hasCacheAccess ? 'مفعّل ON' : 'معطّل OFF'}</span>
-                    </button>
-                  </td>
                   <td className="px-4 py-3 text-sm text-gray-500">
                     {user.createdAt ? (user.createdAt.toDate ? user.createdAt.toDate().toLocaleDateString() : new Date(user.createdAt).toLocaleDateString()) : 'غير معروف'}
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex gap-2">
+                      <button 
+                        onClick={() => setSubscriptionModalUser(user)} 
+                        className="p-2 text-purple-600 hover:bg-purple-50 rounded-lg" 
+                        title="إدارة وتعديل وتمديد تاريخ انتهاء الاشتراك"
+                      >
+                        <Calendar size={18} />
+                      </button>
                       <button 
                         onClick={() => { setSelectedUser({ ...user, action: 'password' }); setNewPasswordInput(''); setPasswordSuccess(false); }} 
                         className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg" 
@@ -595,6 +769,81 @@ export default function UsersTab() {
             )}
           </div>
         </div>
+      )}
+
+      {/* 🎉 Generated Random Account Success Modal */}
+      {generatedAccountModal && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" dir="rtl">
+          <div className="bg-slate-900 text-white rounded-2xl p-6 w-full max-w-md shadow-2xl border border-indigo-500/30 animate-in zoom-in-95 space-y-5">
+            <div className="flex items-center justify-between border-b border-white/10 pb-3">
+              <div className="flex items-center gap-2 text-emerald-400">
+                <Sparkles className="w-6 h-6 animate-pulse text-indigo-400" />
+                <h3 className="text-lg font-bold text-white">تم إنشاء الحساب العشوائي بنجاح!</h3>
+              </div>
+              <button onClick={() => setGeneratedAccountModal(null)} className="text-slate-400 hover:text-white p-1">✕</button>
+            </div>
+
+            <div className="p-3 bg-emerald-950/40 border border-emerald-500/30 rounded-xl text-xs text-emerald-300 flex items-center gap-2">
+              <CheckCircle2 className="w-5 h-5 text-emerald-400 flex-shrink-0" />
+              <span>تم حفظ هذا الحساب تلقائياً في قاعدة البيانات Firestore وسجلات المستخدمين!</span>
+            </div>
+
+            <div className="bg-slate-950 p-4 rounded-xl border border-white/10 space-y-2.5 font-mono text-xs">
+              <div className="flex justify-between items-center text-slate-300 border-b border-white/5 pb-2">
+                <span className="text-slate-400">اسم المستخدم:</span>
+                <span className="font-bold text-indigo-300">{generatedAccountModal.displayName}</span>
+              </div>
+              <div className="flex justify-between items-center text-slate-300 border-b border-white/5 pb-2">
+                <span className="text-slate-400">الآي دي (ID):</span>
+                <span className="font-bold text-amber-400">{generatedAccountModal.numericId}</span>
+              </div>
+              <div className="flex justify-between items-center text-slate-300 border-b border-white/5 pb-2">
+                <span className="text-slate-400">البريد الإلكتروني:</span>
+                <span className="font-bold text-emerald-400 select-all">{generatedAccountModal.email}</span>
+              </div>
+              <div className="flex justify-between items-center text-slate-300 border-b border-white/5 pb-2">
+                <span className="text-slate-400">كلمة المرور:</span>
+                <span className="font-bold text-purple-400 select-all">{generatedAccountModal.password}</span>
+              </div>
+              <div className="flex justify-between items-center text-slate-300">
+                <span className="text-slate-400">الرصيد الابتدائي:</span>
+                <span className="font-bold text-yellow-300">{generatedAccountModal.diamonds} 💎 (VIP مفعل 👑)</span>
+              </div>
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <button
+                onClick={() => {
+                  const text = `بيانات الحساب العشوائي الملكي:\nالاسم: ${generatedAccountModal.displayName}\nالآي دي: ${generatedAccountModal.numericId}\nالبريد: ${generatedAccountModal.email}\nكلمة المرور: ${generatedAccountModal.password}\nالرصيد: ${generatedAccountModal.diamonds} 💎`;
+                  navigator.clipboard.writeText(text);
+                  setCopiedAccountDetails(true);
+                  setTimeout(() => setCopiedAccountDetails(false), 3000);
+                }}
+                className="flex-1 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold py-2.5 rounded-xl text-xs flex items-center justify-center gap-2 shadow-lg"
+              >
+                {copiedAccountDetails ? <Check size={16} className="text-emerald-300" /> : <Copy size={16} />}
+                <span>{copiedAccountDetails ? 'تم نسخ بيانات الحساب بنجاح!' : 'نسخ كافة بيانات الحساب'}</span>
+              </button>
+              <button
+                onClick={() => setGeneratedAccountModal(null)}
+                className="px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold py-2.5 rounded-xl text-xs"
+              >
+                إغلاق
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* User Subscription Modal */}
+      {subscriptionModalUser && (
+        <UserSubscriptionModal
+          user={subscriptionModalUser}
+          isOpen={!!subscriptionModalUser}
+          onClose={() => setSubscriptionModalUser(null)}
+          onUpdated={() => {
+            // onSnapshot automatically updates the users list in real-time
+          }}
+        />
       )}
     </div>
   );

@@ -66,10 +66,9 @@ export interface TableState {
   timerTotal: number;
   roundNumber: number;
   winningSpot?: SpotId;
-  currentWinnerIds?: SpotId[];
-  evaluations?: Record<string, HandEvaluation>;
-  winningHand?: HandEvaluation;
   isGameActive: boolean;
+  evaluations?: any;
+  currentWinnerIds?: string[];
   [key: string]: any;
 }
 
@@ -126,6 +125,10 @@ export interface AdminConfig {
   autoFillBots: boolean;
   defaultPlayerBalance: number;
   whatsappNumber?: string;
+  // Recharge & Withdrawal Exchange Rates
+  coinsPerUsdRecharge: number; // e.g. 1000 coins per 1 USD
+  coinsPerUsdWithdraw: number; // e.g. 1200 coins per 1 USD
+  minWithdrawCoins: number;    // e.g. 1000 coins minimum
   // Win / Loss rate controls
   globalWinRate: number;
   gameWinRates: GameWinRates;
@@ -138,42 +141,56 @@ export interface UserProfile {
   email: string;
   displayName: string;
   name?: string;
-  role: 'admin' | 'player';
+  role: 'admin' | 'player' | 'agency';
   balance: number;
   totalWinnings?: number;
   totalBets?: number;
   createdAt?: string;
   updatedAt?: string;
-}
-
-export interface ChatMessage {
-  id: string;
-  userId: string;
-  userName: string;
-  message: string;
-  timestamp: number | string;
-  avatar?: string;
-  isVip?: boolean;
-  isAdmin?: boolean;
-  gift?: any;
   [key: string]: any;
 }
-
-export type { GiftItem } from '../types';
-
 
 export interface WithdrawalRequest {
   id: string;
   userId: string;
-  userName?: string;
-  amountCoins: number;
-  amountUsd: number;
-  paymentMethod: string;
-  accountDetails: string;
-  status: 'pending' | 'approved' | 'rejected' | 'completed';
-  createdAt: number | string;
-  updatedAt?: number | string;
-  adminNote?: string;
-  [key: string]: any;
+  customId: string;
+  userName: string;
+  userEmail: string;
+  coinsAmount: number;
+  usdAmount: number;
+  paymentMethod: string; // e.g. 'USDT (TRC-20)', 'Vodafone Cash', 'Bank Transfer', 'STC Pay', 'PayPal'
+  accountDetails: string; // Wallet address, phone number, IBAN
+  recipientName: string;
+  status: 'pending' | 'approved' | 'rejected';
+  createdAt: string;
+  reviewedAt?: string;
+  notes?: string;
 }
 
+export interface GiftItem {
+  id: string;
+  name: string;
+  icon: string;
+  coins: number;
+  description: string;
+}
+
+export interface ChatMessage {
+  id: string;
+  senderId: string;
+  senderCustomId: string;
+  senderName: string;
+  senderRole: 'admin' | 'player' | 'agency';
+  content: string;
+  type: 'text' | 'gift' | 'system';
+  gift?: {
+    id: string;
+    name: string;
+    icon: string;
+    coins: number;
+    recipientId: string;
+    recipientName: string;
+    recipientCoinsReceived: number; // 35% of gift coins!
+  };
+  timestamp: number;
+}

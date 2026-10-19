@@ -18,16 +18,7 @@ import {
 import { useLanguage } from '../lib/i18n';
 import { db } from '../lib/firebase';
 import { collection, query, orderBy, limit, onSnapshot, addDoc, serverTimestamp, doc, deleteDoc, setDoc } from 'firebase/firestore';
-import { UserProfile, ChatMessage } from '../types/game';
-
-export interface ChatGiftItem {
-  id: string;
-  name: string;
-  icon: string;
-  coins: number;
-  description?: string;
-  [key: string]: any;
-}
+import { UserProfile, ChatMessage, GiftItem } from '../types/game';
 
 interface ChatWidgetProps {
   isOpen: boolean;
@@ -38,7 +29,7 @@ interface ChatWidgetProps {
   onlineUsersCount?: number;
 }
 
-export const CASINO_GIFTS: ChatGiftItem[] = [
+export const CASINO_GIFTS: GiftItem[] = [
   { id: 'gift-rose', name: 'وردة ملكية', icon: '🌹', coins: 100, description: 'تحية ودية أنيقة' },
   { id: 'gift-drink', name: 'كوكتيل كازينو', icon: '🍹', coins: 500, description: 'مشروب فاخر للاحتفال' },
   { id: 'gift-car', name: 'سيارة رياضية', icon: '🏎️', coins: 2000, description: 'هدية سريعة ومثيرة' },
@@ -67,7 +58,7 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
   const [inputText, setInputText] = useState('');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showGiftModal, setShowGiftModal] = useState(false);
-  const [selectedGift, setSelectedGift] = useState<ChatGiftItem>(CASINO_GIFTS[0]);
+  const [selectedGift, setSelectedGift] = useState<GiftItem>(CASINO_GIFTS[0]);
   const [recipientInput, setRecipientInput] = useState('');
   const [activeUsersList, setActiveUsersList] = useState<{ id: string; name: string; customId: string }[]>([]);
   const [giftAnnouncement, setGiftAnnouncement] = useState<string | null>(null);
@@ -86,51 +77,48 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({
   };
 
 
-  // Real-time Firestore chat listener (Zero Vercel polling / Zero server bandwidth)
+  // Load chat messages
+  const fetchMessages = () => {
+    fetch('/api/chat/messages')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.messages) {
+          setMessages(data.messages);
+        }
+      })
+      .catch(() => {});
+  };
+
+  // Load registered users for recipient picker
+  const fetchUsers = () => {
+    fetch('/api/admin/users')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.users) {
+          const list = data.users
+            .filter((u: any) => u.userId !== user?.userId)
+            .map((u: any) => ({
+              id: u.userId || u.id,
+              name: u.displayName || u.email?.split('@')[0] || 'Player',
+              customId: u.customId || u.userId,
+            }));
+          setActiveUsersList(list);
+          if (list.length > 0 && !recipientInput) {
+            setRecipientInput(list[0].id);
+          }
+        }
+      })
+      .catch(() => {});
+  };
+
   useEffect(() => {
-    if (!isOpen) return;
-
-    // 1. Real-time messages listener
-    const chatQuery = query(
-      collection(db, 'global_chat'),
-      orderBy('timestamp', 'desc'),
-      limit(60)
-    );
-
-    const unsubscribeChat = onSnapshot(chatQuery, (snapshot) => {
-      const msgs = snapshot.docs.map(d => ({
-        id: d.id,
-        ...d.data()
-      })) as ChatMessage[];
-      // Sort ascending for chronological chat display
-      msgs.reverse();
-      setMessages(msgs);
-    }, (error) => {
-      console.warn("Chat onSnapshot error:", error);
-    });
-
-    // 2. Fetch users once on modal open
-    const usersQuery = query(collection(db, 'users'), limit(50));
-    const unsubscribeUsers = onSnapshot(usersQuery, (snapshot) => {
-      const list = snapshot.docs
-        .map(d => ({ id: d.id, ...(d.data() as any) }))
-        .filter((u: any) => (u.userId || u.id) !== user?.userId)
-        .map((u: any) => ({
-          id: u.userId || u.id,
-          name: u.displayName || u.name || u.email?.split('@')[0] || 'Player',
-          customId: u.customId || u.userId || u.id,
-        }));
-      setActiveUsersList(list);
-      if (list.length > 0 && !recipientInput) {
-        setRecipientInput(list[0].id);
-      }
-    }, () => {});
-
-    return () => {
-      unsubscribeChat();
-      unsubscribeUsers();
-    };
-  }, [isOpen, user?.userId]);
+    if (isOpen) {
+      fetchMessages();
+      fetchUsers();
+      const interval = setInterval(fetchMessages, 3000);
+      return () => clearInterval(interval);
+    }
+  }, [isOpen]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });

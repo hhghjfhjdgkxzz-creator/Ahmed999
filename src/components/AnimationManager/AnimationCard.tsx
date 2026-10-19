@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import lottie, { AnimationItem as LottieInstance } from 'lottie-web';
 import { 
   Play, Pause, Trash2, Edit2, Download, Eye, 
-  RotateCw, Check, Grid, Hash, Clock, Layers, Sparkles 
+  RotateCw, Check, Grid, Hash, Clock, Layers, Sparkles, RefreshCw 
 } from 'lucide-react';
 import { AnimationItem, ExportFormat, PreviewBackground, SupportedFormat } from './types';
 
@@ -14,6 +14,7 @@ interface AnimationCardProps {
   onRename: (id: string, newName: string) => void;
   onInspect: (item: AnimationItem) => void;
   onQuickExport: (item: AnimationItem, format: ExportFormat) => void;
+  onOpenLayerEditor?: (item: AnimationItem) => void;
 }
 
 const FORMAT_CONFIG: Record<
@@ -28,10 +29,10 @@ const FORMAT_CONFIG: Record<
   dotlottie: { label: 'DotLottie', bg: 'bg-pink-500/15', text: 'text-pink-400', border: 'border-pink-500/30' },
   svga: { label: 'SVGA', bg: 'bg-indigo-500/15', text: 'text-indigo-400', border: 'border-indigo-500/30' },
   pag: { label: 'PAG', bg: 'bg-rose-500/15', text: 'text-rose-400', border: 'border-rose-500/30' },
-  vap: { label: 'VAP', bg: 'bg-orange-500/15', text: 'text-orange-400', border: 'border-orange-500/30' },
-  yyeva: { label: 'YYEVA', bg: 'bg-yellow-500/15', text: 'text-yellow-400', border: 'border-yellow-500/30' },
-  mp4: { label: 'MP4', bg: 'bg-blue-500/15', text: 'text-blue-400', border: 'border-blue-500/30' },
-  webm: { label: 'WebM', bg: 'bg-teal-500/15', text: 'text-teal-400', border: 'border-teal-500/30' }
+  vap: { label: 'VAP', bg: 'bg-cyan-500/15', text: 'text-cyan-400', border: 'border-cyan-500/30' },
+  yyeva: { label: 'YYEVA', bg: 'bg-amber-500/15', text: 'text-amber-400', border: 'border-amber-500/30' },
+  mp4: { label: 'MP4', bg: 'bg-emerald-500/15', text: 'text-emerald-400', border: 'border-emerald-500/30' },
+  webm: { label: 'WebM', bg: 'bg-purple-500/15', text: 'text-purple-400', border: 'border-purple-500/30' }
 };
 
 export const AnimationCard: React.FC<AnimationCardProps> = ({
@@ -41,7 +42,8 @@ export const AnimationCard: React.FC<AnimationCardProps> = ({
   onDelete,
   onRename,
   onInspect,
-  onQuickExport
+  onQuickExport,
+  onOpenLayerEditor
 }) => {
   const [isPlaying, setIsPlaying] = useState(true);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1);
@@ -92,19 +94,23 @@ export const AnimationCard: React.FC<AnimationCardProps> = ({
 
       if (item.format === 'svga') {
         try {
-          const { Player, Parser } = await import('svga.lite');
-          const parser = new Parser();
-          const buffer = await item.file.arrayBuffer();
-          const svgaData = await parser.do(buffer);
-          
-          if (isCancelled) return;
-          
-          const player = new Player(canvasRef.current);
-          await player.mount(svgaData);
-          player.set({ loop: 0, fillMode: 'forwards' } as any);
-          
-          svgaPlayerRef.current = player;
-          if (isPlaying) player.start();
+          const svgaMod = await import('svga.lite');
+          const Player = svgaMod.Player || (svgaMod as any).default?.Player;
+          const Parser = svgaMod.Parser || (svgaMod as any).default?.Parser;
+          if (Player && Parser) {
+            const parser = new Parser();
+            const buffer = await item.file.arrayBuffer();
+            const svgaData = await parser.do(buffer);
+            
+            if (isCancelled) return;
+            
+            const player = new Player(canvasRef.current);
+            await player.mount(svgaData);
+            player.set({ loop: 0, fillMode: 'forwards' } as any);
+            
+            svgaPlayerRef.current = player;
+            if (isPlaying) player.start();
+          }
         } catch (err) {
           console.warn('SVGA render error on card:', err);
         }
@@ -246,6 +252,18 @@ export const AnimationCard: React.FC<AnimationCardProps> = ({
 
           <button
             type="button"
+            title="محرر وإدارة طبقات الملف"
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenLayerEditor?.(item);
+            }}
+            className="p-1.5 rounded-lg text-purple-300 hover:text-white bg-purple-500/20 hover:bg-purple-500/40 border border-purple-500/40 transition-colors"
+          >
+            <Layers className="w-4 h-4" />
+          </button>
+
+          <button
+            type="button"
             title="معاينة وفحص تفصيلي"
             onClick={(e) => {
               e.stopPropagation();
@@ -270,9 +288,9 @@ export const AnimationCard: React.FC<AnimationCardProps> = ({
         </div>
       </div>
 
-      {/* Animation Preview Stage */}
+      {/* Animation Preview Stage - Square, spacious & eye-friendly matching gift proportions */}
       <div
-        className={`relative w-full h-56 flex items-center justify-center overflow-hidden transition-colors duration-300 ${
+        className={`relative w-full aspect-square flex items-center justify-center overflow-hidden transition-colors duration-300 ${
           background === 'checkerboard'
             ? 'bg-[linear-gradient(45deg,#161d2f_25%,transparent_25%),linear-gradient(-45deg,#161d2f_25%,transparent_25%),linear-gradient(45deg,transparent_75%,#161d2f_75%),linear-gradient(-45deg,transparent_75%,#161d2f_75%)] bg-[size:16px_16px] bg-[#0c1220]'
             : background === 'dark'
@@ -341,137 +359,51 @@ export const AnimationCard: React.FC<AnimationCardProps> = ({
             </button>
           </div>
 
-          {/* Direct SVGA Convert Button */}
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onQuickExport(item, 'svga');
-            }}
-            className="px-2 py-1 rounded-lg bg-gradient-to-r from-indigo-500/30 to-purple-500/30 hover:from-indigo-500/50 hover:to-purple-500/50 text-indigo-200 text-xs font-bold flex items-center gap-1 border border-indigo-400/40 transition-all shadow-sm"
-            title="تحويل فوري مباشر إلى صيغة SVGA"
-          >
-            <Sparkles className="w-3 h-3 text-indigo-300" />
-            <span>تحويل SVGA</span>
-          </button>
-
-          {/* Quick Export Trigger */}
-          <div className="relative">
+          {/* Dedicated Export/Convert/Layer Buttons */}
+          <div className="flex items-center gap-1.5 flex-wrap" onClick={(e) => e.stopPropagation()}>
+            {/* Layer Editor Button */}
             <button
               type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setShowExportMenu(!showExportMenu);
-              }}
-              className="px-2.5 py-1 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400 text-xs font-bold flex items-center gap-1 border border-cyan-500/30 transition-all"
+              onClick={() => onOpenLayerEditor?.(item)}
+              className="px-2 py-1 rounded-lg bg-purple-600/30 hover:bg-purple-600/60 text-purple-200 text-xs font-bold flex items-center gap-1 border border-purple-400/40 transition-all cursor-pointer shadow-sm"
+              title="الدخول على جميع طبقات الملف وحذف/إخفاء أي طبقة وتحديد صيغة التصدير"
             >
-              <Download className="w-3 h-3" />
-              <span>تصدير</span>
+              <Layers className="w-3 h-3 text-purple-300 animate-pulse" />
+              <span>طبقات الملف</span>
             </button>
 
-            {/* Export Menu Popover */}
-            {showExportMenu && (
-              <div
-                onClick={(e) => e.stopPropagation()}
-                className="absolute bottom-8 left-0 w-40 rounded-xl bg-[#0e1628] border border-white/15 shadow-2xl p-1.5 flex flex-col gap-1 z-30"
-              >
-                <button
-                  type="button"
-                  onClick={() => {
-                    onQuickExport(item, 'svga');
-                    setShowExportMenu(false);
-                  }}
-                  className="w-full text-right px-2.5 py-1.5 rounded-lg text-xs font-bold text-indigo-300 bg-indigo-500/15 hover:bg-indigo-500/30 hover:text-indigo-200 transition-colors font-arabic flex items-center justify-between border border-indigo-500/20"
-                >
-                  <span>تحويل إلى SVGA</span>
-                  <span className="text-[9px] px-1 py-0.5 rounded bg-indigo-500/40 text-indigo-100 font-mono">.svga</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onQuickExport(item, 'original');
-                    setShowExportMenu(false);
-                  }}
-                  className="w-full text-right px-2.5 py-1.5 rounded-lg text-xs text-gray-200 hover:bg-white/10 hover:text-cyan-400 transition-colors font-arabic"
-                >
-                  الصيغة الأصلية
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onQuickExport(item, 'gif');
-                    setShowExportMenu(false);
-                  }}
-                  className="w-full text-right px-2.5 py-1.5 rounded-lg text-xs text-gray-200 hover:bg-white/10 hover:text-amber-400 transition-colors font-arabic"
-                >
-                  صيغة GIF متحرك
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onQuickExport(item, 'webp');
-                    setShowExportMenu(false);
-                  }}
-                  className="w-full text-right px-2.5 py-1.5 rounded-lg text-xs text-gray-200 hover:bg-white/10 hover:text-emerald-400 transition-colors font-arabic"
-                >
-                  صيغة WebP
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onQuickExport(item, 'apng');
-                    setShowExportMenu(false);
-                  }}
-                  className="w-full text-right px-2.5 py-1.5 rounded-lg text-xs text-gray-200 hover:bg-white/10 hover:text-purple-400 transition-colors font-arabic"
-                >
-                  صيغة APNG
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onQuickExport(item, 'png_frames');
-                    setShowExportMenu(false);
-                  }}
-                  className="w-full text-right px-2.5 py-1.5 rounded-lg text-xs text-gray-200 hover:bg-white/10 hover:text-sky-400 transition-colors font-arabic"
-                >
-                  حزمة إطارات PNG (ZIP)
-                </button>
-                {item.lottieData && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onQuickExport(item, 'lottie');
-                        setShowExportMenu(false);
-                      }}
-                      className="w-full text-right px-2.5 py-1.5 rounded-lg text-xs text-gray-200 hover:bg-white/10 hover:text-cyan-400 transition-colors font-arabic"
-                    >
-                      Lottie JSON
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onQuickExport(item, 'dotlottie');
-                        setShowExportMenu(false);
-                      }}
-                      className="w-full text-right px-2.5 py-1.5 rounded-lg text-xs text-gray-200 hover:bg-white/10 hover:text-pink-400 transition-colors font-arabic"
-                    >
-                      DotLottie (.lottie)
-                    </button>
-                  </>
-                )}
-                <button
-                  type="button"
-                  onClick={() => {
-                    onQuickExport(item, 'mp4');
-                    setShowExportMenu(false);
-                  }}
-                  className="w-full text-right px-2.5 py-1.5 rounded-lg text-xs text-gray-200 hover:bg-white/10 hover:text-red-400 transition-colors font-arabic"
-                >
-                  فيديو MP4
-                </button>
-              </div>
-            )}
+            {/* Button 1: Export VAP */}
+            <button
+              type="button"
+              onClick={() => onQuickExport(item, 'vap')}
+              className="px-2 py-1 rounded-lg bg-indigo-600/30 hover:bg-indigo-600/60 text-indigo-200 text-xs font-bold flex items-center gap-1 border border-indigo-400/30 transition-all cursor-pointer"
+              title="تصدير بصيغة VAP بالمدة الكاملة"
+            >
+              <Download className="w-3 h-3 text-indigo-300" />
+              <span>VAP</span>
+            </button>
+
+            {/* Button 2: Export YYEVA */}
+            <button
+              type="button"
+              onClick={() => onQuickExport(item, 'yyeva')}
+              className="px-2 py-1 rounded-lg bg-amber-500/25 hover:bg-amber-500/50 text-amber-200 text-xs font-bold flex items-center gap-1 border border-amber-400/30 transition-all cursor-pointer"
+              title="تصدير بصيغة YYEVA بالمدة الكاملة"
+            >
+              <Sparkles className="w-3 h-3 text-amber-300" />
+              <span>YYEVA</span>
+            </button>
+
+            {/* Button 3: Cross Convert */}
+            <button
+              type="button"
+              onClick={() => onQuickExport(item, item.format === 'vap' ? 'yyeva' : 'vap')}
+              className="px-2 py-1 rounded-lg bg-cyan-600/30 hover:bg-cyan-600/60 text-cyan-200 text-xs font-bold flex items-center gap-1 border border-cyan-400/30 transition-all cursor-pointer"
+              title={item.format === 'vap' ? 'تحويل مباشر من VAP إلى YYEVA' : 'تحويل مباشر من YYEVA إلى VAP'}
+            >
+              <RefreshCw className="w-3 h-3 text-cyan-300" />
+              <span>{item.format === 'vap' ? '➔ YYEVA' : '➔ VAP'}</span>
+            </button>
           </div>
         </div>
       </div>

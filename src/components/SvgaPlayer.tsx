@@ -1,11 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
-import SVGA from 'svgaplayerweb';
 import JSZip from 'jszip';
 import { Sparkles, AlertCircle, RefreshCw, Layers } from 'lucide-react';
 import { resolveMediaUrl, getMediaFromIndexedDb, getProxyMediaUrl } from '../utils/mediaStorage';
 
+const SVGA: any = typeof window !== 'undefined' ? (window as any).SVGA : null;
+
 interface SvgaPlayerProps {
-  src: string | ArrayBuffer | Blob | File;
+  src?: string | ArrayBuffer | Blob | File;
+  movie?: any;
+  lang?: any;
   width?: number | string;
   height?: number | string;
   autoPlay?: boolean;
@@ -33,6 +36,8 @@ function dataUrlToArrayBuffer(dataUrl: string): ArrayBuffer {
 
 export const SvgaPlayer: React.FC<SvgaPlayerProps> = ({
   src,
+  movie,
+  lang,
   width = '100%',
   height = '100%',
   autoPlay = true,

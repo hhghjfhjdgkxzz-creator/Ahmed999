@@ -1,8 +1,7 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
 import { FileMetadata, MaterialAsset, AppSettings, UserRecord, PresetBackground } from '../types';
-import { Layers, Download, Copy, Trash2, Lock, ListOrdered, Upload, CheckCircle2, Image as ImageIcon, Music, Scissors } from 'lucide-react';
+import { Layers, Download, Copy, Trash2, Lock, ListOrdered, Upload, CheckCircle2, Image as ImageIcon, Music, Scissors, Film } from 'lucide-react';
 import { logActivity } from '../utils/logger';
 import * as Mp4Muxer from 'mp4-muxer';
 import { FFmpeg } from '@ffmpeg/ffmpeg';
@@ -34,6 +33,7 @@ import { LottieViewer } from './LottieViewer';
 
 import { calculateSafeDimensions, getDefaultDimensions } from '../utils/dimensions';
 import { generateAEProject } from '../services/aeExportService';
+import { AeExportModal } from './AeExportModal';
 import { ErrorBoundary } from './ErrorBoundary';
 import { ensureMp3WithId3 } from '../utils/svgaAudio';
 import { decodeAudioSource } from '../utils/svgaAudioTrimmer';
@@ -238,6 +238,11 @@ export const Workspace: React.FC<WorkspaceProps> = ({ metadata: initialMetadata,
   const [exportScale, setExportScale] = useState(1.0); // 0.1 to 1.0 for file size control
   const [isProcessingVideo, setIsProcessingVideo] = useState(false);
   const [exportResult, setExportResult] = useState<{ url: string; filename: string } | null>(null);
+  const [isAeExportModalOpen, setIsAeExportModalOpen] = useState<boolean>(false);
+  const [aeExportPayload, setAeExportPayload] = useState<{
+    sprites: any[];
+    imagesData: { [key: string]: Uint8Array };
+  } | null>(null);
   const [fadeModalTarget, setFadeModalTarget] = useState<string | null>(null);
   const [fadeModalValues, setFadeModalValues] = useState({ top: 0, bottom: 0, left: 0, right: 0 });
   
@@ -270,7 +275,23 @@ export const Workspace: React.FC<WorkspaceProps> = ({ metadata: initialMetadata,
   const importCompInputRef = useRef<HTMLInputElement>(null);
 
 
-  const [recordingDuration, setRecordingDuration] = useState<number>(10);
+  const [recordingDuration, setRecordingDuration] = useState<number>(() => {
+    if (metadata?.frames && metadata?.fps) {
+      const parsedFps = parseFloat(metadata.fps as any) || 30;
+      if (parsedFps > 0) return Math.round((metadata.frames / parsedFps) * 100) / 100;
+    }
+    return 5;
+  });
+
+  useEffect(() => {
+    if (metadata?.frames && metadata?.fps) {
+      const parsedFps = parseFloat(metadata.fps as any) || 30;
+      if (parsedFps > 0) {
+        const exactSec = metadata.frames / parsedFps;
+        setRecordingDuration(Math.round(exactSec * 100) / 100);
+      }
+    }
+  }, [metadata?.fileUrl, metadata?.frames, metadata?.fps]);
   const ffmpegRef = useRef(new FFmpeg());
   const [ffmpegLoaded, setFfmpegLoaded] = useState(false);
   const [aeJsonData, setAeJsonData] = useState<any>(null);
@@ -3589,10 +3610,24 @@ export const Workspace: React.FC<WorkspaceProps> = ({ metadata: initialMetadata,
       if (message.sprites) {
           message.sprites.forEach((s: any) => {
               if (s.imageKey && !imagesData[s.imageKey]) {
-                  const binaryString = atob(TRANSPARENT_PIXEL.split(',')[1]);
-                  const bytes = new Uint8Array(binaryString.length);
-                  for (let j = 0; j < binaryString.length; j++) bytes[j] = binaryString.charCodeAt(j);
-                  imagesData[s.imageKey] = bytes;
+                  const clean = s.imageKey.replace(/\.png$/i, '');
+                  if (imagesData[clean]) {
+                      imagesData[s.imageKey] = imagesData[clean];
+                  } else if (imagesData[`${clean}.png`]) {
+                      imagesData[s.imageKey] = imagesData[`${clean}.png`];
+                  } else {
+                      // Check case-insensitive match
+                      const lower = clean.toLowerCase();
+                      const matchedKey = Object.keys(imagesData).find(k => k.toLowerCase().replace(/\.png$/i, '') === lower);
+                      if (matchedKey) {
+                          imagesData[s.imageKey] = imagesData[matchedKey];
+                      } else {
+                          const binaryString = atob(TRANSPARENT_PIXEL.split(',')[1]);
+                          const bytes = new Uint8Array(binaryString.length);
+                          for (let j = 0; j < binaryString.length; j++) bytes[j] = binaryString.charCodeAt(j);
+                          imagesData[s.imageKey] = bytes;
+                      }
+                  }
               }
           });
       }
@@ -3836,7 +3871,6 @@ export const Workspace: React.FC<WorkspaceProps> = ({ metadata: initialMetadata,
   };
 
   const handleExportAEProject = async (options: any = {}) => {
-    const { decrement = true } = options;
     if (!svgaInstance) return;
 
     if (!currentUser) {
@@ -3844,40 +3878,48 @@ export const Workspace: React.FC<WorkspaceProps> = ({ metadata: initialMetadata,
       return;
     }
 
-    const { allowed } = await checkAccess('AE Project Export', { decrement, subscriptionOnly: true });
-    if (!allowed) {
-      onSubscriptionRequired();
-      return;
+    try {
+      const { message, imagesData } = await getProcessedSVGAData(true);
+      setAeExportPayload({
+        sprites: message.sprites || [],
+        imagesData: imagesData || {}
+      });
+      setIsAeExportModalOpen(true);
+    } catch (e) {
+      console.error("Failed to prepare data for AE Export", e);
+      setAeExportPayload({
+        sprites: metadata.videoItem?.sprites || [],
+        imagesData: {}
+      });
+      setIsAeExportModalOpen(true);
     }
+  };
 
-    setIsExporting(true);
-    setExportPhase('تحليل مصفوفة الطبقات Quantum v5.6...');
+  const handleDirectDownloadJsx = async () => {
+    if (!svgaInstance) return;
     try {
       const { message, imagesData, originalWidth, originalHeight } = await getProcessedSVGAData(true);
-
-      await generateAEProject({
+      const result = await generateAEProject({
         metadata,
         originalWidth,
         originalHeight,
         sprites: message.sprites || [],
-        imagesData,
+        imagesData: imagesData || {},
         previewBg,
         audioFile,
         audioUrl,
         bgPos,
-        bgScale,
-        setProgress
+        bgScale
       });
-
-      if (currentUser) {
-        logActivity(currentUser, 'export', `Exported After Effects Project: ${metadata.name}.zip`);
-      }
-
-    } catch (e) { 
-      console.error(e); 
-      alert("❌ Error during After Effects export!");
-    } finally { 
-      setTimeout(() => setIsExporting(false), 800); 
+      const blob = new Blob([result.jsxContent], { type: 'text/javascript;charset=utf-8' });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = `${result.baseFileName}.jsx`;
+      link.click();
+      alert(`✅ تم تحميل ملف السكريبت بنجاح: ${result.baseFileName}.jsx`);
+    } catch (e) {
+      console.error(e);
+      alert("حدث خطأ أثناء استخراج السكريبت");
     }
   };
 
@@ -5156,8 +5198,10 @@ export const Workspace: React.FC<WorkspaceProps> = ({ metadata: initialMetadata,
             return;
         }
 
-        // Calculate target frames based on recordingDuration
-        const targetFrames = Math.ceil((recordingDuration || (totalFrames / fps)) * fps);
+        // Calculate target frames using natural file duration unless user customized recordingDuration
+        const naturalFileSec = totalFrames > 0 ? (totalFrames / fps) : 5;
+        const durationToExport = (recordingDuration && recordingDuration > 0) ? recordingDuration : naturalFileSec;
+        const targetFrames = Math.max(1, Math.ceil(durationToExport * fps));
         
         if (targetFrames <= 0) {
             alert("مدة التسجيل غير صالحة");
@@ -5910,10 +5954,11 @@ export const Workspace: React.FC<WorkspaceProps> = ({ metadata: initialMetadata,
         const jsonConfig = {
             info: {
                 v: 2,
-                f: totalFrames,
+                f: Math.round(fps) || 30,
                 w: width,
                 h: height,
-                fps: fps,
+                fps: Math.round(fps) || 30,
+                totalFrames: totalFrames,
                 videoW: videoW,
                 videoH: videoH,
                 aFrame: [width + gap, 0, alphaWidth, alphaHeight],
@@ -6273,8 +6318,10 @@ export const Workspace: React.FC<WorkspaceProps> = ({ metadata: initialMetadata,
             // Use the actual FPS from the SVGA file if available to prevent frame mismatch/stuttering
             const fps = Math.round(parseFloat(metadata.fps as any)) || Math.round(parseFloat(svgaInstance.videoItem?.FPS as any)) || 30;
             const originalTotalFrames = svgaInstance.videoItem?.frames || metadata.frames || 0;
-            // Use recordingDuration if specified, otherwise fallback to original duration
-            const totalFrames = Math.ceil(recordingDuration * fps) || originalTotalFrames;
+            // Calculate total frames using natural file duration unless user customized recordingDuration
+            const naturalFileSec = originalTotalFrames > 0 ? (originalTotalFrames / fps) : 5;
+            const durationToExport = (recordingDuration && recordingDuration > 0) ? recordingDuration : naturalFileSec;
+            const totalFrames = Math.max(1, Math.ceil(durationToExport * fps));
             
             // Ensure even dimensions for video encoding using utility
             const isVap = currentFormat === 'VAP (MP4)' || (currentFormat as any) === 'VAP 1.0.5' || currentFormat === 'SVGA → YYEVA';
@@ -6650,6 +6697,10 @@ export const Workspace: React.FC<WorkspaceProps> = ({ metadata: initialMetadata,
                 // This ensures seekability and recovery from errors without bloating size too much.
                 const isKeyFrame = i === 0 || (i % fps === 0);
 
+                while (videoEncoder.encodeQueueSize > 10) {
+                    await new Promise(r => requestAnimationFrame(r));
+                }
+
                 videoEncoder.encode(frame, { keyFrame: isKeyFrame });
                 frame.close();
                 bitmap.close();
@@ -6675,10 +6726,11 @@ export const Workspace: React.FC<WorkspaceProps> = ({ metadata: initialMetadata,
                 const jsonConfig = {
                     info: {
                         v: 2,
-                        f: totalFrames,
+                        f: Math.round(fps) || 30,
                         w: safeWidth,
                         h: safeHeight,
-                        fps: fps,
+                        fps: Math.round(fps) || 30,
+                        totalFrames: totalFrames,
                         videoW: vapWidth,
                         videoH: vapHeight,
                         aFrame: isYYEVA ? [safeWidth, 0, safeWidth, safeHeight] : [0, 0, safeWidth, safeHeight],
@@ -8330,7 +8382,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({ metadata: initialMetadata,
                         </div>
 
                         {showRangeSelect && (
-                            <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="p-4 bg-white/5 rounded-2xl border border-white/10 space-y-3">
+                            <div className="p-4 bg-white/5 rounded-2xl border border-white/10 space-y-3 animate-in fade-in slide-in-from-top-2 duration-200">
                                 <div className="grid grid-cols-2 gap-3">
                                     <div className="space-y-1">
                                         <label className="text-[8px] text-slate-500 font-black uppercase">من اسم (مثلاً img_1)</label>
@@ -8357,7 +8409,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({ metadata: initialMetadata,
                                     <button onClick={handleSelectRange} className="flex-1 py-2 bg-sky-500 text-white rounded-lg text-[10px] font-black uppercase shadow-glow-sky">تطبيق التحديد</button>
                                     <button onClick={() => setShowRangeSelect(false)} className="px-4 py-2 bg-white/5 text-slate-400 rounded-lg text-[10px] font-black uppercase">إلغاء</button>
                                 </div>
-                            </motion.div>
+                            </div>
                         )}
                     </div>
                     
@@ -9868,27 +9920,38 @@ class _MyAppState extends State<MyApp> {
                 })}
              </div>
 
-             {/* Dedicated Export Buttons */}
+             {/* Dedicated Export to Adobe After Effects Button */}
              <div className="flex flex-col gap-2 mb-2">
-               <div className="flex gap-2">
+               <button 
+                 onClick={() => handleExportAEProject({ decrement: false })}
+                 className="w-full py-4 bg-gradient-to-r from-red-600 via-rose-600 to-red-600 hover:from-red-500 hover:to-rose-500 text-white text-xs font-black rounded-xl shadow-[0_0_25px_rgba(239,68,68,0.5)] active:scale-95 transition-all flex items-center justify-center gap-2 border border-red-400/50 group"
+                 title="تصدير مشروع وسكربت After Effects قابل للتعديل بالكامل مع الطبقات والكي فريمز"
+               >
+                 <Film className="w-4 h-4 text-red-200 group-hover:rotate-12 transition-transform" />
+                 <span>🚀 نقل وتصدير المشروع إلى After Effects (.jsx)</span>
+               </button>
+               
+               <div className="grid grid-cols-2 gap-2">
                  <button 
-                   onClick={handleExportAEProject}
-                   className="flex-1 py-4 bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-black rounded-xl shadow-glow-indigo active:scale-95 transition-all flex items-center justify-center gap-2"
-                   title="تصدير مشروع After Effects"
+                   onClick={handleDirectDownloadJsx}
+                   className="py-2.5 px-2 bg-red-950/80 hover:bg-red-900 text-red-200 hover:text-white text-[10px] font-black rounded-lg active:scale-95 transition-all flex items-center justify-center gap-1.5 border border-red-500/50 shadow-sm"
+                   title="تحميل ملف السكريبت (.jsx) فقط بضغطة واحدة مباشرة"
                  >
-                   🎬 After Effects
+                   <Download className="w-3.5 h-3.5 text-red-400" />
+                   <span>تحميل السكريبت (.jsx)</span>
                  </button>
-                 
+
                  <button 
                    onClick={() => aeJsonInputRef.current?.click()}
-                   className={`px-4 py-4 text-white text-[11px] font-black rounded-xl active:scale-95 transition-all flex items-center justify-center gap-2 border ${
+                   className={`py-2.5 px-2 text-white text-[10px] font-bold rounded-lg active:scale-95 transition-all flex items-center justify-center gap-1.5 border ${
                      aeJsonData 
                        ? 'bg-emerald-600 border-emerald-400 shadow-glow-emerald' 
-                       : 'bg-slate-800 border-white/10 hover:bg-slate-700'
+                       : 'bg-slate-800 border-white/10 hover:bg-slate-700 text-slate-300'
                    }`}
-                   title="رفع ملف quantum_export.json"
+                   title="رفع ملف quantum_export.json المعدل من After Effects"
                  >
-                   {aeJsonData ? <CheckCircle2 className="w-5 h-5" /> : <Upload className="w-5 h-5" />}
+                   {aeJsonData ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> : <Upload className="w-3.5 h-3.5" />}
+                   <span className="truncate">{aeJsonData ? 'تعديلات AE جاهزة' : 'استيراد تعديل AE'}</span>
                  </button>
                </div>
                
@@ -10220,15 +10283,13 @@ class _MyAppState extends State<MyApp> {
         </div>
       )}
       
-      <AnimatePresence>
-        {lottiePreviewData && (
-          <LottieViewer 
-            animationData={lottiePreviewData} 
-            onClose={() => setLottiePreviewData(null)} 
-            fileName={`${metadata.name.replace('.svga', '')}.json`}
-          />
-        )}
-      </AnimatePresence>
+      {lottiePreviewData && (
+        <LottieViewer 
+          animationData={lottiePreviewData} 
+          onClose={() => setLottiePreviewData(null)} 
+          fileName={`${metadata.name.replace('.svga', '')}.json`}
+        />
+      )}
 
       {/* SVGA Audio Editor Studio Modal */}
       {showAudioStudioModal && (
@@ -10244,22 +10305,34 @@ class _MyAppState extends State<MyApp> {
       )}
 
       {/* Audio Studio Success Toast Notification */}
-      <AnimatePresence>
-        {audioStudioToast && (
-          <motion.div
-            initial={{ opacity: 0, y: 50, scale: 0.9 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 20, scale: 0.9 }}
-            className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[9999] bg-slate-900/95 border border-emerald-500/40 text-white px-6 py-3.5 rounded-2xl shadow-2xl backdrop-blur-xl flex items-center gap-3 text-sm font-bold pointer-events-none"
-            dir="rtl"
-          >
-            <div className="w-7 h-7 rounded-xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
-              <CheckCircle2 className="w-4 h-4" />
-            </div>
-            <span>{audioStudioToast}</span>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {audioStudioToast && (
+        <div
+          className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[9999] bg-slate-900/95 border border-emerald-500/40 text-white px-6 py-3.5 rounded-2xl shadow-2xl backdrop-blur-xl flex items-center gap-3 text-sm font-bold pointer-events-none animate-in fade-in slide-in-from-bottom-4 duration-300"
+          dir="rtl"
+        >
+          <div className="w-7 h-7 rounded-xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
+            <CheckCircle2 className="w-4 h-4" />
+          </div>
+          <span>{audioStudioToast}</span>
+        </div>
+      )}
+
+      {/* Adobe After Effects Export Modal */}
+      {isAeExportModalOpen && (
+        <AeExportModal
+          isOpen={isAeExportModalOpen}
+          onClose={() => setIsAeExportModalOpen(false)}
+          metadata={metadata}
+          sprites={aeExportPayload?.sprites || metadata.videoItem?.sprites || []}
+          imagesData={aeExportPayload?.imagesData || {}}
+          previewBg={previewBg}
+          audioFile={audioFile}
+          audioUrl={audioUrl}
+          bgPos={bgPos}
+          bgScale={bgScale}
+          onSuccessToast={(msg) => alert(msg)}
+        />
+      )}
     </div>
   );
 };

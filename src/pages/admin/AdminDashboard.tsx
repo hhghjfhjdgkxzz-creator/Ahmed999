@@ -92,8 +92,8 @@ export default function AdminDashboard() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
-                {allOrders.slice(0, 5).map((order) => (
-                  <tr key={order.id} className="hover:bg-slate-50">
+                {allOrders.slice(0, 5).map((order, idx) => (
+                  <tr key={`order-${order.id || ""}-${idx}`} className="hover:bg-slate-50">
                     <td className="py-3 font-medium text-slate-900">{order.id}</td>
                     <td className="py-3 text-slate-600">{(order.total || 0).toLocaleString()} {t('common.currency')}</td>
                     <td className="py-3">
@@ -133,8 +133,8 @@ export default function AdminDashboard() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
-                {products.slice(0, 5).map((product) => (
-                  <tr key={product.id} className="hover:bg-slate-50">
+                {products.slice(0, 5).map((product, idx) => (
+                  <tr key={`product-${product.id || ""}-${idx}`} className="hover:bg-slate-50">
                     <td className="py-3 font-medium text-slate-900">{product.name}</td>
                     <td className="py-3 text-slate-600">{product.type}</td>
                     <td className="py-3 text-slate-600">{product.stock}</td>

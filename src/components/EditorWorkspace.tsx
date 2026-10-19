@@ -31,9 +31,7 @@ export const EditorWorkspace: React.FC<WorkspaceProps> = ({
 }) => {
   const fileInfo = {
     url: metadata.fileUrl || '',
-    name: metadata.name,
-    size: metadata.size || 0,
-    data: metadata.originalFile || new ArrayBuffer(0)
+    name: metadata.name
   };
 
   return (

@@ -62,20 +62,15 @@ export const AppUpdateToast: React.FC = () => {
       check();
     }, 3000);
 
-    // Lightweight background check every 10 minutes (prevents Vercel quota burnout)
+    // Frequent background check every 45 seconds
     const interval = setInterval(() => {
       check();
-    }, 10 * 60 * 1000);
+    }, 45 * 1000);
 
-    // Throttle visibility change check: at most once every 10 minutes
-    let lastVisibilityCheck = Date.now();
+    // Check immediately when user returns to tab
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') {
-        const now = Date.now();
-        if (now - lastVisibilityCheck > 10 * 60 * 1000) {
-          lastVisibilityCheck = now;
-          check();
-        }
+        check();
       }
     };
     document.addEventListener('visibilitychange', handleVisibility);

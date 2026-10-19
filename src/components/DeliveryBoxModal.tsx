@@ -109,7 +109,7 @@ export const DeliveryBoxModal: React.FC<DeliveryBoxModalProps> = ({
         {/* Content */}
         <div className="p-4 sm:p-6 overflow-y-auto space-y-5">
           {/* Deliveries History Tabs (if multiple purchased) */}
-          {(allDeliveries?.length || 0) > 1 && (
+          {allDeliveries.length > 1 && (
             <div className="flex items-center gap-2 overflow-x-auto pb-1">
               {allDeliveries.map((item) => (
                 <button

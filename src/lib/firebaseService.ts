@@ -1,14 +1,12 @@
 import { collection, getDocs, getDoc, doc, setDoc, updateDoc, onSnapshot, deleteDoc } from 'firebase/firestore';
 import { db, ensureFirebaseAuth } from './firebase';
-import { GiftItem, DeliveryItem, EmployeeUser, HeroBannerItem, CustomCategory, SiteSettings, UserRole, UserPermissions, SavedGiftName, VipBundle } from '../types';
-import { INITIAL_VIP_BUNDLES } from '../data/initialVipBundles';
+import { GiftItem, DeliveryItem, EmployeeUser, HeroBannerItem, CustomCategory, SiteSettings, UserRole, UserPermissions, SavedGiftName } from '../types';
 import { INITIAL_GIFTS } from '../data/initialGifts';
 import { INITIAL_EMPLOYEES } from '../data/initialEmployees';
 import { INITIAL_BANNERS } from '../data/initialBanners';
 import { INITIAL_CATEGORIES } from '../data/initialCategories';
 import { INITIAL_SAVED_GIFT_NAMES } from '../data/initialSavedNames';
 import { handleFirestoreError } from './firebaseErrors';
-import { uploadDataUrlOrFile, compressBase64Image } from '../utils/mediaStorage';
 
 export const collections = {
   gifts: collection(db, 'gifts'),
@@ -19,7 +17,6 @@ export const collections = {
   categories: collection(db, 'categories'),
   settings: collection(db, 'settings'),
   assets: collection(db, 'assets'),
-  vipBundles: collection(db, 'vip_bundles'),
 };
 
 export const DEFAULT_SITE_SETTINGS: SiteSettings = {
@@ -59,8 +56,17 @@ export async function seedDatabase() {
       await setDoc(adminDoc, officialAdmin, { merge: true });
     }
 
-    // 2. Gifts are user-created; do not seed fake mock templates
-    // Only real gifts uploaded by creators and staff are displayed.
+    // 2. Seed gifts (only if never explicitly cleared by admin and collection is empty)
+    const initDoc = await getDoc(doc(db, 'settings', 'system_init'));
+    const isGiftsCleared = initDoc.exists() && initDoc.data()?.initialGiftsCleared;
+
+    const giftsSnapshot = await getDocs(collections.gifts);
+    if (giftsSnapshot.empty && !isGiftsCleared) {
+      console.log('Seeding real gifts into Firestore database...');
+      for (const gift of INITIAL_GIFTS) {
+        await setDoc(doc(db, 'gifts', gift.id), gift);
+      }
+    }
 
     // 3. Seed banners
     const bannersSnapshot = await getDocs(collections.banners);
@@ -111,21 +117,7 @@ function sanitizeData<T extends Record<string, any>>(obj: T): Record<string, any
   const clean: Record<string, any> = {};
   for (const [k, v] of Object.entries(obj)) {
     if (v !== undefined) {
-      if (typeof v === 'string') {
-        // Enforce strict upper bound on Firestore string fields to prevent 1048487 byte rejection
-        if (v.length > 250000) {
-          console.warn(`[Firestore Sanitizer] Property "${k}" is oversized (${v.length} bytes). Truncating/protecting to prevent database crash.`);
-          if (k === 'posterUrl') {
-            clean[k] = 'https://images.unsplash.com/photo-1579783902614-a3fb3927b675?w=400&auto=format&fit=crop&q=80';
-          } else if (k === 'videoUrl') {
-            clean[k] = '';
-          } else {
-            clean[k] = v.substring(0, 10000);
-          }
-        } else {
-          clean[k] = v;
-        }
-      } else if (v && typeof v === 'object' && !Array.isArray(v)) {
+      if (v && typeof v === 'object' && !Array.isArray(v)) {
         clean[k] = sanitizeData(v);
       } else {
         clean[k] = v;
@@ -135,37 +127,24 @@ function sanitizeData<T extends Record<string, any>>(obj: T): Record<string, any
   return clean;
 }
 
-// Explicit IDs of template mock/dummy gifts from initial templates
-export const INITIAL_DUMMY_IDS = new Set([
-  'NO.243751', 'NO.254391', 'NO.253994', 'NO.252990', 'NO.250661',
-  'NO.249888', 'NO.248301', 'NO.247290', 'NO.246112', 'NO.245889',
-  'NO.244302', 'NO.243110'
-]);
-
 // Helper to detect any artificially created dummy/test gifts to satisfy user request
 export const isDummyGift = (gift: Partial<GiftItem>): boolean => {
   if (!gift || !gift.id) return false;
-  // Match only explicit DUMMY_ or MOCK_ markers
-  if (gift.id.startsWith('DUMMY_') || gift.id.startsWith('MOCK_')) {
+  // Match NO.242... dummy range created earlier, or DUMMY, TEST, MOCK
+  if (gift.id.startsWith('NO.242') || gift.id.startsWith('DUMMY_') || gift.id.startsWith('TEST_') || gift.id.startsWith('MOCK_')) {
     return true;
   }
-  // Match initial template dummy items
-  if (INITIAL_DUMMY_IDS.has(gift.id)) {
-    return true;
-  }
-  // Match dummy template external media
-  if (gift.videoUrl && gift.videoUrl.includes('assets.mixkit.co')) return true;
-  if (gift.deliveryUrl && gift.deliveryUrl.includes('cdn.jwtexiao.com/downloads/vfx/')) return true;
-  if (gift.titleAr === 'زهرة القمر الطائر' && gift.price === 49) return true;
-  if (gift.titleAr === 'رقصة تحت ضوء القمر' && gift.price === 29) return true;
-  if (gift.titleAr === 'تشانغ إي تحلق للقمر' && gift.price === 35) return true;
-  if (gift.titleAr === 'صدى مملكة الجليد' && gift.price === 28) return true;
-  if (gift.titleAr === 'عهد السراب الفضي' && gift.price === 45) return true;
-  if (gift.titleAr === '999 وردة حمراء متفتحة' && gift.price === 32) return true;
-  if (gift.titleAr === 'خريف القمر المنسوج' && gift.price === 19) return true;
-  if (gift.titleAr === 'أرنب النجوم الكونية' && gift.price === 24) return true;
-  if (gift.titleAr === 'إلهة الشفق القطبي' && gift.price === 38) return true;
-  if (gift.titleAr === 'المحارب المدرع الأسود' && gift.price === 34) return true;
+  const dummyKeywords = [
+    '黄金帝王冠冕', 'تاج الملوك الذهبي الفاخر',
+    '赛博幽灵超跑', 'سيارة سايبربانك فانتوم الخارقة',
+    '永恒之心钻戒', 'خاتم الألماس الأبدي الفاخر',
+    '星河冠军战旗', 'راية أبطال المجرة الكونية',
+    '幻海星途游艇', 'يخت المحيط الفاخر المسافر',
+    '不死神鸟涅槃', 'طائر الفينيق الخالد المنبعث',
+    '冰魄幻晶王座', 'عرش الكريستال الجليدي الملكي'
+  ];
+  if (gift.title && dummyKeywords.includes(gift.title)) return true;
+  if (gift.titleAr && dummyKeywords.includes(gift.titleAr)) return true;
   return false;
 };
 
@@ -206,7 +185,7 @@ export async function purgeDummyGifts(): Promise<number> {
 // ----------------- GIFTS -----------------
 export function subscribeToGifts(callback: (gifts: GiftItem[]) => void) {
   return onSnapshot(collections.gifts, (snapshot) => {
-    const rawGifts = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as GiftItem));
+    const rawGifts = snapshot.docs.map(d => d.data() as GiftItem);
     // Remove any dummy gifts and silently clean them up
     const gifts = rawGifts.filter(g => !isDummyGift(g));
     rawGifts.forEach(g => {
@@ -225,34 +204,20 @@ export function subscribeToGifts(callback: (gifts: GiftItem[]) => void) {
       const isCleared = localStorage.getItem('jiawei_gifts_cleared') === 'true';
       const map = new Map<string, GiftItem>();
 
-      // Firestore cloud gifts take absolute priority
-      gifts.forEach(g => {
-        if (!isDummyGift(g)) map.set(g.id, g);
-      });
+      // Firestore gifts take priority
+      gifts.forEach(g => map.set(g.id, g));
       cleanLocal.forEach((g: GiftItem) => {
-        if (!map.has(g.id) && !isDummyGift(g)) map.set(g.id, g);
+        if (!map.has(g.id)) map.set(g.id, g);
       });
 
-      const allGifts = Array.from(map.values()).filter(g => !isDummyGift(g));
-      // Sort newest gifts first so any newly uploaded gift immediately reflects at the top of the storefront!
-      allGifts.sort((a, b) => {
-        const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-        const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-        if (timeA && timeB && timeA !== timeB) return timeB - timeA;
-        return (b.id || '').localeCompare(a.id || '');
-      });
+      // Only if no gifts exist at all and never cleared, fall back to initial gifts
+      if (map.size === 0 && !isCleared) {
+        INITIAL_GIFTS.filter(g => !isDummyGift(g)).forEach(g => map.set(g.id, g));
+      }
 
-      callback(allGifts);
+      callback(Array.from(map.values()));
       return;
     } catch(e) {}
-
-    // Sort newest gifts first
-    gifts.sort((a, b) => {
-      const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-      const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-      if (timeA && timeB && timeA !== timeB) return timeB - timeA;
-      return (b.id || '').localeCompare(a.id || '');
-    });
     callback(gifts);
   }, (error) => {
     console.error('Error subscribing to gifts:', handleFirestoreError(error));
@@ -261,69 +226,28 @@ export function subscribeToGifts(callback: (gifts: GiftItem[]) => void) {
       const cleanLocal = localGifts.filter(g => !isDummyGift(g));
       const map = new Map<string, GiftItem>();
       cleanLocal.forEach((g: GiftItem) => map.set(g.id, g));
+      if (map.size === 0) {
+        INITIAL_GIFTS.filter(g => !isDummyGift(g)).forEach(g => map.set(g.id, g));
+      }
       callback(Array.from(map.values()));
     } catch(e) {}
   });
 }
 
-export async function addGift(gift: GiftItem): Promise<void> {
+export async function addGift(gift: GiftItem) {
   if (isDummyGift(gift)) return;
-
-  // Protect against Firestore 1MB field size limit by safely uploading base64 data URLs to server storage
-  let safePosterUrl = gift.posterUrl || '';
-  let safeVideoUrl = gift.videoUrl || '';
-
-  if (safePosterUrl && (safePosterUrl.length > 50000 || safePosterUrl.startsWith('data:'))) {
-    try {
-      safePosterUrl = await uploadDataUrlOrFile(safePosterUrl, `poster_${gift.id}.png`);
-    } catch (e) {
-      console.warn('Poster safe conversion note:', e);
-    }
-  }
-
-  // Double-check safePosterUrl size: ensure it never exceeds 100KB
-  if (safePosterUrl && safePosterUrl.length > 80000) {
-    try {
-      safePosterUrl = await compressBase64Image(safePosterUrl, 320, 0.65);
-    } catch(e) {}
-    if (safePosterUrl.length > 150000) {
-      safePosterUrl = 'https://images.unsplash.com/photo-1579783902614-a3fb3927b675?w=400&auto=format&fit=crop&q=80';
-    }
-  }
-
-  if (safeVideoUrl && (safeVideoUrl.length > 50000 || safeVideoUrl.startsWith('data:'))) {
-    try {
-      safeVideoUrl = await uploadDataUrlOrFile(safeVideoUrl, `media_${gift.id}`);
-    } catch (e) {
-      console.warn('Video safe conversion note:', e);
-    }
-  }
-
-  if (safeVideoUrl && safeVideoUrl.length > 150000 && safeVideoUrl.startsWith('data:')) {
-    safeVideoUrl = gift.deliveryUrl || '';
-  }
-
-  const cleanGift: GiftItem = {
-    ...gift,
-    posterUrl: safePosterUrl,
-    videoUrl: safeVideoUrl,
-    createdAt: gift.createdAt || new Date().toISOString()
-  };
-
   try {
     const localGifts = JSON.parse(localStorage.getItem('jiawei_custom_gifts_v1') || '[]');
-    const filtered = localGifts.filter((g: GiftItem) => g.id !== cleanGift.id && !isDummyGift(g));
-    filtered.unshift(cleanGift);
+    const filtered = localGifts.filter((g: GiftItem) => g.id !== gift.id && !isDummyGift(g));
+    filtered.unshift(gift);
     localStorage.setItem('jiawei_custom_gifts_v1', JSON.stringify(filtered));
   } catch(e) {}
 
   try {
-    await ensureFirebaseAuth().catch(() => {});
-    await setDoc(doc(db, 'gifts', cleanGift.id), sanitizeData(cleanGift));
-    console.log(`[Firestore] Successfully uploaded gift [${cleanGift.id}] to cloud database!`);
+    await ensureFirebaseAuth();
+    await setDoc(doc(db, 'gifts', gift.id), sanitizeData(gift));
   } catch (error) {
     console.error('Error adding gift to Firestore:', handleFirestoreError(error));
-    throw error;
   }
 }
 
@@ -331,42 +255,13 @@ export async function addGift(gift: GiftItem): Promise<void> {
  * Batch add multiple gifts to Firestore & local state simultaneously
  */
 export async function addGiftsBatch(giftsToAdd: GiftItem[]): Promise<void> {
-  const processedGifts: GiftItem[] = [];
-  for (const g of giftsToAdd) {
-    if (isDummyGift(g)) continue;
-    let safePoster = g.posterUrl || '';
-    let safeVideo = g.videoUrl || '';
-    if (safePoster && (safePoster.length > 50000 || safePoster.startsWith('data:'))) {
-      safePoster = await uploadDataUrlOrFile(safePoster, `poster_${g.id}.png`);
-    }
-    if (safePoster && safePoster.length > 80000) {
-      try {
-        safePoster = await compressBase64Image(safePoster, 320, 0.65);
-      } catch(e) {}
-      if (safePoster.length > 150000) {
-        safePoster = 'https://images.unsplash.com/photo-1579783902614-a3fb3927b675?w=400&auto=format&fit=crop&q=80';
-      }
-    }
-    if (safeVideo && (safeVideo.length > 50000 || safeVideo.startsWith('data:'))) {
-      safeVideo = await uploadDataUrlOrFile(safeVideo, `media_${g.id}`);
-    }
-    if (safeVideo && safeVideo.length > 150000 && safeVideo.startsWith('data:')) {
-      safeVideo = g.deliveryUrl || '';
-    }
-    processedGifts.push({
-      ...g,
-      posterUrl: safePoster,
-      videoUrl: safeVideo,
-      createdAt: g.createdAt || new Date().toISOString()
-    });
-  }
-
-  if (processedGifts.length === 0) return;
+  const validGifts = giftsToAdd.filter(g => !isDummyGift(g));
+  if (validGifts.length === 0) return;
 
   try {
     const localGifts: GiftItem[] = JSON.parse(localStorage.getItem('jiawei_custom_gifts_v1') || '[]');
     const map = new Map<string, GiftItem>();
-    processedGifts.forEach(g => map.set(g.id, g));
+    validGifts.forEach(g => map.set(g.id, g));
     localGifts.forEach(g => {
       if (!map.has(g.id) && !isDummyGift(g)) {
         map.set(g.id, g);
@@ -376,54 +271,26 @@ export async function addGiftsBatch(giftsToAdd: GiftItem[]): Promise<void> {
   } catch(e) {}
 
   try {
-    await ensureFirebaseAuth().catch(() => {});
-    const batchPromises = processedGifts.map(gift => setDoc(doc(db, 'gifts', gift.id), sanitizeData(gift)));
+    await ensureFirebaseAuth();
+    const batchPromises = validGifts.map(gift => setDoc(doc(db, 'gifts', gift.id), sanitizeData(gift)));
     await Promise.all(batchPromises);
-    console.log(`[Firestore] Successfully batch uploaded ${processedGifts.length} gifts to cloud database!`);
   } catch (error) {
     console.error('Error batch adding gifts to Firestore:', handleFirestoreError(error));
-    throw error;
   }
 }
 
 export async function updateGift(gift: GiftItem) {
-  let safePoster = gift.posterUrl || '';
-  let safeVideo = gift.videoUrl || '';
-  if (safePoster && (safePoster.length > 50000 || safePoster.startsWith('data:'))) {
-    safePoster = await uploadDataUrlOrFile(safePoster, `poster_${gift.id}.png`);
-  }
-  if (safePoster && safePoster.length > 80000) {
-    try {
-      safePoster = await compressBase64Image(safePoster, 320, 0.65);
-    } catch(e) {}
-    if (safePoster.length > 150000) {
-      safePoster = 'https://images.unsplash.com/photo-1579783902614-a3fb3927b675?w=400&auto=format&fit=crop&q=80';
-    }
-  }
-  if (safeVideo && (safeVideo.length > 50000 || safeVideo.startsWith('data:'))) {
-    safeVideo = await uploadDataUrlOrFile(safeVideo, `media_${gift.id}`);
-  }
-  if (safeVideo && safeVideo.length > 150000 && safeVideo.startsWith('data:')) {
-    safeVideo = gift.deliveryUrl || '';
-  }
-
-  const updated: GiftItem = {
-    ...gift,
-    posterUrl: safePoster,
-    videoUrl: safeVideo
-  };
-
   try {
     const localGifts = JSON.parse(localStorage.getItem('jiawei_custom_gifts_v1') || '[]');
-    const idx = localGifts.findIndex((g: GiftItem) => g.id === updated.id);
-    if (idx >= 0) localGifts[idx] = updated;
-    else localGifts.unshift(updated);
+    const idx = localGifts.findIndex((g: GiftItem) => g.id === gift.id);
+    if (idx >= 0) localGifts[idx] = gift;
+    else localGifts.unshift(gift);
     localStorage.setItem('jiawei_custom_gifts_v1', JSON.stringify(localGifts));
   } catch(e) {}
 
   try {
-    await ensureFirebaseAuth().catch(() => {});
-    await setDoc(doc(db, 'gifts', updated.id), sanitizeData(updated), { merge: true });
+    await ensureFirebaseAuth();
+    await setDoc(doc(db, 'gifts', gift.id), sanitizeData(gift), { merge: true });
   } catch (error) {
     console.error('Error updating gift in Firestore:', handleFirestoreError(error));
   }
@@ -615,7 +482,7 @@ export async function toggleEmployeeStatus(id: string, status: 'active' | 'inact
   }
 }
 
-export async function updateEmployeePermissions(id: string, permissions: Partial<UserPermissions>, role: UserRole = 'employee') {
+export async function updateEmployeePermissions(id: string, permissions: Partial<UserPermissions>, role: UserRole | 'designer' | 'employee' = 'employee') {
   try {
     await ensureFirebaseAuth();
     const colName = (role === 'designer' || role === 'admin' || role === 'employee') 
@@ -631,7 +498,7 @@ export async function updateEmployeePermissions(id: string, permissions: Partial
   }
 }
 
-export async function toggleEmployeeGiftPermission(id: string, canUpload: boolean, role: UserRole = 'employee') {
+export async function toggleEmployeeGiftPermission(id: string, canUpload: boolean, role: UserRole | 'designer' | 'employee' = 'employee') {
   try {
     await ensureFirebaseAuth();
     const colName = (role === 'designer' || role === 'admin' || role === 'employee') 
@@ -645,7 +512,7 @@ export async function toggleEmployeeGiftPermission(id: string, canUpload: boolea
     } catch {
       await setDoc(empRef, { 
         permissions: { 
-          giftUploadAndPublish: canUpload 
+            giftUploadAndPublish: canUpload 
         } 
       }, { merge: true });
     }
@@ -655,7 +522,7 @@ export async function toggleEmployeeGiftPermission(id: string, canUpload: boolea
   }
 }
 
-export async function deleteEmployee(id: string, role: UserRole = 'employee') {
+export async function deleteEmployee(id: string, role: UserRole | 'designer' | 'employee' = 'employee') {
   try {
     await ensureFirebaseAuth();
     const colName = (role === 'designer' || role === 'admin' || role === 'employee') 
@@ -1152,142 +1019,47 @@ export function subscribeToOptimizerSettings(callback: (settings: any) => void):
   }
 }
 
-// ----------------------------------------------------------------------
-// VIP Bundles Functions
-// ----------------------------------------------------------------------
-export async function saveVipBundle(bundle: VipBundle): Promise<void> {
+// ----------------- VIP BUNDLES -----------------
+export async function saveVipBundle(bundle: any) {
   try {
-    await ensureFirebaseAuth();
-    const docRef = doc(db, 'vip_bundles', bundle.id);
-    await setDoc(docRef, {
-      ...bundle,
-      updatedAt: new Date().toISOString()
-    }, { merge: true });
-  } catch (error) {
-    console.warn('Error saving VIP bundle:', error);
-  }
+    const local = JSON.parse(localStorage.getItem('jiawei_vip_bundles_v1') || '[]');
+    const idx = local.findIndex((b: any) => b.id === bundle.id);
+    if (idx >= 0) local[idx] = bundle;
+    else local.push(bundle);
+    localStorage.setItem('jiawei_vip_bundles_v1', JSON.stringify(local));
+  } catch (e) {}
+}
+
+export async function deleteVipBundle(id: string) {
   try {
-    const local = localStorage.getItem('jiawei_vip_bundles_v1');
-    let list: VipBundle[] = local ? JSON.parse(local) : [...INITIAL_VIP_BUNDLES];
-    const idx = list.findIndex(b => b.id === bundle.id);
+    const local = JSON.parse(localStorage.getItem('jiawei_vip_bundles_v1') || '[]');
+    const updated = local.filter((b: any) => b.id !== id);
+    localStorage.setItem('jiawei_vip_bundles_v1', JSON.stringify(updated));
+  } catch (e) {}
+}
+
+export async function toggleVipBundleVisibility(id: string, isVisible: boolean) {
+  try {
+    const local = JSON.parse(localStorage.getItem('jiawei_vip_bundles_v1') || '[]');
+    const idx = local.findIndex((b: any) => b.id === id);
     if (idx >= 0) {
-      list[idx] = bundle;
-    } else {
-      list.push(bundle);
-    }
-    localStorage.setItem('jiawei_vip_bundles_v1', JSON.stringify(list));
-  } catch (e) {}
-}
-
-export async function deleteVipBundle(bundleId: string): Promise<void> {
-  try {
-    await ensureFirebaseAuth();
-    const docRef = doc(db, 'vip_bundles', bundleId);
-    await deleteDoc(docRef);
-  } catch (error) {
-    console.warn('Error deleting VIP bundle:', error);
-  }
-  try {
-    const local = localStorage.getItem('jiawei_vip_bundles_v1');
-    if (local) {
-      const list: VipBundle[] = JSON.parse(local);
-      const filtered = list.filter(b => b.id !== bundleId);
-      localStorage.setItem('jiawei_vip_bundles_v1', JSON.stringify(filtered));
+      local[idx].isVisible = isVisible;
+      localStorage.setItem('jiawei_vip_bundles_v1', JSON.stringify(local));
     }
   } catch (e) {}
 }
 
-export async function toggleVipBundleVisibility(bundleId: string, currentVisible: boolean): Promise<void> {
-  try {
-    await ensureFirebaseAuth();
-    const docRef = doc(db, 'vip_bundles', bundleId);
-    await updateDoc(docRef, { isVisible: !currentVisible, updatedAt: new Date().toISOString() });
-  } catch (error) {
-    console.warn('Error toggling VIP bundle visibility:', error);
-  }
-  try {
-    const local = localStorage.getItem('jiawei_vip_bundles_v1');
-    if (local) {
-      const list: VipBundle[] = JSON.parse(local);
-      const target = list.find(b => b.id === bundleId);
-      if (target) {
-        target.isVisible = !currentVisible;
-        localStorage.setItem('jiawei_vip_bundles_v1', JSON.stringify(list));
-      }
-    }
-  } catch (e) {}
-}
-
-export async function reorderVipBundles(bundles: VipBundle[]): Promise<void> {
-  try {
-    await ensureFirebaseAuth();
-    for (let i = 0; i < bundles.length; i++) {
-      const b = bundles[i];
-      const docRef = doc(db, 'vip_bundles', b.id);
-      await updateDoc(docRef, { order: i + 1, updatedAt: new Date().toISOString() }).catch(() => {});
-    }
-  } catch (error) {
-    console.warn('Error reordering VIP bundles:', error);
-  }
+export async function reorderVipBundles(bundles: any[]) {
   try {
     localStorage.setItem('jiawei_vip_bundles_v1', JSON.stringify(bundles));
   } catch (e) {}
 }
 
-export function subscribeToVipBundles(callback: (bundles: VipBundle[]) => void): () => void {
+export async function saveGameOdds(config: any) {
   try {
-    return onSnapshot(collections.vipBundles, (snap) => {
-      if (!snap.empty) {
-        const list: VipBundle[] = snap.docs.map(d => d.data() as VipBundle);
-        list.sort((a, b) => (a.order || 0) - (b.order || 0));
-        localStorage.setItem('jiawei_vip_bundles_v1', JSON.stringify(list));
-        callback(list);
-      } else {
-        const local = localStorage.getItem('jiawei_vip_bundles_v1');
-        if (local) {
-          try {
-            callback(JSON.parse(local));
-          } catch (e) {
-            callback([...INITIAL_VIP_BUNDLES]);
-          }
-        } else {
-          callback([...INITIAL_VIP_BUNDLES]);
-        }
-      }
-    }, (err) => {
-      const local = localStorage.getItem('jiawei_vip_bundles_v1');
-      if (local) {
-        try {
-          callback(JSON.parse(local));
-        } catch (e) {
-          callback([...INITIAL_VIP_BUNDLES]);
-        }
-      } else {
-        callback([...INITIAL_VIP_BUNDLES]);
-      }
-    });
-  } catch (e) {
-    callback([...INITIAL_VIP_BUNDLES]);
-    return () => {};
-  }
-}
-
-export async function saveGameOdds(odds: any): Promise<void> {
-  try {
-    await ensureFirebaseAuth();
-    const docRef = doc(db, 'settings', 'game_odds');
-    await setDoc(docRef, {
-      ...odds,
-      updatedAt: new Date().toISOString()
-    }, { merge: true });
-  } catch (error) {
-    console.warn('Error saving game odds to Firestore:', error);
-  }
-  try {
-    localStorage.setItem('jiawei_game_odds_config_v1', JSON.stringify(odds));
+    localStorage.setItem('jiawei_game_odds_v1', JSON.stringify(config));
   } catch (e) {}
 }
-
 
 
 

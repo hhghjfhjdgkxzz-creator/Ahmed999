@@ -1,12 +1,10 @@
 {
-  "projectId": "svga-vip",
-  "appId": "1:850648356406:web:986246d3ab7f61724c2a97",
-  "apiKey": "AIzaSyDcF8JDy7djoMGpsRAkM-Nqjmq2KswqQgI",
-  "authDomain": "svga-vip.firebaseapp.com",
+  "projectId": "design-svga",
+  "appId": "1:255075636659:web:7fc736ff19ebde8d1327c6",
+  "apiKey": "AIzaSyCHEreseXhLUBgPCUxoWTjYc8XeAOaNCiY",
+  "authDomain": "design-svga.firebaseapp.com",
   "firestoreDatabaseId": "(default)",
-  "storageBucket": "svga-vip.firebasestorage.app",
-  "messagingSenderId": "850648356406",
-  "measurementId": "",
-  "oAuthClientId": "",
-  "recaptchaSiteKey": ""
+  "storageBucket": "design-svga.firebasestorage.app",
+  "messagingSenderId": "255075636659",
+  "measurementId": ""
 }

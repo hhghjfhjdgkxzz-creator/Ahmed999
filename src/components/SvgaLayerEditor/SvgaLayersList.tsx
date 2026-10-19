@@ -15,6 +15,7 @@ interface SvgaLayersListProps {
   selectedLayerId: string | null;
   selectedLayerIds?: string[];
   currentFrame: number;
+  totalFrames?: number;
   onSelectLayer: (id: string, isMulti?: boolean, isRange?: boolean) => void;
   onSelectAllLayers?: (select: boolean, filterScope?: 'all' | 'bundles' | 'base') => void;
   onToggleLayerSelection?: (id: string) => void;
@@ -48,6 +49,7 @@ export const SvgaLayersList: React.FC<SvgaLayersListProps> = ({
   selectedLayerId,
   selectedLayerIds = [],
   currentFrame,
+  totalFrames = 60,
   onSelectLayer,
   onSelectAllLayers,
   onToggleLayerSelection,
@@ -160,7 +162,7 @@ export const SvgaLayersList: React.FC<SvgaLayersListProps> = ({
       return l.type === 'image' || !!l.thumbnailUrl;
     }
     if (activeTab === 'shapes') {
-      return l.type === 'shape' || l.keyframeSummary.hasShapes;
+      return l.type === 'shape' || !!l.keyframeSummary?.hasShapes;
     }
     if (activeTab === 'bundles') {
       return !!l.groupId;
@@ -936,9 +938,9 @@ export const SvgaLayersList: React.FC<SvgaLayersListProps> = ({
                       </span>
                     )}
                     <span className="text-[10px] text-indigo-400 font-bold bg-indigo-500/10 px-1.5 py-0.5 rounded border border-indigo-500/20">
-                      F{layer.keyframeSummary.startFrame}→{layer.keyframeSummary.endFrame}
+                      F{layer.inFrame ?? layer.keyframeSummary?.startFrame ?? 0}→{layer.outFrame ?? layer.keyframeSummary?.endFrame ?? (totalFrames - 1)}
                     </span>
-                    {layer.keyframeSummary.isSequenceOrRepeated && (
+                    {layer.keyframeSummary?.isSequenceOrRepeated && (
                       <div className="flex items-center gap-1">
                         <span className="text-[9px] text-teal-300 font-bold bg-teal-500/15 border border-teal-500/30 px-1.5 py-0.5 rounded flex items-center gap-1" title="طبقة متسلسلة أو متكررة في الأنيميشن">
                           <RotateCcw size={8} className="text-teal-300" />
@@ -964,6 +966,18 @@ export const SvgaLayersList: React.FC<SvgaLayersListProps> = ({
                       <span className="text-[9px] text-purple-300 font-bold bg-purple-500/20 border border-purple-500/30 px-1.5 py-0.5 rounded flex items-center gap-1">
                         <Package size={9} />
                         <span>{layer.groupName || 'مدمج'}</span>
+                      </span>
+                    )}
+                    {layer.clipToLayerId && (
+                      <span className="text-[9px] text-violet-300 font-bold bg-violet-500/20 border border-violet-500/30 px-1.5 py-0.5 rounded flex items-center gap-1" title="مدمجة كقناع Alpha Matte داخل الطبقة الأصلية">
+                        <Layers size={9} className="text-violet-400" />
+                        <span>قناع ↳ {layers.find(l => l.id === layer.clipToLayerId)?.name || 'الطبقة الأم'}</span>
+                      </span>
+                    )}
+                    {layers.filter(l => l.clipToLayerId === layer.id).length > 0 && (
+                      <span className="text-[9px] text-violet-300 font-bold bg-violet-500/15 border border-violet-500/25 px-1.5 py-0.5 rounded flex items-center gap-1" title="تحتوي على قطع مدمجة (Alpha Matte)">
+                        <Layers size={9} className="text-violet-400" />
+                        <span>+{layers.filter(l => l.clipToLayerId === layer.id).length} مدمجة</span>
                       </span>
                     )}
                     {layer.keyframes && layer.keyframes.length > 0 && (

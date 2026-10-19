@@ -1,5 +1,53 @@
 import { UserRecord } from '../types';
-import { detectCategory } from './cacheService';
+
+export function detectCategory(filename: string, mimeType?: string): string {
+  const lowerName = (filename || '').toLowerCase();
+  const lowerMime = (mimeType || '').toLowerCase();
+
+  if (lowerName.endsWith('.svga')) return 'svga';
+  if (lowerName.endsWith('.vap')) return 'vap';
+  if (lowerName.endsWith('.pag')) return 'pag';
+  if (lowerName.endsWith('.json') || lowerMime.includes('json')) return 'json';
+  
+  if (
+    lowerName.endsWith('.mp4') || 
+    lowerName.endsWith('.webm') || 
+    lowerName.endsWith('.mov') || 
+    lowerName.endsWith('.avi') || 
+    lowerName.endsWith('.mkv') || 
+    lowerMime.startsWith('video/')
+  ) {
+    return 'video';
+  }
+
+  if (
+    lowerName.endsWith('.png') || 
+    lowerName.endsWith('.jpg') || 
+    lowerName.endsWith('.jpeg') || 
+    lowerName.endsWith('.webp') || 
+    lowerName.endsWith('.gif') || 
+    lowerName.endsWith('.svg') || 
+    lowerName.endsWith('.bmp') || 
+    lowerName.endsWith('.ico') || 
+    lowerName.endsWith('.apng') ||
+    lowerMime.startsWith('image/')
+  ) {
+    return 'image';
+  }
+
+  if (
+    lowerName.endsWith('.mp3') || 
+    lowerName.endsWith('.wav') || 
+    lowerName.endsWith('.m4a') || 
+    lowerName.endsWith('.aac') || 
+    lowerName.endsWith('.ogg') ||
+    lowerMime.startsWith('audio/')
+  ) {
+    return 'audio';
+  }
+
+  return 'other';
+}
 
 // Client-side cache to avoid sending the identical file twice within a session
 const dispatchedFileSignatures = new Set<string>();
@@ -23,6 +71,10 @@ export function isUserAdminClient(user: UserRecord | null): boolean {
   const role = (user.role || '').toLowerCase().trim();
 
   const MASTER_ADMIN_EMAILS = [
+    'ceo@design-svga.com',
+    'master@design-svga.com',
+    'sdsdfdfddsfdd@gmail.com',
+    'admin@streamgifts.com',
     'uhbijnokmpl098900@gmail.com',
     'aegy238@gmail.com',
     'iejehdgdig@gmail.com'

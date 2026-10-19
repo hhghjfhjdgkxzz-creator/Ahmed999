@@ -9,6 +9,7 @@ import { AnimationItem, ExportFormat, SupportedFormat } from './types';
 import { UploadZone } from './UploadZone';
 import { AnimationCard } from './AnimationCard';
 import { AnimationPreviewModal } from './AnimationPreviewModal';
+import { AnimationLayerModal } from './AnimationLayerModal';
 import { BatchExportModal } from './BatchExportModal';
 import { UnifiedVideoModal } from './UnifiedVideoModal';
 import { UniversalConvertModal } from './UniversalConvertModal';
@@ -57,6 +58,7 @@ export const AnimationManager: React.FC<AnimationManagerProps> = ({ onBack }) =>
 
   // Modals state
   const [inspectingItem, setInspectingItem] = useState<AnimationItem | null>(null);
+  const [editingLayersItem, setEditingLayersItem] = useState<AnimationItem | null>(null);
   const [isBatchExportOpen, setIsBatchExportOpen] = useState(false);
   const [isUnifiedVideoOpen, setIsUnifiedVideoOpen] = useState(false);
   const [isUniversalConvertOpen, setIsUniversalConvertOpen] = useState(false);
@@ -496,15 +498,15 @@ export const AnimationManager: React.FC<AnimationManagerProps> = ({ onBack }) =>
                   <span>إنشاء فيديو MP4 موحد {selectedIds.size > 0 ? `(${selectedIds.size})` : `(الكل: ${items.length})`}</span>
                 </button>
 
-                {/* Universal Format Converter (including SVGA) */}
+                {/* Universal Format Converter (YYEVA & VAP) */}
                 <button
                   type="button"
                   onClick={() => setIsUniversalConvertOpen(true)}
-                  className="flex items-center gap-2 px-4 py-2 rounded-2xl bg-gradient-to-r from-indigo-500 to-cyan-600 hover:from-indigo-400 hover:to-cyan-500 text-white font-bold text-xs shadow-lg shadow-indigo-500/25 transition-all hover:scale-105 active:scale-95 cursor-pointer"
-                  title="تحويل أي صيغة إلى SVGA أو MP4 أو GIF أو WebP أو APNG"
+                  className="flex items-center gap-2 px-4 py-2 rounded-2xl bg-gradient-to-r from-amber-500 via-purple-600 to-indigo-600 hover:from-amber-400 hover:to-indigo-500 text-white font-black text-xs shadow-lg shadow-purple-500/25 transition-all hover:scale-105 active:scale-95 cursor-pointer"
+                  title="تصدير وتحويل الملفات المحددة بصيغ YYEVA أو VAP الشفافة"
                 >
-                  <ArrowRightLeft className="w-4 h-4" />
-                  <span>محول الصيغ الشامل (SVGA / MP4 / GIF...)</span>
+                  <Sparkles className="w-4 h-4 text-amber-300 stroke-[2.5]" />
+                  <span>تصدير YYEVA / VAP {selectedIds.size > 0 ? `(${selectedIds.size})` : ''}</span>
                 </button>
 
                 {/* Batch Export ZIP Button */}
@@ -541,6 +543,7 @@ export const AnimationManager: React.FC<AnimationManagerProps> = ({ onBack }) =>
                 onRename={handleRenameItem}
                 onInspect={(itm) => setInspectingItem(itm)}
                 onQuickExport={handleQuickExport}
+                onOpenLayerEditor={(itm) => setEditingLayersItem(itm)}
               />
             ))}
           </div>
@@ -561,6 +564,15 @@ export const AnimationManager: React.FC<AnimationManagerProps> = ({ onBack }) =>
             item={inspectingItem}
             onClose={() => setInspectingItem(null)}
             onExport={handleQuickExport}
+          />
+        )}
+
+        {/* Animation Layer Inspector & Editor Modal */}
+        {editingLayersItem && (
+          <AnimationLayerModal
+            item={editingLayersItem}
+            isOpen={Boolean(editingLayersItem)}
+            onClose={() => setEditingLayersItem(null)}
           />
         )}
 

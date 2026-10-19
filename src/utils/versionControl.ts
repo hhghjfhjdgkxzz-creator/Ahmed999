@@ -142,9 +142,6 @@ export const verifyAccountVersionWithServer = async (
   }
 };
 
-let lastVersionCheckTime = 0;
-let lastVersionResult: any = null;
-
 /**
  * Check if a new server update/build has been deployed
  */
@@ -154,21 +151,13 @@ export const checkForServerUpdate = async (): Promise<{
   serverBuildId?: string;
   serverBuildTime?: string;
 }> => {
-  const now = Date.now();
-  // Client throttle: do not hit server more than once every 3 minutes
-  if (lastVersionResult && (now - lastVersionCheckTime < 3 * 60 * 1000)) {
-    return lastVersionResult;
-  }
-
   try {
-    const res = await fetch('/api/version', {
-      headers: { 'Accept': 'application/json' }
+    const cacheBuster = `t=${Date.now()}`;
+    const res = await fetch(`/api/version?${cacheBuster}`, {
+      cache: 'no-store',
+      headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
     });
-    if (!res.ok) {
-      lastVersionCheckTime = now;
-      lastVersionResult = { hasUpdate: false };
-      return lastVersionResult;
-    }
+    if (!res.ok) return { hasUpdate: false };
     const data = await res.json();
     
     const serverVersion = (data.version || '').trim();
@@ -177,27 +166,23 @@ export const checkForServerUpdate = async (): Promise<{
 
     // If client version matches server version or user already applied this server version, no update needed
     if (!serverVersion || serverVersion === clientVersion || serverVersion === lastApplied) {
-      lastVersionCheckTime = now;
-      lastVersionResult = {
+      return {
         hasUpdate: false,
         serverVersion,
         serverBuildId: data.buildId,
         serverBuildTime: data.buildTime
       };
-      return lastVersionResult;
     }
 
     // New version detected on server
     const isNewVersion = serverVersion !== clientVersion;
 
-    lastVersionCheckTime = now;
-    lastVersionResult = {
-      hasUpdate: isNewVersion,
-      serverVersion,
+    return {
+      hasUpdate: Boolean(isNewVersion),
+      serverVersion: data.version,
       serverBuildId: data.buildId,
       serverBuildTime: data.buildTime
     };
-    return lastVersionResult;
   } catch (err) {
     return { hasUpdate: false };
   }

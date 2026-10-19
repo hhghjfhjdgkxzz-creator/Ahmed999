@@ -28,83 +28,103 @@ interface FormatOption {
 const FORMAT_OPTIONS: FormatOption[] = [
   {
     format: 'svga',
-    name: 'صيغة SVGA 2.0',
+    name: 'صيغة SVGA (SVGA 2.0 Animation)',
     badge: 'SVGA',
     ext: '.svga',
-    desc: 'صيغة الأنيميشن الفائقة للألعاب وتطبيقات البث المباشر مع دعم كامل للشفافية وتوفير المساحة.',
+    desc: 'تنسيق الرسوم المتحركة القياسي SVGA 2.0 خفيف الحجم وعالي الأداء لتطبيقات الهدايا مع الحفاظ على الطبقات والحركة.',
+    color: 'text-sky-400',
+    bg: 'bg-sky-500/15',
+    border: 'border-sky-500/30'
+  },
+  {
+    format: 'yyeva',
+    name: 'صيغة YYEVA (YY Transparent Video)',
+    badge: 'YYEVA',
+    ext: '.mp4',
+    desc: 'صيغة الفيديو الشفاف القياسية لـ YYEVA مع قناة ألفا وصندوق بيانات yyea بالمدة الكاملة الصحيحة.',
+    color: 'text-amber-400',
+    bg: 'bg-amber-500/15',
+    border: 'border-amber-500/30'
+  },
+  {
+    format: 'vap',
+    name: 'صيغة VAP (Tencent VAP)',
+    badge: 'VAP',
+    ext: '.vap',
+    desc: 'فيديو شفاف مع قناة ألفا مدمجة وصندوق بيانات vapc لتطبيقات الهدايا والبث المباشر بالمدة الكاملة الصحيحة.',
+    color: 'text-violet-400',
+    bg: 'bg-violet-500/15',
+    border: 'border-violet-500/30'
+  },
+  {
+    format: 'mp4',
+    name: 'فيديو MP4 (Standard Video)',
+    badge: 'MP4',
+    ext: '.mp4',
+    desc: 'تنسيق فيديو MP4 القياسي عالي الوضوح متوافق مع كافة المشغلات والأجهزة والمنصات.',
     color: 'text-indigo-400',
     bg: 'bg-indigo-500/15',
     border: 'border-indigo-500/30'
   },
   {
-    format: 'mp4',
-    name: 'فيديو MP4 عالي الدقة',
-    badge: 'MP4',
-    ext: '.mp4',
-    desc: 'فيديو H.264 متوافق مع كافة المشغلات ومواقع التواصل ومناسب للعرض التوضيحي.',
-    color: 'text-red-400',
-    bg: 'bg-red-500/15',
-    border: 'border-red-500/30'
-  },
-  {
-    format: 'webp',
-    name: 'صيغة WebP متحرك',
-    badge: 'WEBP',
-    ext: '.webp',
-    desc: 'صيغة ويب حديثة وفائقة الضغط مع دعم الشفافية وألوان 24 بت حقيقية.',
+    format: 'webm',
+    name: 'فيديو WebM (VP9 Transparent)',
+    badge: 'WebM',
+    ext: '.webm',
+    desc: 'فيديو WebM VP9 شفاف حقيقي بدون تقسيم للألفا، مثالي للاستخدام المباشر على صفحات الويب.',
     color: 'text-emerald-400',
     bg: 'bg-emerald-500/15',
     border: 'border-emerald-500/30'
   },
   {
     format: 'gif',
-    name: 'صيغة GIF متحرك',
+    name: 'صورة متحركة GIF (Animation)',
     badge: 'GIF',
     ext: '.gif',
-    desc: 'الصيغة التقليدية الشائعة للصور المتحركة مع شفافية وتوافق عالمي.',
-    color: 'text-amber-400',
-    bg: 'bg-amber-500/15',
-    border: 'border-amber-500/30'
+    desc: 'صورة متحركة تدعم الشفافية والتكرار المستمر ومناسبة لكافة المتصفحات والمحادثات.',
+    color: 'text-pink-400',
+    bg: 'bg-pink-500/15',
+    border: 'border-pink-500/30'
   },
   {
-    format: 'apng',
-    name: 'صيغة APNG (Animated PNG)',
-    badge: 'APNG',
-    ext: '.png',
-    desc: 'أعلى دقة نقاء وشفافية ألفا متدرجة 24-bit بدون أي تشوه أو خسارة لونية.',
-    color: 'text-purple-400',
-    bg: 'bg-purple-500/15',
-    border: 'border-purple-500/30'
-  },
-  {
-    format: 'png_frames',
-    name: 'حزمة إطارات PNG منفصلة',
-    badge: 'PNG ZIP',
-    ext: '.zip',
-    desc: 'أرشيف ZIP يحتوي على كل إطار كصورة PNG مستقلة عالية النقاء مع ملف البيانات.',
-    color: 'text-sky-400',
-    bg: 'bg-sky-500/15',
-    border: 'border-sky-500/30'
-  },
-  {
-    format: 'lottie',
-    name: 'Lottie JSON',
-    badge: 'JSON',
-    ext: '.json',
-    desc: 'تنسيق متجهي خفيف الوزن للملفات المدعومة من Lottie أو DotLottie.',
+    format: 'webp',
+    name: 'صورة متحركة WebP (Animated)',
+    badge: 'WebP',
+    ext: '.webp',
+    desc: 'صورة متحركة بدقة ألوان كاملة 24-bit مع قناة ألفا شفافة بحجم ملف مضغوط وصغير جداً.',
     color: 'text-cyan-400',
     bg: 'bg-cyan-500/15',
     border: 'border-cyan-500/30'
   },
   {
-    format: 'dotlottie',
-    name: 'DotLottie Archive',
-    badge: '.lottie',
-    ext: '.lottie',
-    desc: 'حاوية DotLottie فائقة الضغط لمكتبات وأجهزة الجوال.',
-    color: 'text-pink-400',
-    bg: 'bg-pink-500/15',
-    border: 'border-pink-500/30'
+    format: 'apng',
+    name: 'صورة متحركة APNG (Animated PNG)',
+    badge: 'APNG',
+    ext: '.png',
+    desc: 'تنسيق PNG متحرك بأعلى جودة بصرية وألوان حقيقية مع شفافية تامة وبدون فقد في التفاصيل.',
+    color: 'text-teal-400',
+    bg: 'bg-teal-500/15',
+    border: 'border-teal-500/30'
+  },
+  {
+    format: 'lottie',
+    name: 'أنيميشن Lottie (JSON Animation)',
+    badge: 'Lottie',
+    ext: '.json',
+    desc: 'ملف رسوم متحركة بصيغة JSON لـ Lottie متوافق مع تطبيقات iOS و Android والويب.',
+    color: 'text-rose-400',
+    bg: 'bg-rose-500/15',
+    border: 'border-rose-500/30'
+  },
+  {
+    format: 'png_frames',
+    name: 'سلسلة إطارات (PNG Frames ZIP)',
+    badge: 'PNG ZIP',
+    ext: '.zip',
+    desc: 'تصدير كافة إطارات الأنيميشن كصور PNG شفافة عالية الدقة داخل أرشيف ZIP منظم.',
+    color: 'text-fuchsia-400',
+    bg: 'bg-fuchsia-500/15',
+    border: 'border-fuchsia-500/30'
   }
 ];
 

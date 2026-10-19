@@ -806,11 +806,12 @@ export const SVGAViewer: React.FC<SVGAViewerProps> = ({
         await new Promise(r => setTimeout(r, 30));
         const canvas = tempContainer.querySelector('canvas');
         if (canvas) {
-          const bitmap = await createImageBitmap(canvas);
-          const frame = new VideoFrame(bitmap, { timestamp: (i / fps) * 1_000_000 });
+          const frame = new VideoFrame(canvas, {
+            timestamp: (i / fps) * 1_000_000,
+            alpha: 'discard'
+          });
           videoEncoder.encode(frame, { keyFrame: i % 30 === 0 });
           frame.close();
-          bitmap.close();
         }
         setExportProgress(Math.round(((i + 1) / totalFrames) * 85));
       }
@@ -839,9 +840,35 @@ export const SVGAViewer: React.FC<SVGAViewerProps> = ({
     }
   };
 
-  // Keyboard Shortcuts for Zoom
+  // Keyboard Shortcuts for Play/Pause, Export and Zoom
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      const activeEl = document.activeElement as HTMLElement | null;
+      const isInput = activeEl && (
+        activeEl.tagName === 'INPUT' ||
+        activeEl.tagName === 'TEXTAREA' ||
+        activeEl.tagName === 'SELECT' ||
+        activeEl.isContentEditable ||
+        Boolean(activeEl.closest('input, textarea, select, [contenteditable="true"]'))
+      );
+      if (isInput) return;
+
+      // Space: Play / Pause toggle
+      if (e.code === 'Space' || e.key === ' ') {
+        e.preventDefault();
+        togglePlay();
+        return;
+      }
+
+      // Enter or Tab: Export SVGA
+      if (e.code === 'Enter' || e.key === 'Enter' || e.code === 'Tab' || e.key === 'Tab') {
+        e.preventDefault();
+        if (!exporting) {
+          downloadModifiedSVGA();
+        }
+        return;
+      }
+
       if (e.ctrlKey || e.metaKey) {
         if (e.key === '+' || e.key === '=') {
           e.preventDefault();
@@ -860,7 +887,7 @@ export const SVGAViewer: React.FC<SVGAViewerProps> = ({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [exporting, status]);
 
   const filteredAssets = useMemo(() => {
     return assets.filter(a => (a.id || '').toLowerCase().includes((searchQuery || '').toLowerCase()));

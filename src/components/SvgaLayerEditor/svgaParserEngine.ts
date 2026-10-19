@@ -1,5 +1,6 @@
 import pako from 'pako';
 import protobuf from 'protobufjs';
+import JSZip from 'jszip';
 import { svgaSchema } from '../../svga-proto';
 import { EditableLayer, SVGAProjectData } from './types';
 
@@ -27,6 +28,18 @@ function base64ToUint8Array(base64: string): Uint8Array {
     bytes[i] = binary.charCodeAt(i);
   }
   return bytes;
+}
+
+function sniffImageMimeType(bytes: Uint8Array): string {
+  if (!bytes || bytes.length < 4) return 'image/png';
+  if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4E && bytes[3] === 0x47) return 'image/png';
+  if (bytes[0] === 0xFF && bytes[1] === 0xD8) return 'image/jpeg';
+  if (bytes.length >= 12 && bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
+      bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50) {
+    return 'image/webp';
+  }
+  if (bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46) return 'image/gif';
+  return 'image/png';
 }
 
 // Fast, memory-safe binary header dimension extractor (0ms, 0 RAM/GPU allocation)
@@ -138,10 +151,14 @@ export async function parseSvgaToProject(file: File): Promise<{
   const buffer = await file.arrayBuffer();
   const uint8Array = new Uint8Array(buffer);
 
-  // Check for ZIP signature (SVGA 1.0)
+  // Check for ZIP signature (SVGA 1.0 ZIP format)
   const isZip = uint8Array[0] === 0x50 && uint8Array[1] === 0x4B && uint8Array[2] === 0x03 && uint8Array[3] === 0x04;
   if (isZip) {
-    throw new Error('الملف بصيغة SVGA 1.0 (ZIP القديمة). يرجى استخدام ملف SVGA 2.0.');
+    try {
+      return await parseSvga1ZipToProject(buffer, file.name, file.size);
+    } catch (zipErr) {
+      console.warn('SVGA 1.0 ZIP parse attempt error, trying standard fallback:', zipErr);
+    }
   }
 
   let inflated: Uint8Array;
@@ -155,23 +172,40 @@ export async function parseSvgaToProject(file: File): Promise<{
     }
   }
 
-  const decoded = MovieEntity.decode(inflated);
-  const movie = MovieEntity.toObject(decoded, {
-    keepCase: true,
-    longs: Number,
-    enums: Number,
-    bytes: Uint8Array,
-    defaults: false,
-    arrays: true,
-    objects: true,
-    oneofs: true
-  } as any);
+  let movie: any;
+  let decoded: any;
+
+  try {
+    decoded = MovieEntity.decode(inflated);
+    movie = MovieEntity.toObject(decoded, {
+      keepCase: true,
+      longs: Number,
+      enums: Number,
+      bytes: Uint8Array,
+      defaults: false,
+      arrays: true,
+      objects: true,
+      oneofs: true
+    } as any);
+  } catch (protoErr: any) {
+    // If protobuf decode fails, check if the file is an unzipped SVGA 1.0 JSON or Lottie JSON
+    try {
+      const textDecoder = new TextDecoder('utf-8');
+      const text = textDecoder.decode(inflated);
+      const parsedJson = JSON.parse(text);
+      if (parsedJson && (parsedJson.movie || parsedJson.sprites || parsedJson.viewBox || parsedJson.images)) {
+        return parseSvga1JsonToProject(parsedJson, {}, file.name, file.size);
+      }
+    } catch {}
+
+    throw new Error(`تعذر فك ترميز ملف SVGA Protobuf: ${protoErr.message || 'بيانات غير متوافقة'}`);
+  }
 
   // Critical SVGA 2.0 Fidelity: Protobuf toObject with defaults:false strips numeric 0 values,
   // which causes frame.alpha to be undefined for inactive/hidden frames (alpha: 0).
   // In the raw protobuf decoded message, alpha is explicitly decoded as 0, 1, or fractional float.
   // We restore and preserve each frame's exact alpha value from decoded.
-  if ((decoded as any).sprites && Array.isArray((decoded as any).sprites) && movie.sprites) {
+  if (decoded && (decoded as any).sprites && Array.isArray((decoded as any).sprites) && movie.sprites) {
     for (let s = 0; s < (decoded as any).sprites.length; s++) {
       const decSprite = (decoded as any).sprites[s];
       const movSprite = movie.sprites[s];
@@ -211,13 +245,16 @@ export async function parseSvgaToProject(file: File): Promise<{
       const defaultMime = isAudio ? 'audio/mp3' : 'image/png';
 
       if (typeof val === 'string') {
-        const url = (val as string).startsWith('data:') ? (val as string) : `data:${defaultMime};base64,${val}`;
+        const raw = base64ToUint8Array(val);
+        rawImages[key] = raw;
+        const mime = isAudio ? 'audio/mp3' : sniffImageMimeType(raw);
+        const url = (val as string).startsWith('data:') ? (val as string) : `data:${mime};base64,${val}`;
         imagesMap[key] = url;
-        rawImages[key] = base64ToUint8Array(url);
       } else if (val instanceof Uint8Array || Array.isArray(val)) {
         const bytes = val instanceof Uint8Array ? val : new Uint8Array(val);
         rawImages[key] = bytes;
-        imagesMap[key] = `data:${defaultMime};base64,${uint8ArrayToBase64(bytes)}`;
+        const mime = isAudio ? 'audio/mp3' : sniffImageMimeType(bytes);
+        imagesMap[key] = `data:${mime};base64,${uint8ArrayToBase64(bytes)}`;
       }
     }
 
@@ -246,6 +283,18 @@ export async function parseSvgaToProject(file: File): Promise<{
     }
   }
 
+  // Check for embedded project metadata
+  let embeddedMeta: any = null;
+  const metaRaw = rawImages['__svga_editor_meta__.json'];
+  if (metaRaw) {
+    try {
+      const decodedMetaStr = new TextDecoder().decode(metaRaw);
+      embeddedMeta = JSON.parse(decodedMetaStr);
+    } catch (e) {
+      console.warn('Could not parse embedded SVGA editor metadata:', e);
+    }
+  }
+
   const project: SVGAProjectData = {
     fileName: file.name,
     fileSize: file.size,
@@ -257,7 +306,10 @@ export async function parseSvgaToProject(file: File): Promise<{
     imagesMap,
     rawImages,
     audios: movie.audios || [],
-    rawMovie: movie
+    rawMovie: movie,
+    fadeConfig: embeddedMeta?.fadeConfig,
+    cropConfig: embeddedMeta?.cropConfig,
+    cropFeather: embeddedMeta?.cropFeather
   };
 
   // Build Editable Layers from Sprites
@@ -570,6 +622,40 @@ export async function parseSvgaToProject(file: File): Promise<{
     }
   });
 
+  // Restore saved layer shine configurations from embedded metadata
+  if (embeddedMeta?.layers && Array.isArray(embeddedMeta.layers)) {
+    layers.forEach(l => {
+      const match = embeddedMeta.layers.find((slm: any) => 
+        slm.id === l.id ||
+        (slm.imageKey && l.imageKey && slm.imageKey === l.imageKey) ||
+        slm.name === l.name
+      );
+      if (match) {
+        if (match.shineConfig) {
+          l.shineConfig = { ...match.shineConfig };
+        }
+        if (match.shineExportMode) {
+          l.shineExportMode = match.shineExportMode;
+        }
+        if (match.isShineLayer !== undefined) {
+          l.isShineLayer = match.isShineLayer;
+        }
+        if (match.linkedMirroredLayerId) {
+          l.linkedMirroredLayerId = match.linkedMirroredLayerId;
+        }
+        if (match.isMirroredLayer !== undefined) {
+          l.isMirroredLayer = match.isMirroredLayer;
+        }
+        if (match.autoSyncMirroredAsset !== undefined) {
+          l.autoSyncMirroredAsset = match.autoSyncMirroredAsset;
+        }
+        if (match.autoFlipMirroredAsset !== undefined) {
+          l.autoFlipMirroredAsset = match.autoFlipMirroredAsset;
+        }
+      }
+    });
+  }
+
   return { project, layers };
 }
 
@@ -620,25 +706,367 @@ export function createNewSvgaProject(options: {
   return { project, layers: [] };
 }
 
-export function convertImageToSvgaProject(
-  dataUrlOrBytes: string | Uint8Array,
-  fileName: string,
-  width: number = 500,
-  height: number = 500,
-  fps: number = 30,
-  durationSec: number = 3
-): { project: SVGAProjectData; layers: EditableLayer[] } {
-  const dataUrl = typeof dataUrlOrBytes === 'string' ? dataUrlOrBytes : `data:image/png;base64,${uint8ArrayToBase64(dataUrlOrBytes)}`;
-  const rawBytes = typeof dataUrlOrBytes === 'string' ? base64ToUint8Array(dataUrlOrBytes) : dataUrlOrBytes;
-  const imageKey = 'image_0';
-  const totalFrames = Math.max(1, Math.round(durationSec * fps));
+/**
+ * Converts a static image (PNG, JPG, WebP, SVG) or image file into an editable SVGA project
+ */
+export async function convertImageToSvgaProject(file: File): Promise<{ project: SVGAProjectData; layers: EditableLayer[] }> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      const img = new Image();
+      img.onload = () => {
+        let width = img.naturalWidth || 750;
+        let height = img.naturalHeight || 750;
 
-  const imagesMap: Record<string, string> = { [imageKey]: dataUrl };
-  const rawImages: Record<string, Uint8Array> = { [imageKey]: rawBytes };
+        // Cap large dimensions to 1920
+        const maxDim = Math.max(width, height);
+        if (maxDim > 1920) {
+          const ratio = 1920 / maxDim;
+          width = Math.round(width * ratio);
+          height = Math.round(height * ratio);
+        }
+        width = width - (width % 2);
+        height = height - (height % 2);
+
+        const fps = 30;
+        const totalFrames = 60; // 2 seconds default
+        const fileName = file.name.replace(/\.[^.]+$/, '') + '.svga';
+        const imageKey = `image_layer_${Date.now()}`;
+
+        // Convert base64 dataUrl to Uint8Array
+        const b64Data = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
+        const binaryStr = atob(b64Data);
+        const rawBytes = new Uint8Array(binaryStr.length);
+        for (let i = 0; i < binaryStr.length; i++) {
+          rawBytes[i] = binaryStr.charCodeAt(i);
+        }
+
+        const imagesMap: Record<string, string> = { [imageKey]: dataUrl };
+        const rawImages: Record<string, Uint8Array> = { [imageKey]: rawBytes };
+
+        const frameData = {
+          alpha: 1.0,
+          transform: { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 },
+          layout: { x: 0, y: 0, width, height }
+        };
+        const spriteFrames = new Array(totalFrames).fill(frameData);
+
+        const sprite = {
+          imageKey,
+          frames: spriteFrames
+        };
+
+        const rawMovie = {
+          version: '2.0',
+          params: { viewBoxWidth: width, viewBoxHeight: height, fps, frames: totalFrames },
+          images: { [imageKey]: rawBytes },
+          sprites: [sprite],
+          audios: []
+        };
+
+        const project: SVGAProjectData = {
+          fileName,
+          fileSize: file.size,
+          width,
+          height,
+          fps,
+          totalFrames,
+          durationSec: totalFrames / fps,
+          imagesMap,
+          rawImages,
+          audios: [],
+          rawMovie
+        };
+
+        const layer: EditableLayer = {
+          id: `layer_${Date.now()}_0`,
+          originalIndex: 0,
+          name: file.name.replace(/\.[^.]+$/, ''),
+          type: 'image',
+          imageKey,
+          visible: true,
+          locked: false,
+          blendMode: 'normal',
+          inFrame: 0,
+          outFrame: totalFrames - 1,
+          framesCount: totalFrames,
+          keyframeSummary: {
+            startFrame: 0,
+            endFrame: totalFrames - 1,
+            hasShapes: false,
+            hasTransform: false
+          },
+          initialBounds: { x: 0, y: 0, width, height },
+          transform: {
+            x: 0,
+            y: 0,
+            scaleX: 1,
+            scaleY: 1,
+            rotation: 0,
+            opacity: 1,
+            width,
+            height
+          },
+          aspectRatioLocked: true,
+          spriteRef: sprite,
+          thumbnailUrl: dataUrl
+        };
+
+        resolve({ project, layers: [layer] });
+      };
+      img.onerror = () => reject(new Error('فشل تحميل وقراءة أبعاد ملف الصورة.'));
+      img.src = dataUrl;
+    };
+    reader.onerror = () => reject(new Error('فشل قراءة ملف الصورة.'));
+    reader.readAsDataURL(file);
+  });
+}
+
+/**
+ * Parses SVGA 1.0 ZIP archives (containing spec.json / movie.json and image files)
+ */
+export async function parseSvga1ZipToProject(
+  buffer: ArrayBuffer,
+  fileName: string,
+  fileSize: number
+): Promise<{ project: SVGAProjectData; layers: EditableLayer[] }> {
+  const zip = new JSZip();
+  const loadedZip = await zip.loadAsync(buffer);
+
+  // 1. Locate spec.json or movie.json
+  let specJson: any = null;
+  const jsonEntry = Object.keys(loadedZip.files).find(
+    name => (name === 'spec.json' || name === 'movie.json' || name.endsWith('.json')) && !loadedZip.files[name].dir
+  );
+
+  if (jsonEntry) {
+    const text = await loadedZip.files[jsonEntry].async('string');
+    try {
+      specJson = JSON.parse(text);
+    } catch (e) {
+      console.warn('SVGA 1.0 JSON parse warning:', e);
+    }
+  }
+
+  // 2. Extract all images in the ZIP archive
+  const imagesMap: Record<string, string> = {};
+  const rawImages: Record<string, Uint8Array> = {};
+
+  for (const [entryName, entry] of Object.entries(loadedZip.files)) {
+    if (entry.dir) continue;
+    const lower = entryName.toLowerCase();
+    if (lower.endsWith('.png') || lower.endsWith('.jpg') || lower.endsWith('.jpeg') || lower.endsWith('.webp')) {
+      const imgBuffer = await entry.async('uint8array');
+      rawImages[entryName] = imgBuffer;
+      const mime = sniffImageMimeType(imgBuffer);
+      imagesMap[entryName] = `data:${mime};base64,${uint8ArrayToBase64(imgBuffer)}`;
+
+      // Also support key without folder prefix or with cleaned key
+      const baseName = entryName.split('/').pop() || entryName;
+      if (!imagesMap[baseName]) {
+        imagesMap[baseName] = imagesMap[entryName];
+        rawImages[baseName] = imgBuffer;
+      }
+    }
+  }
+
+  if (specJson) {
+    return parseSvga1JsonToProject(specJson, { imagesMap, rawImages }, fileName, fileSize);
+  }
+
+  // Fallback: If no spec.json was found in the ZIP, build a sequence project from extracted images
+  const imageKeys = Object.keys(rawImages).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+  if (imageKeys.length === 0) {
+    throw new Error('لم يتم العثور على بيانات spec.json أو صور داخل حزمة SVGA 1.0.');
+  }
+
+  const firstKey = imageKeys[0];
+  const dims = getDimensionsFromBytes(rawImages[firstKey]) || { width: 750, height: 750 };
+  const width = dims.width;
+  const height = dims.height;
+  const fps = 20;
+  const totalFrames = imageKeys.length;
+
+  const spriteFrames = imageKeys.map((k) => ({
+    alpha: 1.0,
+    imageKey: k,
+    transform: { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 },
+    layout: { x: 0, y: 0, width, height }
+  }));
+
+  const sprite = {
+    imageKey: firstKey,
+    frames: spriteFrames
+  };
 
   const project: SVGAProjectData = {
     fileName,
-    fileSize: rawBytes.length,
+    fileSize,
+    width,
+    height,
+    fps,
+    totalFrames,
+    durationSec: totalFrames / fps,
+    imagesMap,
+    rawImages,
+    audios: [],
+    rawMovie: {
+      version: '1.0',
+      params: { viewBoxWidth: width, viewBoxHeight: height, fps, frames: totalFrames },
+      images: rawImages,
+      sprites: [sprite],
+      audios: []
+    }
+  };
+
+  const layer: EditableLayer = {
+    id: `svga1_${Date.now()}_0`,
+    originalIndex: 0,
+    name: fileName.replace(/\.[^.]+$/, ''),
+    type: 'image',
+    imageKey: firstKey,
+    visible: true,
+    locked: false,
+    blendMode: 'normal',
+    inFrame: 0,
+    outFrame: totalFrames - 1,
+    framesCount: totalFrames,
+    isVideoSequence: true,
+    sequenceIndex: 1,
+    sequenceTotal: totalFrames,
+    initialBounds: { x: 0, y: 0, width, height },
+    transform: { x: 0, y: 0, scaleX: 1, scaleY: 1, rotation: 0, opacity: 1, width, height },
+    aspectRatioLocked: true,
+    spriteRef: sprite,
+    thumbnailUrl: imagesMap[firstKey],
+    keyframeSummary: {
+      startFrame: 0,
+      endFrame: totalFrames - 1,
+      hasShapes: false,
+      hasTransform: false,
+      hasAnyExplicitAlpha: true
+    }
+  };
+
+  return { project, layers: [layer] };
+}
+
+/**
+ * Parses SVGA 1.0 Spec JSON into project & layers
+ */
+export function parseSvga1JsonToProject(
+  specJson: any,
+  assets: { imagesMap?: Record<string, string>; rawImages?: Record<string, Uint8Array> },
+  fileName: string,
+  fileSize: number
+): { project: SVGAProjectData; layers: EditableLayer[] } {
+  const movie = specJson.movie || specJson;
+  const viewBox = movie.viewBox || { width: 500, height: 500 };
+  const width = Math.round(viewBox.width || movie.width || 500);
+  const height = Math.round(viewBox.height || movie.height || 500);
+  const fps = Math.max(1, Math.round(movie.fps || 20));
+  const totalFrames = Math.max(1, Math.round(movie.frames || 60));
+  const durationSec = parseFloat((totalFrames / fps).toFixed(2));
+
+  const imagesMap: Record<string, string> = { ...(assets.imagesMap || {}) };
+  const rawImages: Record<string, Uint8Array> = { ...(assets.rawImages || {}) };
+
+  // If images embedded in JSON as base64
+  if (specJson.images && typeof specJson.images === 'object') {
+    for (const [key, val] of Object.entries(specJson.images)) {
+      if (typeof val === 'string') {
+        const raw = base64ToUint8Array(val);
+        rawImages[key] = raw;
+        const mime = sniffImageMimeType(raw);
+        imagesMap[key] = val.startsWith('data:') ? val : `data:${mime};base64,${val}`;
+      }
+    }
+  }
+
+  const rawSprites = movie.sprites || [];
+  const sprites = [...rawSprites].reverse();
+  const layers: EditableLayer[] = [];
+
+  sprites.forEach((sprite: any, idx: number) => {
+    const originalIndex = rawSprites.length - 1 - idx;
+    const imageKey = sprite.imageKey || `layer_${originalIndex}`;
+    const rawFrames = sprite.frames || [];
+
+    const normalizedFrames = rawFrames.map((f: any) => ({
+      alpha: typeof f.alpha === 'number' ? f.alpha : 1.0,
+      imageKey: f.imageKey || imageKey,
+      transform: f.transform ? {
+        a: f.transform.a ?? 1,
+        b: f.transform.b ?? 0,
+        c: f.transform.c ?? 0,
+        d: f.transform.d ?? 1,
+        tx: f.transform.tx ?? 0,
+        ty: f.transform.ty ?? 0
+      } : { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 },
+      layout: f.layout ? {
+        x: f.layout.x ?? 0,
+        y: f.layout.y ?? 0,
+        width: f.layout.width ?? width,
+        height: f.layout.height ?? height
+      } : { x: 0, y: 0, width, height },
+      shapes: f.shapes || []
+    }));
+
+    const normalizedSprite = {
+      imageKey,
+      frames: normalizedFrames
+    };
+
+    const firstFrame = normalizedFrames[0];
+    const initialBounds = firstFrame?.layout ? {
+      x: firstFrame.layout.x || 0,
+      y: firstFrame.layout.y || 0,
+      width: firstFrame.layout.width || width,
+      height: firstFrame.layout.height || height
+    } : { x: 0, y: 0, width, height };
+
+    const layer: EditableLayer = {
+      id: `svga1_${Date.now()}_${idx}`,
+      originalIndex,
+      name: imageKey.replace(/\.[^.]+$/, '') || `Layer ${originalIndex + 1}`,
+      type: 'image',
+      imageKey,
+      visible: true,
+      locked: false,
+      blendMode: 'normal',
+      inFrame: 0,
+      outFrame: totalFrames - 1,
+      framesCount: totalFrames,
+      initialBounds,
+      transform: {
+        x: initialBounds.x,
+        y: initialBounds.y,
+        scaleX: 1,
+        scaleY: 1,
+        rotation: 0,
+        opacity: firstFrame?.alpha ?? 1,
+        width: initialBounds.width,
+        height: initialBounds.height
+      },
+      aspectRatioLocked: true,
+      spriteRef: normalizedSprite,
+      thumbnailUrl: imagesMap[imageKey] || undefined,
+      keyframeSummary: {
+        startFrame: 0,
+        endFrame: totalFrames - 1,
+        hasShapes: false,
+        hasTransform: false,
+        hasAnyExplicitAlpha: true
+      }
+    };
+
+    layers.push(layer);
+  });
+
+  const project: SVGAProjectData = {
+    fileName,
+    fileSize,
     width,
     height,
     fps,
@@ -648,66 +1076,14 @@ export function convertImageToSvgaProject(
     rawImages,
     audios: [],
     rawMovie: {
-      version: '2.0',
-      params: { viewBoxWidth: width, viewBoxHeight: height, fps, frames: totalFrames },
-      images: { [imageKey]: rawBytes },
-      sprites: []
-    }
-  };
-
-  const layer: EditableLayer = {
-    id: 'layer_0',
-    originalIndex: 0,
-    name: fileName.replace(/\.[^/.]+$/, ''),
-    imageKey,
-    type: 'image',
-    visible: true,
-    locked: false,
-    aspectRatioLocked: true,
-    keyframes: [],
-    transform: { x: 0, y: 0, width, height, scaleX: 1, scaleY: 1, rotation: 0, opacity: 100 },
-    initialBounds: { x: 0, y: 0, width, height },
-    spriteRef: { imageKey, frames: [] },
-    framesCount: totalFrames,
-    keyframeSummary: {
-      startFrame: 0,
-      endFrame: totalFrames - 1,
-      hasShapes: false,
-      hasTransform: true
-    },
-    inFrame: 0,
-    outFrame: totalFrames - 1
-  };
-
-  return { project, layers: [layer] };
-}
-
-export function parseSvga1JsonToProject(jsonObj: any, fileName: string = 'imported.svga'): { project: SVGAProjectData; layers: EditableLayer[] } {
-  const w = jsonObj.movie?.viewBox?.width || 500;
-  const h = jsonObj.movie?.viewBox?.height || 500;
-  const fps = jsonObj.movie?.fps || 30;
-  const frames = jsonObj.movie?.frames || 60;
-  const durationSec = frames / fps;
-
-  const project: SVGAProjectData = {
-    fileName,
-    fileSize: 0,
-    width: w,
-    height: h,
-    fps,
-    totalFrames: frames,
-    durationSec,
-    imagesMap: {},
-    rawImages: {},
-    audios: [],
-    rawMovie: {
       version: '1.0',
-      params: { viewBoxWidth: w, viewBoxHeight: h, fps, frames },
-      images: {},
-      sprites: []
+      params: { viewBoxWidth: width, viewBoxHeight: height, fps, frames: totalFrames },
+      images: rawImages,
+      sprites: rawSprites,
+      audios: []
     }
   };
 
-  return { project, layers: [] };
+  return { project, layers };
 }
 

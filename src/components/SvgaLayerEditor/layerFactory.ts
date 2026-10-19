@@ -1,7 +1,10 @@
 import { EditableLayer, SVGAProjectData } from './types';
 
 // Helper to convert an image File or Blob to DataURL and Uint8Array
-export async function fileToImageBuffer(file: File | Blob): Promise<{
+export async function fileToImageBuffer(
+  file: File | Blob,
+  maxDim?: number
+): Promise<{
   dataUrl: string;
   bytes: Uint8Array;
   width: number;
@@ -15,16 +18,102 @@ export async function fileToImageBuffer(file: File | Blob): Promise<{
   });
 
   const arrayBuffer = await file.arrayBuffer();
-  const bytes = new Uint8Array(arrayBuffer);
+  let bytes = new Uint8Array(arrayBuffer);
 
-  const { width, height } = await new Promise<{ width: number; height: number }>((resolve) => {
-    const img = new Image();
-    img.onload = () => resolve({ width: img.naturalWidth || 200, height: img.naturalHeight || 200 });
-    img.onerror = () => resolve({ width: 200, height: 200 });
-    img.src = dataUrl;
+  const { width: rawW, height: rawH, img } = await new Promise<{ width: number; height: number; img: HTMLImageElement }>((resolve) => {
+    const imageEl = new Image();
+    imageEl.onload = () => resolve({ width: imageEl.naturalWidth || 200, height: imageEl.naturalHeight || 200, img: imageEl });
+    imageEl.onerror = () => resolve({ width: 200, height: 200, img: imageEl });
+    imageEl.src = dataUrl;
   });
 
-  return { dataUrl, bytes, width, height };
+  let width = rawW;
+  let height = rawH;
+  let finalDataUrl = dataUrl;
+
+  // If maxDim is provided and image exceeds it, downscale proportionally to prevent file size explosion
+  if (maxDim && maxDim > 100 && (width > maxDim || height > maxDim)) {
+    const ratio = Math.min(maxDim / width, maxDim / height);
+    const targetW = Math.max(1, Math.round(width * ratio));
+    const targetH = Math.max(1, Math.round(height * ratio));
+
+    const canvas = document.createElement('canvas');
+    canvas.width = targetW;
+    canvas.height = targetH;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(img, 0, 0, targetW, targetH);
+      finalDataUrl = canvas.toDataURL('image/png');
+      const blob = await new Promise<Blob | null>(res => canvas.toBlob(res, 'image/png'));
+      if (blob) {
+        bytes = new Uint8Array(await blob.arrayBuffer());
+        width = targetW;
+        height = targetH;
+      }
+    }
+  }
+
+  return { dataUrl: finalDataUrl, bytes, width, height };
+}
+
+// Helper to flip an image horizontally and/or vertically and return its buffer
+export async function getFlippedImageBuffer(
+  source: Uint8Array | string | Blob,
+  flipH: boolean = true,
+  flipV: boolean = false
+): Promise<{
+  dataUrl: string;
+  bytes: Uint8Array;
+  width: number;
+  height: number;
+}> {
+  let imgSource = '';
+  let needRevoke = false;
+  if (typeof source === 'string') {
+    imgSource = source;
+  } else if (source instanceof Blob) {
+    imgSource = URL.createObjectURL(source);
+    needRevoke = true;
+  } else if (source instanceof Uint8Array) {
+    const blob = new Blob([source as any], { type: 'image/png' });
+    imgSource = URL.createObjectURL(blob);
+    needRevoke = true;
+  }
+
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const el = new Image();
+    el.onload = () => resolve(el);
+    el.onerror = (e) => reject(e);
+    el.src = imgSource;
+  });
+
+  const w = img.naturalWidth || 200;
+  const h = img.naturalHeight || 200;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Could not get canvas context');
+
+  ctx.save();
+  ctx.translate(flipH ? w : 0, flipV ? h : 0);
+  ctx.scale(flipH ? -1 : 1, flipV ? -1 : 1);
+  ctx.drawImage(img, 0, 0);
+  ctx.restore();
+
+  if (needRevoke && imgSource.startsWith('blob:')) {
+    URL.revokeObjectURL(imgSource);
+  }
+
+  const dataUrl = canvas.toDataURL('image/png');
+  const blob = await new Promise<Blob | null>(res => canvas.toBlob(res, 'image/png'));
+  if (!blob) throw new Error('Failed to create flipped blob');
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+
+  return { dataUrl, bytes, width: w, height: h };
 }
 
 // Generate new Image Layer
@@ -152,25 +241,33 @@ export async function createShapeLayer(
   if (shapeType === 'rect') {
     const pad = 20;
     ctx.fillStyle = fillColor;
-    ctx.strokeStyle = strokeColor;
-    ctx.lineWidth = 8;
     if (ctx.roundRect) {
       ctx.beginPath();
       ctx.roundRect(pad, pad, size - pad * 2, size - pad * 2, 24);
       ctx.fill();
-      ctx.stroke();
+      if (strokeColor && strokeColor !== 'transparent') {
+        ctx.strokeStyle = strokeColor;
+        ctx.lineWidth = 4;
+        ctx.stroke();
+      }
     } else {
       ctx.fillRect(pad, pad, size - pad * 2, size - pad * 2);
-      ctx.strokeRect(pad, pad, size - pad * 2, size - pad * 2);
+      if (strokeColor && strokeColor !== 'transparent') {
+        ctx.strokeStyle = strokeColor;
+        ctx.lineWidth = 4;
+        ctx.strokeRect(pad, pad, size - pad * 2, size - pad * 2);
+      }
     }
   } else if (shapeType === 'circle') {
     ctx.fillStyle = fillColor;
-    ctx.strokeStyle = strokeColor;
-    ctx.lineWidth = 8;
     ctx.beginPath();
     ctx.arc(size / 2, size / 2, (size - 40) / 2, 0, Math.PI * 2);
     ctx.fill();
-    ctx.stroke();
+    if (strokeColor && strokeColor !== 'transparent') {
+      ctx.strokeStyle = strokeColor;
+      ctx.lineWidth = 4;
+      ctx.stroke();
+    }
   } else if (shapeType === 'star') {
     const cx = size / 2;
     const cy = size / 2;
@@ -262,4 +359,80 @@ export async function createShapeLayer(
   );
 
   return { layer, dataUrl, bytes };
+}
+
+/**
+ * Generate a dedicated, independent Shine Layer (طبقة لمعة مستقلة)
+ */
+export function createShineLayer(
+  projectWidth: number,
+  projectHeight: number,
+  totalFrames: number,
+  targetLayer?: EditableLayer
+): { layer: EditableLayer; dataUrl: string; bytes: Uint8Array; imageKey: string } {
+  const canvas = document.createElement('canvas');
+  const w = targetLayer ? (targetLayer.transform.width || projectWidth) : projectWidth;
+  const h = targetLayer ? (targetLayer.transform.height || projectHeight) : projectHeight;
+  canvas.width = Math.max(20, Math.min(2048, w));
+  canvas.height = Math.max(20, Math.min(2048, h));
+  
+  const ctx = canvas.getContext('2d');
+  if (ctx) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  }
+
+  const dataUrl = canvas.toDataURL('image/png');
+  const b64 = dataUrl.split(',')[1];
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+
+  const imageKey = `shine_layer_${Date.now()}`;
+  const startX = targetLayer ? targetLayer.transform.x : 0;
+  const startY = targetLayer ? targetLayer.transform.y : 0;
+
+  const baseLayer = createImageLayer(
+    imageKey,
+    targetLayer ? `لمعة (${targetLayer.name})` : 'طبقة اللمعة (Shine Layer)',
+    dataUrl,
+    canvas.width,
+    canvas.height,
+    projectWidth,
+    projectHeight,
+    totalFrames
+  );
+
+  baseLayer.isShineLayer = true;
+  baseLayer.trackColor = '#f59e0b';
+  baseLayer.transform.x = startX;
+  baseLayer.transform.y = startY;
+  baseLayer.transform.width = w;
+  baseLayer.transform.height = h;
+  baseLayer.initialBounds = { x: startX, y: startY, width: w, height: h };
+
+  baseLayer.shineConfig = {
+    enabled: true,
+    isSeparateLayer: true,
+    applyScope: 'single',
+    exportMode: 'separate',
+    beamWidth: 60,
+    angleDeg: 45,
+    opacity: 0.9,
+    featherSides: 0.85,
+    featherTopBottom: 0.7,
+    maskToAlpha: false,
+    color: '255, 255, 255',
+    keyframeStart: 0.0,
+    keyframeEnd: 1.0,
+    durationSeconds: 2.0,
+    repeatInterval: 0.5,
+    speedMultiplier: 1.0,
+    style: 'double',
+    direction: 'forward',
+    startPoint: { x: startX, y: startY },
+    endPoint: { x: startX + w, y: startY + h },
+    editPathOnCanvas: true
+  };
+
+  return { layer: baseLayer, dataUrl, bytes, imageKey };
 }

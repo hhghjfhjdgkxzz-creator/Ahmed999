@@ -15,8 +15,7 @@ export const RechargeModal: React.FC<RechargeModalProps> = ({
   onRecharge,
   isAlertOnly = false,
 }) => {
-  const { t: baseT, isRTL, language } = useLanguage();
-  const t: any = baseT;
+  const { t, isRTL, language } = useLanguage();
   const [showPackages, setShowPackages] = useState(!isAlertOnly);
   const [successNotice, setSuccessNotice] = useState<number | null>(null);
   const [adminPhone, setAdminPhone] = useState('201000000000');

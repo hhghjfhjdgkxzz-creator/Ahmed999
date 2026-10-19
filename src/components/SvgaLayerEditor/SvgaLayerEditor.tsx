@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { 
   EditableLayer, SVGAProjectData, CanvasTool, LayerKeyframe,
-  FadeConfig, CropConfig, CropFeather, ShineEffectConfig, SVGAAudioTrack
+  FadeConfig, CropConfig, CropFeather, ShineEffectConfig, SVGAAudioTrack,
+  ProjectSession
 } from './types';
 import { 
   DEFAULT_FADE_CONFIG, 
@@ -9,7 +10,9 @@ import {
   DEFAULT_CROP_FEATHER, 
   isTransparencyActive 
 } from './transparencyEngine';
-import { parseSvgaToProject, createNewSvgaProject } from './svgaParserEngine';
+import { parseSvgaToProject, createNewSvgaProject, convertImageToSvgaProject } from './svgaParserEngine';
+import { loadUniversalProject } from './universalProjectLoader';
+import { convertMp4ToSvgaProject, createFastMp4Project } from './mp4SvgaEngine';
 import { exportEditedSvga } from './svgaExportEngine';
 import { mergeSvgaFileIntoProject, transformLayerGroup, mergeLayersIntoSingleLayer, ungroupMergedLayer, syncLayerMotionWithReference } from './svgaMergeEngine';
 import { 
@@ -19,7 +22,8 @@ import {
   duplicateSelectedLayers, 
   deleteSelectedLayers 
 } from './svgaMultiSelectEngine';
-import { fileToImageBuffer, createImageLayer, createShapeLayer } from './layerFactory';
+import { fileToImageBuffer, getFlippedImageBuffer, createImageLayer, createShapeLayer } from './layerFactory';
+import { convertImageData, SupportedImageFormat } from './imageConverter';
 import { SvgaDesignCanvas } from './SvgaDesignCanvas';
 import { SvgaLayersList } from './SvgaLayersList';
 import { SvgaPropertiesPanel } from './SvgaPropertiesPanel';
@@ -28,15 +32,21 @@ import { SvgaAudioEditorModal } from './SvgaAudioEditorModal';
 import { SvgaExportModal } from './SvgaExportModal';
 import { SvgaMp4ImportModal } from './SvgaMp4ImportModal';
 import { SvgaMergeCanvasModal } from './SvgaMergeCanvasModal';
-import { SvgaChromaPenStudio } from './SvgaChromaPenStudio';
-import { ChromaTargetColor, identifyColorType, applySmartChromaToSingleImage, isAudioSource } from './svgaSmartChromaEngine';
+import { SvgaChromaPenStudio, ChromaPenSubMode, PenMaskToolType } from './SvgaChromaPenStudio';
+import { SvgaProjectsTabBar } from './SvgaProjectsTabBar';
+import { SvgaMultiProjectOverview } from './SvgaMultiProjectOverview';
+import { SvgaMultiCanvasStage } from './SvgaMultiCanvasStage';
+import { SvgaBatchExportModal } from './SvgaBatchExportModal';
+import { SvgaBackgroundLibraryModal, downloadImageUrl } from './SvgaBackgroundLibraryModal';
+import { AfterEffectsMaskedLayerStudio } from './AfterEffectsMaskedLayerStudio';
+import { ChromaTargetColor, identifyColorType, applySmartChromaToSingleImage, applyCustomPenMaskToSingleImage, PenMaskStroke, isAudioSource } from './svgaSmartChromaEngine';
 import { ErrorBoundary } from '../ErrorBoundary';
 import { 
   Upload, Layers, Download, ArrowLeft, RotateCcw, 
   Sparkles, MousePointer, Hand, ZoomIn, Grid, Compass, 
   FileCode, Check, AlertCircle, RefreshCw, X, Shield, Eye,
   Sliders, Play, Film, CheckCircle2, Music, Plus, FilePlus, Package,
-  Image as ImageIcon, Pipette
+  Image as ImageIcon, Pipette, LayoutGrid, Copy, Video
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -166,12 +176,23 @@ export const SvgaLayerEditor: React.FC<SvgaLayerEditorProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const mergeFileInputRef = useRef<HTMLInputElement>(null);
   const mp4FileInputRef = useRef<HTMLInputElement>(null);
+  const multiFileInputRef = useRef<HTMLInputElement>(null);
+
+  // Multi-Project Compositions State (supports multiple files SVGA/MP4/Images side-by-side)
+  const [projects, setProjects] = useState<ProjectSession[]>([]);
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
+  const [canvasViewMode, setCanvasViewMode] = useState<'multi' | 'single'>('multi');
+  const [isOverviewMode, setIsOverviewMode] = useState<boolean>(false);
+  const [showBatchExportModal, setShowBatchExportModal] = useState<boolean>(false);
 
   // Project Data & Layers
   const [project, setProject] = useState<SVGAProjectData | null>(null);
   const [layers, setLayers] = useState<EditableLayer[]>([]);
   const [selectedLayerId, setSelectedLayerId] = useState<string | null>(null);
   const [selectedLayerIds, setSelectedLayerIds] = useState<string[]>([]);
+
+  // Computed selectedLayer available to all hooks
+  const selectedLayer = useMemo(() => layers.find(l => l.id === selectedLayerId) || null, [layers, selectedLayerId]);
 
   // Persistent reference map for full layer objects (sprites & thumbnails) so history only stores lightweight metadata
   const masterLayersMapRef = useRef<Map<string, EditableLayer>>(new Map());
@@ -200,10 +221,13 @@ export const SvgaLayerEditor: React.FC<SvgaLayerEditorProps> = ({
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isExporting, setIsExporting] = useState<boolean>(false);
   const [showExportModal, setShowExportModal] = useState<boolean>(false);
+  const [initialExportFormat, setInitialExportFormat] = useState<string>('SVGA 2.0');
   const [showNewProjectModal, setShowNewProjectModal] = useState<boolean>(false);
   const [showAudioStudioModal, setShowAudioStudioModal] = useState<boolean>(false);
   const [showMergeCanvasModal, setShowMergeCanvasModal] = useState<boolean>(false);
   const [showMp4ImportModal, setShowMp4ImportModal] = useState<boolean>(false);
+  const [showBgLibraryModal, setShowBgLibraryModal] = useState<boolean>(false);
+  const [showAeMaskedStudioModal, setShowAeMaskedStudioModal] = useState<boolean>(false);
   const [mp4InitialFiles, setMp4InitialFiles] = useState<File[]>([]);
   const [newProjectConfig, setNewProjectConfig] = useState({
     name: 'مشروع SVGA جديد',
@@ -213,6 +237,19 @@ export const SvgaLayerEditor: React.FC<SvgaLayerEditorProps> = ({
     durationSec: 2
   });
   const [exportFileName, setExportFileName] = useState<string>('');
+  const [isMobile, setIsMobile] = useState<boolean>(false);
+  const [activeMobileTab, setActiveMobileTab] = useState<'canvas' | 'layers' | 'properties'>('canvas');
+  const [isTimelineOpenMobile, setIsTimelineOpenMobile] = useState<boolean>(false);
+  const [showMobileMenu, setShowMobileMenu] = useState<boolean>(false);
+
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 1024);
+    };
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
   const [lastExportedBlob, setLastExportedBlob] = useState<{ blob: Blob; fileName: string } | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successToast, setSuccessToast] = useState<string | null>(null);
@@ -221,6 +258,9 @@ export const SvgaLayerEditor: React.FC<SvgaLayerEditorProps> = ({
   const [fadeConfig, setFadeConfig] = useState<FadeConfig>(DEFAULT_FADE_CONFIG);
   const [cropConfig, setCropConfig] = useState<CropConfig>(DEFAULT_CROP_CONFIG);
   const [cropFeather, setCropFeather] = useState<CropFeather>(DEFAULT_CROP_FEATHER);
+
+  // Interactive Click-to-Place Shine Vector Points State
+  const [shinePointStep, setShinePointStep] = useState<'idle' | 'place-start' | 'place-end'>('idle');
 
   // Smart Chroma Key Pen State
   const [isChromaPenActive, setIsChromaPenActive] = useState<boolean>(false);
@@ -233,14 +273,36 @@ export const SvgaLayerEditor: React.FC<SvgaLayerEditorProps> = ({
   const [isChromaProcessing, setIsChromaProcessing] = useState<boolean>(false);
   const [chromaProgress, setChromaProgress] = useState<number>(0);
   const [chromaStatus, setChromaStatus] = useState<string>('');
+  const [chromaSubMode, setChromaSubMode] = useState<ChromaPenSubMode>('pen-mask');
+  const [chromaPenTool, setChromaPenTool] = useState<PenMaskToolType>('brush');
+  const [chromaMaskMode, setChromaMaskMode] = useState<'erase' | 'keep'>('erase');
+  const [chromaBrushSize, setChromaBrushSize] = useState<number>(30);
+  const [chromaPenFeather, setChromaPenFeather] = useState<number>(8);
+  const [chromaPenOpacity, setChromaPenOpacity] = useState<number>(100);
+  const [penStrokes, setPenStrokes] = useState<PenMaskStroke[]>([]);
   const [chromaUndoStack, setChromaUndoStack] = useState<Array<{
     imagesMap: Record<string, string>;
     rawImages: Record<string, Uint8Array>;
   }>>([]);
 
-  const handleToggleChromaPen = useCallback(() => {
+  const handleAddPenStroke = useCallback((stroke: PenMaskStroke) => {
+    setPenStrokes(prev => [...prev, stroke]);
+  }, []);
+
+  const handleClearPenStrokes = useCallback(() => {
+    setPenStrokes([]);
+  }, []);
+
+  const handleUndoPenStroke = useCallback(() => {
+    setPenStrokes(prev => prev.slice(0, Math.max(0, prev.length - 1)));
+  }, []);
+
+  const handleToggleChromaPen = useCallback((mode?: ChromaPenSubMode) => {
+    if (mode) {
+      setChromaSubMode(mode);
+    }
     setIsChromaPenActive(prev => {
-      const next = !prev;
+      const next = mode !== undefined ? true : !prev;
       if (next) {
         setActiveTool('chroma-pen');
         setIsPlaying(false);
@@ -334,7 +396,6 @@ export const SvgaLayerEditor: React.FC<SvgaLayerEditorProps> = ({
       if (chromaScope === 'all') {
         targetKeys = Object.keys(project.imagesMap || {});
       } else if (chromaScope === 'selected') {
-        const selectedLayer = layers.find(l => l.id === selectedLayerId);
         if (selectedLayer && selectedLayer.imageKey) {
           targetKeys = [selectedLayer.imageKey];
         } else {
@@ -430,7 +491,111 @@ export const SvgaLayerEditor: React.FC<SvgaLayerEditorProps> = ({
       setIsChromaProcessing(false);
       setChromaStatus('');
     }
-  }, [project, layers, selectedLayerId, currentFrame, chromaTargetColors, chromaTolerance, chromaSmoothness, chromaDespill, chromaScope]);
+  }, [project, layers, selectedLayerId, selectedLayer, currentFrame, chromaTargetColors, chromaTolerance, chromaSmoothness, chromaDespill, chromaScope]);
+
+  const handleApplyPenMask = useCallback(async () => {
+    if (!project || penStrokes.length === 0) return;
+
+    setIsChromaProcessing(true);
+    setChromaProgress(10);
+    setChromaStatus('جاري تطبيق القص والتفريغ بالقلم...');
+
+    try {
+      const currentImagesMapSnapshot = { ...(project.imagesMap || {}) };
+      const currentRawImagesSnapshot: Record<string, Uint8Array> = {};
+      if (project.rawImages) {
+        for (const [k, v] of Object.entries(project.rawImages)) {
+          if (v instanceof Uint8Array) {
+            currentRawImagesSnapshot[k] = new Uint8Array(v);
+          }
+        }
+      }
+      setChromaUndoStack(prev => [...prev.slice(-4), {
+        imagesMap: currentImagesMapSnapshot,
+        rawImages: currentRawImagesSnapshot
+      }]);
+
+      let targetKeys: string[] = [];
+      if (chromaScope === 'all') {
+        targetKeys = Object.keys(project.imagesMap || {});
+      } else if (selectedLayer && selectedLayer.imageKey) {
+        targetKeys = [selectedLayer.imageKey];
+      } else if (selectedLayer) {
+        targetKeys = [selectedLayer.id];
+      } else {
+        targetKeys = Object.keys(project.imagesMap || {});
+      }
+
+      const updatedImagesMap = { ...project.imagesMap };
+      const updatedRawImages = { ...(project.rawImages || {}) };
+      const total = targetKeys.length;
+
+      for (let i = 0; i < total; i++) {
+        const key = targetKeys[i];
+        const primarySource = updatedImagesMap[key] || updatedRawImages[key];
+        const fallbackSource = updatedRawImages[key] || updatedImagesMap[key];
+        let processed = false;
+
+        if (primarySource) {
+          try {
+            const result = await applyCustomPenMaskToSingleImage(
+              primarySource,
+              penStrokes,
+              project.width,
+              project.height
+            );
+            updatedImagesMap[key] = result.dataUrl;
+            updatedRawImages[key] = result.bytes;
+            processed = true;
+          } catch (err) {
+            console.warn(`Primary source failed for ${key}, trying fallback:`, err);
+          }
+        }
+
+        if (!processed && fallbackSource && fallbackSource !== primarySource) {
+          try {
+            const result = await applyCustomPenMaskToSingleImage(
+              fallbackSource,
+              penStrokes,
+              project.width,
+              project.height
+            );
+            updatedImagesMap[key] = result.dataUrl;
+            updatedRawImages[key] = result.bytes;
+            processed = true;
+          } catch (err) {
+            console.error(`Fallback source also failed for ${key}:`, err);
+          }
+        }
+        setChromaProgress(Math.round(((i + 1) / total) * 90) + 10);
+      }
+
+      setProject(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          imagesMap: updatedImagesMap,
+          rawImages: updatedRawImages
+        };
+      });
+
+      setPenStrokes([]);
+      setChromaStatus('تم تطبيق القص والتفريغ بنجاح ✨');
+      setChromaProgress(100);
+      setSuccessToast('تم قـص وتفريغ المنطقة بالقلم بنجاح ✨');
+
+      setTimeout(() => {
+        setIsChromaProcessing(false);
+        setChromaStatus('');
+        setChromaProgress(0);
+      }, 1200);
+
+    } catch (err: any) {
+      console.error('Error applying pen mask:', err);
+      setChromaStatus('حدث خطأ أثناء تطبيق القلم');
+      setIsChromaProcessing(false);
+    }
+  }, [project, penStrokes, chromaScope, selectedLayer]);
 
   const handleBackgroundUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -444,12 +609,41 @@ export const SvgaLayerEditor: React.FC<SvgaLayerEditorProps> = ({
       const result = event.target?.result as string;
       if (result) {
         setBgImageUrl(result);
-        setSuccessToast('تم رفع وتثبيت صورة الخلفية بنجاح للمعاينة خلف الهدية');
+        // Apply background to all open projects in multi-project view
+        setProjects(prev => prev.map(p => ({
+          ...p,
+          bgImageUrl: result
+        })));
+        setSuccessToast(`تم رفع وتثبيت صورة الخلفية بنجاح على جميع المشاريع (${projects.length || 1}) للمعاينة الموحدة!`);
       }
     };
     reader.readAsDataURL(file);
     e.target.value = '';
-  }, []);
+  }, [projects.length]);
+
+  const handleSelectBackground = useCallback((url: string | null, applyToAll: boolean) => {
+    setBgImageUrl(url);
+    if (applyToAll) {
+      setProjects(prev => prev.map(p => ({
+        ...p,
+        bgImageUrl: url
+      })));
+      if (url) {
+        setSuccessToast(`تم تطبيق الخلفية وتثبيتها بنجاح على جميع المشاريع (${projects.length || 1}) للمعاينة الموحدة`);
+      } else {
+        setSuccessToast('تمت إزالة صورة الخلفية والعودة للوضع الافتراضي في جميع المشاريع');
+      }
+    } else {
+      if (activeProjectId) {
+        setProjects(prev => prev.map(p => p.id === activeProjectId ? { ...p, bgImageUrl: url } : p));
+      }
+      if (url) {
+        setSuccessToast('تم تطبيق الخلفية على المشروع الحالي');
+      } else {
+        setSuccessToast('تمت إزالة صورة الخلفية عن المشروع الحالي');
+      }
+    }
+  }, [activeProjectId, projects.length]);
 
   const handleResetTransparency = useCallback(() => {
     setFadeConfig({ top: 0, bottom: 0, left: 0, right: 0 });
@@ -543,18 +737,39 @@ export const SvgaLayerEditor: React.FC<SvgaLayerEditorProps> = ({
     setHistoryIndex(prev => Math.min(prev + 1, MAX_HISTORY_STEPS - 1));
   }, [historyIndex]);
 
-  // Load File
+  // Load File (Universal Multi-Format Support)
   const loadSvgaFile = useCallback(async (file: File) => {
     setIsLoading(true);
     setErrorMessage(null);
     try {
-      const { project: parsedProject, layers: parsedLayers } = await parseSvgaToProject(file);
+      const res = await loadUniversalProject(file);
+      const parsedProject = res.project;
+      const parsedLayers = res.layers;
+
+      // Check localStorage for persisted shine configuration as safety net
+      try {
+        const localShineStr = localStorage.getItem(`svga_shine_${file.name}`);
+        if (localShineStr) {
+          const localShineMap = JSON.parse(localShineStr);
+          parsedLayers.forEach(l => {
+            if (!l.shineConfig && localShineMap[l.id]) {
+              l.shineConfig = localShineMap[l.id].shineConfig;
+              if (localShineMap[l.id].shineExportMode) l.shineExportMode = localShineMap[l.id].shineExportMode;
+              if (localShineMap[l.id].isShineLayer !== undefined) l.isShineLayer = localShineMap[l.id].isShineLayer;
+            }
+          });
+        }
+      } catch (e) {
+        console.warn('Could not restore local shine config:', e);
+      }
+
       setProject(parsedProject);
       setLayers(parsedLayers);
       setSelectedLayerId(parsedLayers[0]?.id || null);
+      setSelectedLayerIds(parsedLayers[0]?.id ? [parsedLayers[0].id] : []);
       setCurrentFrame(0);
-      setIsPlaying(false);
-      setExportFileName(file.name.replace(/\.svga$/i, '') + '_edited.svga');
+      setIsPlaying(true); // Automatically play as requested!
+      setExportFileName(file.name.replace(/\.[^.]+$/, '') + '_edited.svga');
 
       // Initialize Edge Fade & Crop configs from project if present, or reset to 0
       setFadeConfig(parsedProject.fadeConfig ? { ...parsedProject.fadeConfig } : { top: 0, bottom: 0, left: 0, right: 0 });
@@ -576,17 +791,48 @@ export const SvgaLayerEditor: React.FC<SvgaLayerEditorProps> = ({
       setHistory([createLayersSnapshot(parsedLayers)]);
       setHistoryIndex(0);
 
-      setSuccessToast(`تم فتح الملف بنجاح (${parsedLayers.length} طبقة)`);
+      const newSessionId = `proj_${Date.now()}`;
+      const newSession: ProjectSession = {
+        id: newSessionId,
+        name: file.name.replace(/\.[^.]+$/, ''),
+        originalFileName: file.name,
+        fileType: (res.fileType as any) || 'svga',
+        videoUrl: res.videoUrl,
+        videoFile: res.videoFile,
+        project: parsedProject,
+        layers: parsedLayers,
+        history: [createLayersSnapshot(parsedLayers)],
+        historyIndex: 0,
+        selectedLayerId: parsedLayers[0]?.id || null,
+        selectedLayerIds: parsedLayers[0]?.id ? [parsedLayers[0].id] : [],
+        currentFrame: 0,
+        zoom: fitZoom,
+        panOffset: { x: 0, y: 0 },
+        fadeConfig: parsedProject.fadeConfig ? { ...parsedProject.fadeConfig } : { top: 0, bottom: 0, left: 0, right: 0 },
+        cropConfig: parsedProject.cropConfig ? { ...parsedProject.cropConfig } : { top: 0, bottom: 0, left: 0, right: 0 },
+        cropFeather: parsedProject.cropFeather ? { ...parsedProject.cropFeather } : { top: 0, bottom: 0, left: 0, right: 0 },
+        bgColor: 'transparent',
+        bgImageUrl: bgImageUrl || null,
+        exportFileName: file.name.replace(/\.[^.]+$/, '') + '_edited.svga',
+        modifiedAt: Date.now()
+      };
+      setProjects(prev => {
+        const filtered = prev.filter(p => p.originalFileName !== file.name);
+        return [...filtered, newSession];
+      });
+      setActiveProjectId(newSessionId);
+
+      setSuccessToast(`🎉 تم فتح وتشغيل المشروع بنجاح في سكريبت أفتر افكت (${parsedLayers.length} طبقة - ${parsedProject.totalFrames} إطار)`);
     } catch (err: any) {
-      console.error("Failed to parse SVGA file:", err);
-      setErrorMessage(err.message || 'حدث خطأ أثناء قراءة ملف SVGA.');
+      console.error("Failed to load project file:", err);
+      setErrorMessage(err.message || 'حدث خطأ أثناء قراءة وتفكيك ملف المشروع.');
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [bgImageUrl]);
 
   // Handle Import MP4 as Full SVGA Project
-  const handleImportMp4AsProject = useCallback((newProject: SVGAProjectData, newLayers: EditableLayer[]) => {
+  const handleImportMp4AsProject = useCallback((newProject: SVGAProjectData, newLayers: EditableLayer[], videoFile?: File) => {
     setProject(newProject);
     setLayers(newLayers);
     setSelectedLayerId(newLayers[0]?.id || null);
@@ -612,8 +858,440 @@ export const SvgaLayerEditor: React.FC<SvgaLayerEditorProps> = ({
     setHistory([createLayersSnapshot(newLayers)]);
     setHistoryIndex(0);
 
+    const videoUrl = videoFile ? URL.createObjectURL(videoFile) : undefined;
+    const newSessionId = `proj_${Date.now()}`;
+    const newSession: ProjectSession = {
+      id: newSessionId,
+      name: newProject.fileName.replace(/\.[^.]+$/, ''),
+      originalFileName: newProject.fileName,
+      fileType: 'mp4',
+      videoUrl,
+      videoFile,
+      project: newProject,
+      layers: newLayers,
+      history: [createLayersSnapshot(newLayers)],
+      historyIndex: 0,
+      selectedLayerId: newLayers[0]?.id || null,
+      selectedLayerIds: newLayers[0]?.id ? [newLayers[0].id] : [],
+      currentFrame: 0,
+      zoom: fitZoom,
+      panOffset: { x: 0, y: 0 },
+      fadeConfig: newProject.fadeConfig ? { ...newProject.fadeConfig } : { top: 0, bottom: 0, left: 0, right: 0 },
+      cropConfig: newProject.cropConfig ? { ...newProject.cropConfig } : { top: 0, bottom: 0, left: 0, right: 0 },
+      cropFeather: newProject.cropFeather ? { ...newProject.cropFeather } : { top: 0, bottom: 0, left: 0, right: 0 },
+      bgColor: 'transparent',
+      bgImageUrl: bgImageUrl || null,
+      exportFileName: newProject.fileName.replace(/\.svga$/i, '') + '_edited.svga',
+      modifiedAt: Date.now()
+    };
+    setProjects(prev => {
+      const filtered = prev.filter(p => p.originalFileName !== newProject.fileName);
+      const updated = [...filtered, newSession];
+      if (updated.length > 1) {
+        setCanvasViewMode('multi');
+      }
+      return updated;
+    });
+    setActiveProjectId(newSessionId);
+
     setSuccessToast(`تم استدعاء فيديو MP4 بنجاح كملف SVGA كامل (${newProject.totalFrames} إطار)`);
   }, []);
+
+  // Handle Import Multiple MP4 Projects concurrently
+  const handleImportMultipleProjects = useCallback((items: { project: SVGAProjectData; layers: EditableLayer[]; file?: File; videoUrl?: string }[]) => {
+    if (!items || items.length === 0) return;
+    
+    const newSessions: ProjectSession[] = items.map((item, idx) => {
+      const sessionId = `proj_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 6)}`;
+      const fileName = item.file?.name || item.project.fileName;
+      const baseName = fileName.replace(/\.[^.]+$/, '');
+      const isVid = (item.file?.name.toLowerCase().endsWith('.mp4') || item.file?.type.startsWith('video/'));
+      const videoUrl = item.videoUrl || (item.file ? URL.createObjectURL(item.file) : undefined);
+
+      return {
+        id: sessionId,
+        name: baseName,
+        originalFileName: fileName,
+        fileType: isVid ? 'mp4' : 'svga',
+        videoUrl,
+        videoFile: item.file,
+        project: item.project,
+        layers: item.layers,
+        history: [createLayersSnapshot(item.layers)],
+        historyIndex: 0,
+        selectedLayerId: item.layers[0]?.id || null,
+        selectedLayerIds: item.layers[0]?.id ? [item.layers[0].id] : [],
+        currentFrame: 0,
+        zoom: 100,
+        panOffset: { x: 0, y: 0 },
+        fadeConfig: item.project.fadeConfig ? { ...item.project.fadeConfig } : { top: 0, bottom: 0, left: 0, right: 0 },
+        cropConfig: item.project.cropConfig ? { ...item.project.cropConfig } : { top: 0, bottom: 0, left: 0, right: 0 },
+        cropFeather: item.project.cropFeather ? { ...item.project.cropFeather } : { top: 0, bottom: 0, left: 0, right: 0 },
+        bgColor: 'transparent',
+        bgImageUrl: bgImageUrl || null,
+        exportFileName: baseName + '_edited.svga',
+        modifiedAt: Date.now()
+      };
+    });
+
+    setProjects(prev => {
+      const updated = [...prev, ...newSessions];
+      if (updated.length > 1) {
+        setCanvasViewMode('multi');
+      }
+      return updated;
+    });
+
+    if (newSessions.length > 0) {
+      const first = newSessions[0];
+      setActiveProjectId(first.id);
+      setProject(first.project);
+      setLayers(first.layers);
+      setSelectedLayerId(first.selectedLayerId);
+      setSelectedLayerIds(first.selectedLayerIds);
+      setCurrentFrame(0);
+      setZoom(100);
+      setPanOffset({ x: 0, y: 0 });
+      setFadeConfig(first.fadeConfig);
+      setCropConfig(first.cropConfig);
+      setCropFeather(first.cropFeather);
+      setExportFileName(first.exportFileName);
+      masterLayersMapRef.current.clear();
+      first.layers.forEach(l => masterLayersMapRef.current.set(l.id, l));
+      setHistory([createLayersSnapshot(first.layers)]);
+      setHistoryIndex(0);
+    }
+
+    setSuccessToast(`🎉 تم استدعاء وتحويل ${newSessions.length} فيديوهات إلى مشاريع SVGA وعرضها معاً بنجاح!`);
+  }, []);
+
+  // Handle Import Multiple MP4 Layers into existing project
+  const handleImportMultipleLayers = useCallback((newLayers: EditableLayer[], addedAudios: SVGAAudioTrack[]) => {
+    if (!newLayers || newLayers.length === 0) return;
+    setLayers(prev => {
+      const updated = [...newLayers, ...prev];
+      pushHistory(updated);
+      return updated;
+    });
+
+    if (addedAudios && addedAudios.length > 0) {
+      setProject(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          audios: [...(prev.audios || []), ...addedAudios]
+        };
+      });
+    }
+
+    setSelectedLayerId(newLayers[0].id);
+    setSelectedLayerIds(newLayers[0]?.id ? [newLayers[0].id] : []);
+    setSuccessToast(`تمت إضافة ${newLayers.length} طبقات فيديو MP4 إلى المشروع بنجاح`);
+  }, [pushHistory]);
+
+  // Handle Load Multiple Files (SVGA / MP4 / Images) at once into parallel project compositions
+  const handleLoadMultipleFiles = useCallback(async (files: File[]) => {
+    if (!files || files.length === 0) return;
+    setIsLoading(true);
+    setErrorMessage(null);
+
+    const newSessions: ProjectSession[] = [];
+    let count = 0;
+
+    for (const f of files) {
+      count++;
+      try {
+        const res = await loadUniversalProject(f);
+        const loadedProject: SVGAProjectData = res.project;
+        const loadedLayers: EditableLayer[] = res.layers;
+        const fileType: 'svga' | 'mp4' | 'image' | 'custom' = (res.fileType as any) || 'svga';
+        const videoUrl: string | undefined = res.videoUrl;
+        const videoFile: File | undefined = res.videoFile;
+
+        const sessionId = `proj_${Date.now()}_${count}`;
+        const sessionName = f.name.replace(/\.[^.]+$/, '');
+        const session: ProjectSession = {
+          id: sessionId,
+          name: sessionName,
+          originalFileName: f.name,
+          fileType,
+          videoUrl,
+          videoFile,
+          project: loadedProject,
+          layers: loadedLayers,
+          history: [createLayersSnapshot(loadedLayers)],
+          historyIndex: 0,
+          selectedLayerId: loadedLayers[0]?.id || null,
+          selectedLayerIds: loadedLayers[0]?.id ? [loadedLayers[0].id] : [],
+          currentFrame: 0,
+          zoom: 100,
+          panOffset: { x: 0, y: 0 },
+          fadeConfig: loadedProject.fadeConfig ? { ...loadedProject.fadeConfig } : { top: 0, bottom: 0, left: 0, right: 0 },
+          cropConfig: loadedProject.cropConfig ? { ...loadedProject.cropConfig } : { top: 0, bottom: 0, left: 0, right: 0 },
+          cropFeather: loadedProject.cropFeather ? { ...loadedProject.cropFeather } : { top: 0, bottom: 0, left: 0, right: 0 },
+          bgColor: 'transparent',
+          bgImageUrl: bgImageUrl || null,
+          exportFileName: f.name.replace(/\.[^.]+$/, '') + '_edited.svga',
+          modifiedAt: Date.now()
+        };
+        newSessions.push(session);
+      } catch (err: any) {
+        console.error(`Failed to load file ${f.name}:`, err);
+      }
+    }
+
+    if (newSessions.length > 0) {
+      setProjects(prev => [...prev, ...newSessions]);
+      const first = newSessions[0];
+      setActiveProjectId(first.id);
+      setProject(first.project);
+      setLayers(first.layers);
+      setSelectedLayerId(first.selectedLayerId);
+      setSelectedLayerIds(first.selectedLayerIds);
+      setCurrentFrame(0);
+      setIsPlaying(true);
+      setZoom(100);
+      setPanOffset({ x: 0, y: 0 });
+      setFadeConfig(first.fadeConfig);
+      setCropConfig(first.cropConfig);
+      setCropFeather(first.cropFeather);
+      setExportFileName(first.exportFileName);
+
+      masterLayersMapRef.current.clear();
+      first.layers.forEach(l => masterLayersMapRef.current.set(l.id, l));
+      setHistory([createLayersSnapshot(first.layers)]);
+      setHistoryIndex(0);
+
+      setIsOverviewMode(false);
+      setCanvasViewMode('multi');
+      setSuccessToast(`🎉 تم فتح وعرض ${newSessions.length} مشاريع وفيديوهات بنجاح على الشاشة!`);
+    } else {
+      setErrorMessage('تعذر قراءة الملفات المحددة. يرجى التأكد من سلامة صيغ الملفات.');
+    }
+    setIsLoading(false);
+  }, []);
+
+  // Multi-Project Switching & Management Handlers
+  const handleSwitchProject = useCallback((targetId: string) => {
+    if (targetId === activeProjectId) {
+      setIsOverviewMode(false);
+      return;
+    }
+
+    // Save current active state into projects array before switching
+    if (activeProjectId && project) {
+      setProjects(prev => prev.map(p => {
+        if (p.id === activeProjectId) {
+          return {
+            ...p,
+            project,
+            layers,
+            fadeConfig,
+            cropConfig,
+            cropFeather,
+            bgColor,
+            bgImageUrl,
+            currentFrame,
+            selectedLayerId,
+            selectedLayerIds,
+            history,
+            historyIndex,
+            modifiedAt: Date.now()
+          };
+        }
+        return p;
+      }));
+    }
+
+    const targetSession = projects.find(p => p.id === targetId);
+    if (!targetSession) return;
+
+    setIsPlaying(false);
+    setActiveProjectId(targetId);
+    setProject(targetSession.project);
+    setLayers(targetSession.layers);
+    setHistory(targetSession.history && targetSession.history.length > 0 ? targetSession.history : [createLayersSnapshot(targetSession.layers)]);
+    setHistoryIndex(targetSession.historyIndex >= 0 ? targetSession.historyIndex : 0);
+    setSelectedLayerId(targetSession.selectedLayerId);
+    setSelectedLayerIds(targetSession.selectedLayerIds || (targetSession.selectedLayerId ? [targetSession.selectedLayerId] : []));
+    setCurrentFrame(targetSession.currentFrame || 0);
+    setZoom(targetSession.zoom || 100);
+    setPanOffset(targetSession.panOffset || { x: 0, y: 0 });
+    setFadeConfig(targetSession.fadeConfig || { top: 0, bottom: 0, left: 0, right: 0 });
+    setCropConfig(targetSession.cropConfig || { top: 0, bottom: 0, left: 0, right: 0 });
+    setCropFeather(targetSession.cropFeather || { top: 0, bottom: 0, left: 0, right: 0 });
+    setBgColor(targetSession.bgColor || 'transparent');
+    setBgImageUrl(targetSession.bgImageUrl || null);
+    setExportFileName(targetSession.exportFileName || targetSession.project.fileName.replace(/\.svga$/i, '') + '_edited.svga');
+
+    masterLayersMapRef.current.clear();
+    targetSession.layers.forEach(l => masterLayersMapRef.current.set(l.id, l));
+
+    setIsOverviewMode(false);
+    setSuccessToast(`المشروع النشط للتعديل: ${targetSession.name}`);
+  }, [activeProjectId, project, layers, fadeConfig, cropConfig, cropFeather, bgColor, bgImageUrl, currentFrame, selectedLayerId, selectedLayerIds, history, historyIndex, projects]);
+
+  // Merge another project's layers into the active project canvas
+  const handleMergeProjectIntoActive = useCallback((sourceProjId: string) => {
+    if (!project) return;
+    const sourceProj = projects.find(p => p.id === sourceProjId);
+    if (!sourceProj) return;
+
+    const randKey = Math.random().toString(36).substring(2, 6);
+    const prefix = `m_${randKey}_`;
+
+    const updatedImagesMap = { ...project.imagesMap };
+    const updatedRawImages = { ...project.rawImages };
+    const keyTranslation: Record<string, string> = {};
+
+    for (const [key, dataUrl] of Object.entries(sourceProj.project.imagesMap)) {
+      const namespaced = `${prefix}${key}`;
+      keyTranslation[key] = namespaced;
+      updatedImagesMap[namespaced] = dataUrl;
+      if (sourceProj.project.rawImages?.[key]) {
+        updatedRawImages[namespaced] = sourceProj.project.rawImages[key];
+      }
+    }
+
+    const clonedLayers: EditableLayer[] = sourceProj.layers.map((l, idx) => ({
+      ...l,
+      id: `mrg_${randKey}_${l.id}`,
+      name: `[${sourceProj.name}] ${l.name}`,
+      imageKey: l.imageKey && keyTranslation[l.imageKey] ? keyTranslation[l.imageKey] : l.imageKey,
+      transform: {
+        ...l.transform,
+        x: l.transform.x + 20 * (idx + 1),
+        y: l.transform.y + 20 * (idx + 1)
+      }
+    }));
+
+    const newLayers = [...clonedLayers, ...layers];
+    clonedLayers.forEach(l => masterLayersMapRef.current.set(l.id, l));
+    setLayers(newLayers);
+    setProject({
+      ...project,
+      imagesMap: updatedImagesMap,
+      rawImages: updatedRawImages
+    });
+    pushHistory(newLayers);
+    setSuccessToast(`تم دمج طبقات "${sourceProj.name}" بنجاح في المشروع النشط!`);
+  }, [project, projects, layers, pushHistory]);
+
+  // Merge all open projects and videos into a single master canvas as layers
+  const handleMergeAllProjectsIntoSingleCanvas = useCallback(() => {
+    if (!project || projects.length <= 1) return;
+
+    let mergedImagesMap = { ...project.imagesMap };
+    let mergedRawImages = { ...project.rawImages };
+    let allAdditionalLayers: EditableLayer[] = [];
+
+    projects.forEach((proj, pIdx) => {
+      if (proj.id === activeProjectId) return;
+      const randKey = Math.random().toString(36).substring(2, 6);
+      const prefix = `m_${randKey}_`;
+      const keyTranslation: Record<string, string> = {};
+
+      for (const [key, dataUrl] of Object.entries(proj.project.imagesMap)) {
+        const namespaced = `${prefix}${key}`;
+        keyTranslation[key] = namespaced;
+        mergedImagesMap[namespaced] = dataUrl;
+        if (proj.project.rawImages?.[key]) {
+          mergedRawImages[namespaced] = proj.project.rawImages[key];
+        }
+      }
+
+      const clonedLayers: EditableLayer[] = proj.layers.map((l, idx) => ({
+        ...l,
+        id: `mrg_${randKey}_${l.id}`,
+        name: `[${proj.name}] ${l.name}`,
+        imageKey: l.imageKey && keyTranslation[l.imageKey] ? keyTranslation[l.imageKey] : l.imageKey,
+        transform: {
+          ...l.transform,
+          x: l.transform.x + 30 * (pIdx + 1),
+          y: l.transform.y + 30 * (pIdx + 1)
+        }
+      }));
+
+      clonedLayers.forEach(l => masterLayersMapRef.current.set(l.id, l));
+      allAdditionalLayers.push(...clonedLayers);
+    });
+
+    const finalLayers = [...allAdditionalLayers, ...layers];
+    setLayers(finalLayers);
+    setProject({
+      ...project,
+      imagesMap: mergedImagesMap,
+      rawImages: mergedRawImages
+    });
+    pushHistory(finalLayers);
+    setCanvasViewMode('single');
+    setSuccessToast(`🎉 تم دمج جميع المشاريع والفيديوهات المفتوحة كطبقات في كانفاس واحد!`);
+  }, [project, projects, activeProjectId, layers, pushHistory]);
+
+  const handleCloseProject = useCallback((id: string) => {
+    setProjects(prev => {
+      const remaining = prev.filter(p => p.id !== id);
+      if (id === activeProjectId) {
+        if (remaining.length > 0) {
+          const next = remaining[0];
+          setTimeout(() => handleSwitchProject(next.id), 0);
+        } else {
+          setActiveProjectId(null);
+          setProject(null);
+          setLayers([]);
+          setSelectedLayerId(null);
+          setSelectedLayerIds([]);
+        }
+      }
+      return remaining;
+    });
+  }, [activeProjectId, handleSwitchProject]);
+
+  const handleDuplicateProject = useCallback((id: string) => {
+    const target = projects.find(p => p.id === id);
+    if (!target) return;
+    const newId = `proj_${Date.now()}_copy`;
+    const copySession: ProjectSession = {
+      ...target,
+      id: newId,
+      name: `${target.name} (نسخة)`,
+      modifiedAt: Date.now()
+    };
+    setProjects(prev => [...prev, copySession]);
+    setSuccessToast(`تم إنشاء نسخة من المشروع: ${copySession.name}`);
+  }, [projects]);
+
+  const handleRenameProject = useCallback((id: string, newName: string) => {
+    setProjects(prev => prev.map(p => p.id === id ? { ...p, name: newName } : p));
+  }, []);
+
+  // Synchronize active project changes to projects session state (excluding currentFrame to prevent infinite loop & re-render spam during 60fps playback)
+  useEffect(() => {
+    if (!activeProjectId || !project) return;
+    setProjects(prev => prev.map(p => {
+      if (p.id === activeProjectId) {
+        return {
+          ...p,
+          project,
+          layers,
+          history,
+          historyIndex,
+          selectedLayerId,
+          selectedLayerIds,
+          zoom,
+          panOffset,
+          fadeConfig,
+          cropConfig,
+          cropFeather,
+          bgColor,
+          bgImageUrl,
+          exportFileName,
+          modifiedAt: Date.now()
+        };
+      }
+      return p;
+    }));
+  }, [activeProjectId, project, layers, fadeConfig, cropConfig, cropFeather, exportFileName]);
 
   // Handle Import MP4 as Layer into Existing SVGA Project
   const handleImportMp4AsLayer = useCallback((newLayer: EditableLayer, addedAudios: SVGAAudioTrack[]) => {
@@ -639,10 +1317,15 @@ export const SvgaLayerEditor: React.FC<SvgaLayerEditorProps> = ({
   }, [pushHistory]);
 
   // Handle Initial File or Direct Transferred Project
+  const initialLoadedRef = useRef<File | SVGAProjectData | null>(null);
   useEffect(() => {
     if (initialProject && initialLayers && initialLayers.length > 0) {
+      if (initialLoadedRef.current === initialProject) return;
+      initialLoadedRef.current = initialProject;
       handleImportMp4AsProject(initialProject, initialLayers);
     } else if (initialFile) {
+      if (initialLoadedRef.current === initialFile) return;
+      initialLoadedRef.current = initialFile;
       loadSvgaFile(initialFile);
     }
   }, [initialFile, initialProject, initialLayers, handleImportMp4AsProject, loadSvgaFile]);
@@ -693,21 +1376,11 @@ export const SvgaLayerEditor: React.FC<SvgaLayerEditorProps> = ({
       return () => clearTimeout(timer);
     }
   }, [successToast]);
-  // Layer Update Handlers
+  // Layer Update Handlers - Updates the specific layer individually without propagating to other layers
   const handleUpdateLayerTransform = useCallback((layerId: string, deltaTransform: Partial<EditableLayer['transform']>) => {
     setLayers(prev => {
       const target = prev.find(l => l.id === layerId);
       if (!target) return prev;
-
-      const isSequence = Boolean(target.sequenceGroupId || (target.keyframeSummary?.isSequenceOrRepeated && target.imageKey));
-      const targetSeqGroupId = target.sequenceGroupId;
-      const targetImageKey = target.imageKey;
-
-      const dx = deltaTransform.x !== undefined ? deltaTransform.x - target.transform.x : 0;
-      const dy = deltaTransform.y !== undefined ? deltaTransform.y - target.transform.y : 0;
-      const dScaleX = deltaTransform.scaleX !== undefined ? deltaTransform.scaleX - target.transform.scaleX : 0;
-      const dScaleY = deltaTransform.scaleY !== undefined ? deltaTransform.scaleY - target.transform.scaleY : 0;
-      const dRot = deltaTransform.rotation !== undefined ? deltaTransform.rotation - target.transform.rotation : 0;
 
       return prev.map(l => {
         if (l.id === layerId) {
@@ -716,24 +1389,6 @@ export const SvgaLayerEditor: React.FC<SvgaLayerEditorProps> = ({
             transform: {
               ...l.transform,
               ...deltaTransform
-            }
-          };
-        }
-        // If part of sequence/repeated group, propagate delta so sequential images move together like SVGA 2.0
-        if (isSequence && (
-          (targetSeqGroupId && l.sequenceGroupId === targetSeqGroupId) ||
-          (targetImageKey && l.imageKey === targetImageKey && l.keyframeSummary?.isSequenceOrRepeated)
-        )) {
-          return {
-            ...l,
-            transform: {
-              ...l.transform,
-              x: l.transform.x + dx,
-              y: l.transform.y + dy,
-              scaleX: Math.max(0.01, l.transform.scaleX + dScaleX),
-              scaleY: Math.max(0.01, l.transform.scaleY + dScaleY),
-              rotation: l.transform.rotation + dRot,
-              opacity: deltaTransform.opacity !== undefined ? deltaTransform.opacity : l.transform.opacity
             }
           };
         }
@@ -759,20 +1414,41 @@ export const SvgaLayerEditor: React.FC<SvgaLayerEditorProps> = ({
             keyframeEnd: 1.0,
             durationSeconds: 2.0
           };
+          const newShine = {
+            ...currentShine,
+            ...shineDelta,
+            enabled: shineDelta.enabled !== undefined ? shineDelta.enabled : (shineDelta.color ? true : currentShine.enabled)
+          };
           return {
             ...l,
-            shineConfig: {
-              ...currentShine,
-              ...shineDelta
-            }
+            shineExportMode: newShine.exportMode || l.shineExportMode,
+            shineConfig: newShine
           };
         }
         return l;
       });
       pushHistory(updated);
+
+      // Persist to localStorage for project
+      try {
+        if (project?.fileName) {
+          const shineMap: Record<string, any> = {};
+          updated.forEach(layerItem => {
+            if (layerItem.shineConfig && layerItem.shineConfig.enabled) {
+              shineMap[layerItem.id] = {
+                shineConfig: layerItem.shineConfig,
+                shineExportMode: layerItem.shineExportMode,
+                isShineLayer: layerItem.isShineLayer
+              };
+            }
+          });
+          localStorage.setItem(`svga_shine_${project.fileName}`, JSON.stringify(shineMap));
+        }
+      } catch (e) {}
+
       return updated;
     });
-  }, [pushHistory]);
+  }, [pushHistory, project]);
 
   const handleResetShine = useCallback((layerId: string) => {
     setLayers(prev => {
@@ -801,6 +1477,112 @@ export const SvgaLayerEditor: React.FC<SvgaLayerEditorProps> = ({
       return updated;
     });
   }, [pushHistory]);
+
+  const handleCreateShineLayer = useCallback(() => {
+    if (!project) return;
+    const shineLayerId = `shine_layer_${Date.now()}`;
+    const newLayer: EditableLayer = {
+      id: shineLayerId,
+      originalIndex: 0,
+      aspectRatioLocked: false,
+      spriteRef: { imageKey: '', frames: [] },
+      name: `✨ طبقة لمعة مستمرة ${layers.filter(l => l.isShineLayer).length + 1}`,
+      type: 'shape',
+      imageKey: '',
+      isShineLayer: true,
+      visible: true,
+      locked: false,
+      blendMode: 'screen',
+      inFrame: 0,
+      outFrame: project.totalFrames - 1,
+      framesCount: project.totalFrames,
+      keyframeSummary: {
+        startFrame: 0,
+        endFrame: project.totalFrames - 1,
+        hasTransform: false,
+        hasShapes: true,
+        isSequenceOrRepeated: false
+      },
+      initialBounds: {
+        x: 0,
+        y: 0,
+        width: project.width,
+        height: project.height
+      },
+      transform: {
+        x: 0,
+        y: 0,
+        width: project.width,
+        height: project.height,
+        scaleX: 1,
+        scaleY: 1,
+        rotation: 0,
+        opacity: 100
+      },
+      shineConfig: {
+        enabled: true,
+        beamWidth: 80,
+        angleDeg: 45,
+        opacity: 0.9,
+        featherSides: 0.85,
+        featherTopBottom: 0.7,
+        maskToAlpha: false,
+        color: '#ffffff',
+        speedMultiplier: 1.0,
+        durationSeconds: 2.0,
+        repeatInterval: 0.5,
+        style: 'soft',
+        direction: 'forward',
+        exportMode: 'separate',
+        editPathOnCanvas: true,
+        startPoint: { x: 0, y: 0 },
+        endPoint: { x: project.width, y: project.height }
+      }
+    };
+    setLayers(prev => {
+      const updated = [newLayer, ...prev];
+      pushHistory(updated);
+      return updated;
+    });
+    setSelectedLayerId(shineLayerId);
+    setSelectedLayerIds([shineLayerId]);
+    setSuccessToast('تم إنشاء طبقة لمعة مستقلة جديدة بنجاح ✨');
+  }, [project, layers, pushHistory]);
+
+  const handleExportShineLayerOnly = useCallback(async () => {
+    if (!project) return;
+    try {
+      setIsExporting(true);
+      const shineLayers = layers.filter(l => l.isShineLayer || l.shineConfig?.enabled);
+      if (shineLayers.length === 0) {
+        alert('لا توجد طبقات لمعة مفعلة لتصديرها وحدها');
+        setIsExporting(false);
+        return;
+      }
+      
+      const { blob, fileName } = await exportEditedSvga(
+        project,
+        shineLayers,
+        `${project.fileName.replace(/\.svga$/i, '')}_shine_only.svga`,
+        { fadeConfig, cropConfig, cropFeather }
+      );
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setSuccessToast(`تم تصدير طبقة اللمعة وحدها بنجاح: ${fileName} (${(blob.size / 1024).toFixed(1)} KB)`);
+    } catch (err: any) {
+      console.error('Error exporting shine layer only:', err);
+      alert(err?.message || 'فشل تصدير طبقة اللمعة');
+    } finally {
+      setIsExporting(false);
+    }
+  }, [project, layers, fadeConfig, cropConfig, cropFeather]);
 
   // Synchronize motion path across all layers in a sequence/repeated group (SVGA 2.0 Motion Sync)
   const handleSyncSequenceMotion = useCallback((layerIdOrGroupId: string) => {
@@ -1189,12 +1971,17 @@ export const SvgaLayerEditor: React.FC<SvgaLayerEditorProps> = ({
       cloned.name = `${target.name} (نسخة ${mirror ? 'معكوسة' : ''})`;
       cloned.isDuplicate = true;
       cloned.sourceLayerId = target.id;
+      cloned.isMirroredLayer = mirror;
+      cloned.linkedMirroredLayerId = target.id;
+      cloned.autoSyncMirroredAsset = true;
+      cloned.autoFlipMirroredAsset = mirror;
       cloned.isMotionSynced = false;
       cloned.motionReferenceLayerId = undefined;
-      
+
+      const layerW = target.transform.width || target.initialBounds?.width || 100;
       if (mirror && project) {
-        // Mirror horizontally across the canvas center
-        cloned.transform.x = project.width - target.transform.x;
+        // Mirror horizontally across the canvas center with exact bounding box alignment
+        cloned.transform.x = project.width - (target.transform.x + layerW);
         cloned.transform.scaleX = -target.transform.scaleX;
         if (cloned.transform.rotation) {
           cloned.transform.rotation = -cloned.transform.rotation;
@@ -1203,7 +1990,7 @@ export const SvgaLayerEditor: React.FC<SvgaLayerEditorProps> = ({
         // Mirror all keyframes
         if (cloned.keyframes) {
           cloned.keyframes.forEach(kf => {
-            if (kf.x !== undefined) kf.x = project.width - kf.x;
+            if (kf.x !== undefined) kf.x = project.width - (kf.x + layerW);
             if (kf.scaleX !== undefined) kf.scaleX = -kf.scaleX;
             if (kf.rotation !== undefined) kf.rotation = -kf.rotation;
           });
@@ -1232,15 +2019,26 @@ export const SvgaLayerEditor: React.FC<SvgaLayerEditorProps> = ({
       cloned.originalSpriteFrames = JSON.parse(JSON.stringify(cloned.spriteRef?.frames || []));
       cloned.originalKeyframes = cloned.keyframes ? JSON.parse(JSON.stringify(cloned.keyframes)) : undefined;
 
+      // Update source target layer to link back to twin
+      const updatedTarget: EditableLayer = {
+        ...target,
+        linkedMirroredLayerId: newId,
+        autoSyncMirroredAsset: true
+      };
+
+      masterLayersMapRef.current.set(newId, cloned);
+      masterLayersMapRef.current.set(target.id, updatedTarget);
+
       const updated = [
         ...prev.slice(0, targetIndex),
+        updatedTarget,
         cloned,
-        ...prev.slice(targetIndex)
+        ...prev.slice(targetIndex + 1)
       ];
       setSelectedLayerId(newId);
       setSelectedLayerIds([newId]);
       pushHistory(updated);
-      setSuccessToast(mirror ? `تم تكرار الطبقة وعكسها أفقياً` : `تم تكرار الطبقة: ${target.name}`);
+      setSuccessToast(mirror ? `تم تكرار الطبقة وعكسها أفقياً وربطها توأماً مع الأصلية` : `تم تكرار الطبقة: ${target.name}`);
       return updated;
     });
   }, [selectedLayerIds, pushHistory, project]);
@@ -1371,6 +2169,82 @@ export const SvgaLayerEditor: React.FC<SvgaLayerEditorProps> = ({
       const targetW = layer.transform.width;
       const targetH = layer.transform.height;
 
+      // Find twin / mirrored / duplicate layers linked to this layer or sharing the same image
+      const checkIsLayerMirrored = (l: EditableLayer) => {
+        if (l.isMirroredLayer) return true;
+        if (l.transform.scaleX < 0) return true;
+        if (Boolean(l.autoFlipMirroredAsset)) return true;
+        if (l.spriteRef?.frames?.some((fr: any) => fr?.transform && ((fr.transform.a !== undefined && fr.transform.a < -0.01) || (fr.transform.a * fr.transform.d - fr.transform.b * fr.transform.c < -0.01)))) {
+          return true;
+        }
+        if (l.originalSpriteFrames?.some((fr: any) => fr?.transform && ((fr.transform.a !== undefined && fr.transform.a < -0.01) || (fr.transform.a * fr.transform.d - fr.transform.b * fr.transform.c < -0.01)))) {
+          return true;
+        }
+        const nameLower = (l.name || '').toLowerCase();
+        return nameLower.includes('mirror') || nameLower.includes('معكوس') || nameLower.includes('twin') || nameLower.includes('عكس');
+      };
+
+      const twinLayers = layers.filter(other => 
+        other.id !== layer.id && (
+          other.id === layer.linkedMirroredLayerId ||
+          other.linkedMirroredLayerId === layer.id ||
+          other.sourceLayerId === layer.id ||
+          layer.sourceLayerId === other.id ||
+          other.imageKey === imgKey ||
+          (other.spriteRef?.imageKey && other.spriteRef.imageKey === imgKey)
+        )
+      );
+
+      const shouldSyncTwin = layer.autoSyncMirroredAsset !== false;
+      let flippedBuffer: { dataUrl: string; bytes: Uint8Array; width: number; height: number } | null = null;
+
+      if (shouldSyncTwin && twinLayers.length > 0) {
+        const needsFlip = twinLayers.some(t => {
+          const hasNegativeMatrix = t.spriteRef?.frames?.some((fr: any) => fr?.transform && fr.transform.a !== undefined && fr.transform.a < -0.01);
+          // If the SVGA sprite frame itself already has negative scale matrix a < 0, it flips natively.
+          // Otherwise, if it's marked as mirrored or scaleX < 0, it needs pixel flipping.
+          return checkIsLayerMirrored(t) && !hasNegativeMatrix;
+        });
+
+        if (needsFlip) {
+          try {
+            flippedBuffer = await getFlippedImageBuffer(bytes, true, false);
+          } catch (e) {
+            console.warn('Could not generate flipped buffer for mirrored twin:', e);
+          }
+        }
+      }
+
+      const projectUpdatesRaw: Record<string, Uint8Array> = { [imgKey]: bytes };
+      const projectUpdatesMap: Record<string, string> = { [imgKey]: dataUrl };
+
+      const twinKeyMap = new Map<string, string>();
+      const twinUrlMap = new Map<string, string>();
+
+      if (shouldSyncTwin && twinLayers.length > 0) {
+        for (const twin of twinLayers) {
+          const isMirrored = checkIsLayerMirrored(twin);
+          const hasNegativeMatrix = twin.spriteRef?.frames?.some((fr: any) => fr?.transform && fr.transform.a !== undefined && fr.transform.a < -0.01);
+          
+          // If frame matrix already flips (a < 0), use un-flipped bytes so SVGA matrix flips it once;
+          // if it doesn't have matrix flip, use flippedBuffer.
+          const willFlip = isMirrored && !hasNegativeMatrix && flippedBuffer !== null;
+          const assignedDataUrl = willFlip ? flippedBuffer!.dataUrl : dataUrl;
+          const assignedBytes = willFlip ? flippedBuffer!.bytes : bytes;
+
+          let targetTwinKey = twin.imageKey;
+          if (willFlip && targetTwinKey === imgKey) {
+            targetTwinKey = `${imgKey}_mirrored_${Date.now()}_${twin.id.slice(-4)}`;
+          }
+
+          twinKeyMap.set(twin.id, targetTwinKey);
+          twinUrlMap.set(twin.id, assignedDataUrl);
+
+          projectUpdatesRaw[targetTwinKey] = assignedBytes;
+          projectUpdatesMap[targetTwinKey] = assignedDataUrl;
+        }
+      }
+
       // Update in project imagesMap and rawImages (ensures both canvas preview and SVGA binary export update immediately)
       setProject(prev => {
         if (!prev) return prev;
@@ -1378,19 +2252,19 @@ export const SvgaLayerEditor: React.FC<SvgaLayerEditorProps> = ({
           ...prev,
           rawImages: {
             ...prev.rawImages,
-            [imgKey]: bytes
+            ...projectUpdatesRaw
           },
           imagesMap: {
             ...prev.imagesMap,
-            [imgKey]: dataUrl
+            ...projectUpdatesMap
           }
         };
       });
 
-      // Update layer thumbnail, dimensions, and sprite frames
+      // Update layer thumbnail, dimensions, and sprite frames for target layer AND all linked/copied layers
       setLayers(prev => {
         const updated = prev.map(l => {
-          if (l.id === selectedLayerId || l.imageKey === imgKey) {
+          if (l.id === selectedLayerId) {
             let updatedSpriteRef = l.spriteRef;
             if (l.spriteRef && l.spriteRef.frames) {
               const updatedFrames = l.spriteRef.frames.map((fr: any) => {
@@ -1420,7 +2294,7 @@ export const SvgaLayerEditor: React.FC<SvgaLayerEditorProps> = ({
               };
             }
 
-            return {
+            const updatedLayer: EditableLayer = {
               ...l,
               thumbnailUrl: dataUrl,
               spriteRef: updatedSpriteRef,
@@ -1435,6 +2309,199 @@ export const SvgaLayerEditor: React.FC<SvgaLayerEditorProps> = ({
                 height: targetH
               }
             };
+            masterLayersMapRef.current.set(l.id, updatedLayer);
+            return updatedLayer;
+          }
+
+          // If layer is in twinLayers or shares imgKey
+          if (twinLayers.some(t => t.id === l.id) || l.imageKey === imgKey) {
+            const twinKey = twinKeyMap.get(l.id) || l.imageKey;
+            const twinUrl = twinUrlMap.get(l.id) || dataUrl;
+
+            const twinLayoutW = l.spriteRef?.frames?.[0]?.layout?.width || l.initialBounds?.width || l.transform?.width || newWidth;
+            const twinLayoutH = l.spriteRef?.frames?.[0]?.layout?.height || l.initialBounds?.height || l.transform?.height || newHeight;
+            const twinScaleX = (newWidth > 0 && twinLayoutW > 0) ? (twinLayoutW / newWidth) : 1;
+            const twinScaleY = (newHeight > 0 && twinLayoutH > 0) ? (twinLayoutH / newHeight) : 1;
+
+            let updatedTwinSprite = l.spriteRef;
+            if (l.spriteRef && l.spriteRef.frames) {
+              const updatedFrames = l.spriteRef.frames.map((fr: any) => {
+                if (!fr) return fr;
+                const t = fr.transform || { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 };
+                return {
+                  ...fr,
+                  layout: {
+                    ...(fr.layout || {}),
+                    width: newWidth,
+                    height: newHeight
+                  },
+                  transform: {
+                    ...t,
+                    a: (t.a ?? 1) * twinScaleX,
+                    b: (t.b ?? 0) * twinScaleY,
+                    c: (t.c ?? 0) * twinScaleX,
+                    d: (t.d ?? 1) * twinScaleY,
+                    tx: t.tx ?? 0,
+                    ty: t.ty ?? 0
+                  }
+                };
+              });
+              updatedTwinSprite = {
+                ...l.spriteRef,
+                imageKey: twinKey,
+                frames: updatedFrames
+              };
+            }
+
+            const updatedTwin: EditableLayer = {
+              ...l,
+              imageKey: twinKey,
+              thumbnailUrl: twinUrl,
+              spriteRef: updatedTwinSprite,
+              transform: {
+                ...l.transform,
+                width: targetW,
+                height: targetH
+              },
+              initialBounds: {
+                ...l.initialBounds,
+                width: targetW,
+                height: targetH
+              }
+            };
+            masterLayersMapRef.current.set(l.id, updatedTwin);
+            return updatedTwin;
+          }
+
+          return l;
+        });
+        pushHistory(updated);
+        return updated;
+      });
+
+      const syncedMsg = (shouldSyncTwin && twinLayers.length > 0)
+        ? ` وتمت مزامنة الطبقات المنسوخة والمعكوسة المقترنة (${twinLayers.map(t => t.name).join(', ')}) وحفظها تلقائياً للتصدير بنجاح ✓`
+        : '';
+      setSuccessToast(`تم استبدال صورة الطبقة وتحديث الطبقات المنسوخة والمعكوسة بنجاح (${targetW}×${targetH}): ${layer.name}${syncedMsg}`);
+    } catch (err: any) {
+      console.error('Failed to replace image asset:', err);
+    }
+  }, [selectedLayerId, project, layers, pushHistory]);
+
+  // Link or unlink a mirrored twin layer
+  const handleLinkMirroredLayer = useCallback((layerId: string, twinLayerId: string | null) => {
+    setLayers(prev => {
+      const updated = prev.map(l => {
+        if (l.id === layerId) {
+          return {
+            ...l,
+            linkedMirroredLayerId: twinLayerId || undefined,
+            autoSyncMirroredAsset: true
+          };
+        }
+        if (twinLayerId && l.id === twinLayerId) {
+          return {
+            ...l,
+            linkedMirroredLayerId: layerId,
+            isMirroredLayer: true,
+            autoSyncMirroredAsset: true,
+            autoFlipMirroredAsset: true
+          };
+        }
+        // If unlinking previous twin
+        if (!twinLayerId && l.linkedMirroredLayerId === layerId) {
+          return {
+            ...l,
+            linkedMirroredLayerId: undefined
+          };
+        }
+        return l;
+      });
+      pushHistory(updated);
+      setSuccessToast(twinLayerId ? 'تم ربط الطبقة المعكوسة بنجاح وتفعيل المزامنة التلقائية' : 'تم إلغاء ربط الطبقة المعكوسة');
+      return updated;
+    });
+  }, [pushHistory]);
+
+  // Toggle auto sync / auto flip on mirrored twin
+  const handleToggleAutoSyncMirrored = useCallback((layerId: string, enabled: boolean) => {
+    setLayers(prev => {
+      const updated = prev.map(l => (l.id === layerId ? { ...l, autoSyncMirroredAsset: enabled } : l));
+      pushHistory(updated);
+      return updated;
+    });
+  }, [pushHistory]);
+
+  const handleToggleAutoFlipMirrored = useCallback((layerId: string, enabled: boolean) => {
+    setLayers(prev => {
+      const updated = prev.map(l => (l.id === layerId ? { ...l, autoFlipMirroredAsset: enabled } : l));
+      pushHistory(updated);
+      return updated;
+    });
+  }, [pushHistory]);
+
+  // Manually sync current layer's image to twin right now
+  const handleSyncMirroredLayerAsset = useCallback(async (layerId: string, customTwinId?: string) => {
+    if (!project) return;
+    const layer = layers.find(l => l.id === layerId);
+    if (!layer || !layer.imageKey) return;
+
+    const twinId = customTwinId || layer.linkedMirroredLayerId;
+    if (!twinId) return;
+
+    const twin = layers.find(l => l.id === twinId);
+    if (!twin) return;
+
+    const rawSrcBytes = project.rawImages?.[layer.imageKey];
+    const dataUrlSrc = project.imagesMap?.[layer.imageKey] || layer.thumbnailUrl;
+    if (!rawSrcBytes && !dataUrlSrc) return;
+
+    try {
+      const hasMatrixFlip = twin.spriteRef?.frames?.some((fr: any) => fr?.transform && fr.transform.a !== undefined && fr.transform.a < -0.01) || twin.transform.scaleX < 0;
+      const isMirrored = twin.isMirroredLayer || Boolean(twin.autoFlipMirroredAsset);
+      // Only flip pixel buffer if layer does NOT have native affine matrix flip
+      const shouldFlip = isMirrored && !hasMatrixFlip && twin.autoFlipMirroredAsset !== false;
+
+      let finalBytes = rawSrcBytes;
+      let finalDataUrl = dataUrlSrc;
+
+      if (shouldFlip) {
+        const flipped = await getFlippedImageBuffer(rawSrcBytes || dataUrlSrc!, true, false);
+        finalBytes = flipped.bytes;
+        finalDataUrl = flipped.dataUrl;
+      }
+
+      let twinKey = twin.imageKey;
+      if (shouldFlip && twinKey === layer.imageKey) {
+        twinKey = `${layer.imageKey}_mirrored_${Date.now()}`;
+      } else if (!shouldFlip) {
+        // Reuse original asset directly to prevent inflating file size
+        twinKey = layer.imageKey;
+      }
+
+      setProject(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          rawImages: { ...prev.rawImages, [twinKey]: finalBytes! },
+          imagesMap: { ...prev.imagesMap, [twinKey]: finalDataUrl! }
+        };
+      });
+
+      setLayers(prev => {
+        const updated = prev.map(l => {
+          if (l.id === twin.id) {
+            const updatedTwin: EditableLayer = {
+              ...l,
+              imageKey: twinKey,
+              thumbnailUrl: finalDataUrl,
+              spriteRef: {
+                ...l.spriteRef,
+                imageKey: twinKey
+              }
+            };
+            masterLayersMapRef.current.set(l.id, updatedTwin);
+            return updatedTwin;
           }
           return l;
         });
@@ -1442,17 +2509,380 @@ export const SvgaLayerEditor: React.FC<SvgaLayerEditorProps> = ({
         return updated;
       });
 
-      setSuccessToast(`تم استبدال صورة الطبقة ومطابقة مقاسها تلقائياً مع الطبقة الأصلية (${targetW}×${targetH}): ${layer.name}`);
-    } catch (err: any) {
-      console.error('Failed to replace image asset:', err);
+      setSuccessToast(`تمت مزامنة صورة الطبقة المعكوسة (${twin.name}) بنجاح`);
+    } catch (e: any) {
+      console.error('Failed to sync mirrored layer asset:', e);
+      alert('تعذر مزامنة صورة الطبقة المعكوسة');
     }
-  }, [selectedLayerId, project, layers, pushHistory]);
+  }, [project, layers, pushHistory]);
+
+  // Convert layer image format and/or match & bake dimensions to old layer
+  const handleConvertLayerFormat = useCallback(async (
+    layerId: string,
+    targetMime: SupportedImageFormat,
+    forceResizeToLayer: boolean = true,
+    matchOldLayerId?: string
+  ) => {
+    if (!project) return;
+    const targetLayer = layers.find(l => l.id === layerId);
+    if (!targetLayer || !targetLayer.imageKey) return;
+
+    const imgKey = targetLayer.imageKey;
+    const sourceDataUrl = project.imagesMap?.[imgKey] || targetLayer.thumbnailUrl;
+    const sourceBytes = project.rawImages?.[imgKey];
+    const source = sourceBytes || sourceDataUrl;
+
+    if (!source) {
+      alert('لم يتم العثور على بيانات الصورة الأصلية لتحويلها');
+      return;
+    }
+
+    try {
+      // 1. Identify reference "old layer" (الطبقة القديمة) to match its dimensions and position
+      const otherLayers = layers.filter(l => l.id !== targetLayer.id);
+      let oldLayer: EditableLayer | undefined;
+
+      if (matchOldLayerId) {
+        oldLayer = otherLayers.find(l => l.id === matchOldLayerId);
+      }
+      if (!oldLayer && targetLayer.sourceLayerId) {
+        oldLayer = otherLayers.find(l => l.id === targetLayer.sourceLayerId);
+      }
+      if (!oldLayer && targetLayer.linkedMirroredLayerId) {
+        oldLayer = otherLayers.find(l => l.id === targetLayer.linkedMirroredLayerId);
+      }
+
+      const isCustomOrAdded = Boolean(
+        targetLayer.imageKey?.startsWith('img_custom') ||
+        targetLayer.id.includes('custom') ||
+        targetLayer.id.includes('add') ||
+        !targetLayer.originalSpriteFrames
+      );
+
+      // If it's a custom/added layer, search other layers for the original SVGA layer
+      if (!oldLayer && isCustomOrAdded) {
+        oldLayer = otherLayers.find(l => 
+          !l.imageKey?.startsWith('img_custom') && 
+          !l.id.includes('custom') &&
+          (l.originalIndex !== undefined || (l.spriteRef?.frames && l.spriteRef.frames.length > 0))
+        );
+      }
+
+      // If still not found and other layers exist, pick adjacent layer in the stack
+      if (!oldLayer && otherLayers.length > 0) {
+        const curIdx = layers.findIndex(l => l.id === targetLayer.id);
+        oldLayer = layers[curIdx + 1] || layers[curIdx - 1] || otherLayers[0];
+      }
+
+      // 2. Compute exact target dimensions (Width, Height, X, Y)
+      let targetW = 0;
+      let targetH = 0;
+      let targetX = 0;
+      let targetY = 0;
+
+      if (oldLayer) {
+        targetW = Math.max(1, Math.round(Math.abs(
+          oldLayer.transform.width ||
+          oldLayer.initialBounds.width ||
+          oldLayer.originalInitialBounds?.width ||
+          oldLayer.spriteRef?.frames?.[0]?.layout?.width ||
+          100
+        )));
+        targetH = Math.max(1, Math.round(Math.abs(
+          oldLayer.transform.height ||
+          oldLayer.initialBounds.height ||
+          oldLayer.originalInitialBounds?.height ||
+          oldLayer.spriteRef?.frames?.[0]?.layout?.height ||
+          100
+        )));
+        targetX = Math.round(
+          oldLayer.transform.x ??
+          oldLayer.initialBounds.x ??
+          oldLayer.originalInitialBounds?.x ??
+          0
+        );
+        targetY = Math.round(
+          oldLayer.transform.y ??
+          oldLayer.initialBounds.y ??
+          oldLayer.originalInitialBounds?.y ??
+          0
+        );
+      } else {
+        targetW = Math.max(1, Math.round(Math.abs(
+          targetLayer.originalInitialBounds?.width ||
+          targetLayer.originalSpriteFrames?.[0]?.layout?.width ||
+          targetLayer.initialBounds.width ||
+          targetLayer.transform.width ||
+          100
+        )));
+        targetH = Math.max(1, Math.round(Math.abs(
+          targetLayer.originalInitialBounds?.height ||
+          targetLayer.originalSpriteFrames?.[0]?.layout?.height ||
+          targetLayer.initialBounds.height ||
+          targetLayer.transform.height ||
+          100
+        )));
+        targetX = Math.round(
+          targetLayer.originalInitialBounds?.x ??
+          targetLayer.initialBounds.x ??
+          targetLayer.transform.x
+        );
+        targetY = Math.round(
+          targetLayer.originalInitialBounds?.y ??
+          targetLayer.initialBounds.y ??
+          targetLayer.transform.y
+        );
+      }
+
+      const finalResizeW = forceResizeToLayer ? targetW : undefined;
+      const finalResizeH = forceResizeToLayer ? targetH : undefined;
+
+      const { dataUrl, bytes, width: newW, height: newH } = await convertImageData(
+        source,
+        targetMime,
+        0.95,
+        finalResizeW,
+        finalResizeH
+      );
+
+      const formatLabel = targetMime === 'image/png' ? 'PNG' : targetMime === 'image/webp' ? 'WEBP' : 'JPEG';
+
+      // Update project rawImages and imagesMap
+      setProject(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          rawImages: {
+            ...prev.rawImages,
+            [imgKey]: bytes
+          },
+          imagesMap: {
+            ...prev.imagesMap,
+            [imgKey]: dataUrl
+          }
+        };
+      });
+
+      // Update layers
+      setLayers(prev => {
+        const updated = prev.map(l => {
+          if (l.id === layerId) {
+            const isMirrored = l.isMirroredLayer || l.transform.scaleX < 0;
+            let updatedSpriteRef = l.spriteRef;
+
+            if (forceResizeToLayer && l.spriteRef && l.spriteRef.frames) {
+              const updatedFrames = l.spriteRef.frames.map((fr: any, fIdx: number) => {
+                if (!fr) return fr;
+
+                // If matching an animated old layer with frames, copy frame transform and timing
+                if (oldLayer && oldLayer.spriteRef?.frames && oldLayer.spriteRef.frames.length > 0) {
+                  const oldFr = oldLayer.spriteRef.frames[fIdx] || oldLayer.spriteRef.frames[0];
+                  const t = oldFr?.transform || { a: 1, b: 0, c: 0, d: 1, tx: targetX, ty: targetY };
+                  let finalTransform = { ...t };
+                  if (isMirrored) {
+                    finalTransform.a = -Math.abs(finalTransform.a ?? 1);
+                  }
+                  return {
+                    ...oldFr,
+                    layout: {
+                      ...(oldFr?.layout || {}),
+                      x: 0,
+                      y: 0,
+                      width: newW,
+                      height: newH
+                    },
+                    transform: finalTransform,
+                    alpha: oldFr?.alpha !== undefined ? oldFr.alpha : (fr?.alpha ?? 1.0)
+                  };
+                }
+
+                // If adapting with originalSpriteFrames
+                const origFr = l.originalSpriteFrames?.[fIdx];
+                const t = fr.transform || { a: 1, b: 0, c: 0, d: 1, tx: targetX, ty: targetY };
+                let finalTransform = { ...t };
+                if (origFr && origFr.transform) {
+                  const origA = origFr.transform.a ?? 1;
+                  const origD = origFr.transform.d ?? 1;
+                  finalTransform = {
+                    ...origFr.transform,
+                    a: isMirrored ? -Math.abs(origA) : Math.abs(origA),
+                    d: origD,
+                    tx: targetX,
+                    ty: targetY
+                  };
+                } else {
+                  finalTransform = {
+                    ...finalTransform,
+                    a: isMirrored ? -1 : 1,
+                    d: 1,
+                    tx: targetX,
+                    ty: targetY
+                  };
+                }
+
+                return {
+                  ...fr,
+                  layout: {
+                    ...(fr.layout || {}),
+                    x: 0,
+                    y: 0,
+                    width: newW,
+                    height: newH
+                  },
+                  transform: finalTransform
+                };
+              });
+
+              updatedSpriteRef = {
+                ...l.spriteRef,
+                frames: updatedFrames
+              };
+            }
+
+            const updatedMain: EditableLayer = {
+              ...l,
+              thumbnailUrl: dataUrl,
+              sourceLayerId: oldLayer ? oldLayer.id : l.sourceLayerId,
+              spriteRef: updatedSpriteRef,
+              initialBounds: forceResizeToLayer ? {
+                ...l.initialBounds,
+                x: targetX,
+                y: targetY,
+                width: newW,
+                height: newH
+              } : l.initialBounds,
+              transform: forceResizeToLayer ? {
+                ...l.transform,
+                x: targetX,
+                y: targetY,
+                width: newW,
+                height: newH,
+                scaleX: isMirrored ? -1 : 1,
+                scaleY: l.transform.scaleY < 0 ? -1 : 1,
+                rotation: oldLayer ? oldLayer.transform.rotation : l.transform.rotation
+              } : l.transform,
+              originalInitialBounds: forceResizeToLayer ? {
+                x: targetX,
+                y: targetY,
+                width: newW,
+                height: newH
+              } : l.originalInitialBounds
+            };
+            masterLayersMapRef.current.set(l.id, updatedMain);
+            return updatedMain;
+          }
+
+          // Also synchronize any layer that shares the same imageKey or is a mirrored twin
+          if (l.imageKey === imgKey || l.linkedMirroredLayerId === layerId || targetLayer.linkedMirroredLayerId === l.id) {
+            const isMirrored = l.isMirroredLayer || l.transform.scaleX < 0 || Boolean(l.autoFlipMirroredAsset);
+            let updatedTwinSprite = l.spriteRef;
+            if (forceResizeToLayer && l.spriteRef && l.spriteRef.frames) {
+              const updatedFrames = l.spriteRef.frames.map((fr: any, fIdx: number) => {
+                if (!fr) return fr;
+                if (oldLayer && oldLayer.spriteRef?.frames && oldLayer.spriteRef.frames.length > 0) {
+                  const oldFr = oldLayer.spriteRef.frames[fIdx] || oldLayer.spriteRef.frames[0];
+                  const t = oldFr?.transform || { a: 1, b: 0, c: 0, d: 1, tx: targetX, ty: targetY };
+                  return {
+                    ...oldFr,
+                    layout: {
+                      ...(oldFr?.layout || {}),
+                      x: 0,
+                      y: 0,
+                      width: newW,
+                      height: newH
+                    },
+                    transform: {
+                      ...t,
+                      a: isMirrored ? -Math.abs(t.a ?? 1) : Math.abs(t.a ?? 1)
+                    },
+                    alpha: oldFr?.alpha !== undefined ? oldFr.alpha : (fr?.alpha ?? 1.0)
+                  };
+                }
+                const origFr = l.originalSpriteFrames?.[fIdx];
+                const t = fr.transform || { a: 1, b: 0, c: 0, d: 1, tx: targetX, ty: targetY };
+                let finalTransform = { ...t };
+                if (origFr && origFr.transform) {
+                  const origA = origFr.transform.a ?? 1;
+                  const origD = origFr.transform.d ?? 1;
+                  finalTransform = {
+                    ...origFr.transform,
+                    a: isMirrored ? -Math.abs(origA) : Math.abs(origA),
+                    d: origD,
+                    tx: targetX,
+                    ty: targetY
+                  };
+                } else {
+                  finalTransform = {
+                    ...finalTransform,
+                    a: isMirrored ? -1 : 1,
+                    d: 1,
+                    tx: targetX,
+                    ty: targetY
+                  };
+                }
+                return {
+                  ...fr,
+                  layout: {
+                    ...(fr.layout || {}),
+                    x: 0,
+                    y: 0,
+                    width: newW,
+                    height: newH
+                  },
+                  transform: finalTransform
+                };
+              });
+              updatedTwinSprite = {
+                ...l.spriteRef,
+                frames: updatedFrames
+              };
+            }
+
+            const updatedTwin: EditableLayer = {
+              ...l,
+              thumbnailUrl: dataUrl,
+              spriteRef: updatedTwinSprite,
+              initialBounds: forceResizeToLayer ? {
+                ...l.initialBounds,
+                x: targetX,
+                y: targetY,
+                width: newW,
+                height: newH
+              } : l.initialBounds,
+              transform: forceResizeToLayer ? {
+                ...l.transform,
+                x: targetX,
+                y: targetY,
+                width: newW,
+                height: newH,
+                scaleX: isMirrored ? -1 : 1,
+                scaleY: l.transform.scaleY < 0 ? -1 : 1
+              } : l.transform
+            };
+            masterLayersMapRef.current.set(l.id, updatedTwin);
+            return updatedTwin;
+          }
+
+          return l;
+        });
+        pushHistory(updated);
+        return updated;
+      });
+
+      const matchMsg = oldLayer ? ` لتطابق أبعاد وموضع الطبقة القديمة (${oldLayer.name}: ${newW}×${newH}px)` : ` بأبعاد (${newW}×${newH}px)`;
+      setSuccessToast(forceResizeToLayer ? `تم ضبط وتثبيت مقاس الطبقة بنجاح${matchMsg} وتحديث الكانفاس والتصدير بصيغة ${formatLabel}! ✨` : `تم تحويل صيغة الصورة بنجاح إلى ${formatLabel} بدقة وجودة فائقة! ✨`);
+    } catch (err: any) {
+      console.error('Failed to convert layer image format:', err);
+      alert(`فشل ضبط مقاس وتحويل صيغة الصورة: ${err.message || 'خطأ غير معروف'}`);
+    }
+  }, [project, layers, pushHistory]);
 
   // Add New Image Layer
   const handleAddImageLayer = useCallback(async (file: File) => {
     if (!project) return;
     try {
-      const { dataUrl, bytes, width, height } = await fileToImageBuffer(file);
+      const maxAllowedDim = Math.max(1200, Math.max(project.width, project.height) * 2);
+      const { dataUrl, bytes, width, height } = await fileToImageBuffer(file, maxAllowedDim);
       const imageKey = `img_custom_${Date.now()}`;
       const layerName = file.name.replace(/\.[^/.]+$/, '') || 'صورة مخصصة';
 
@@ -1484,6 +2914,15 @@ export const SvgaLayerEditor: React.FC<SvgaLayerEditorProps> = ({
         project.totalFrames
       );
 
+      // Automatically link to previously selected layer or first original SVGA layer as reference old layer
+      const refOldLayer = selectedLayerId 
+        ? layers.find(l => l.id === selectedLayerId)
+        : layers.find(l => !l.imageKey?.startsWith('img_custom'));
+
+      if (refOldLayer) {
+        newLayer.sourceLayerId = refOldLayer.id;
+      }
+
       setLayers(prev => {
         const updated = [newLayer, ...prev];
         pushHistory(updated);
@@ -1496,7 +2935,92 @@ export const SvgaLayerEditor: React.FC<SvgaLayerEditorProps> = ({
       console.error("Failed to add image layer:", err);
       alert(`فشل إضافة الصورة: ${err.message || 'خطأ غير متوقع'}`);
     }
-  }, [project, pushHistory]);
+  }, [project, layers, selectedLayerId, pushHistory]);
+
+  // ⭐️ إضافة قطعة مدمجة كقناع (Alpha Matte) داخل طبقة محددة ⭐️
+  const handleAddMaskedChildLayer = useCallback(async (parentLayerId: string, file: File) => {
+    if (!project) return;
+    try {
+      const parentLayer = layers.find(l => l.id === parentLayerId);
+      if (!parentLayer) return;
+
+      const { dataUrl, bytes, width, height } = await fileToImageBuffer(file);
+      const imageKey = `img_custom_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      const layerName = `${parentLayer.name} - ${file.name.replace(/\.[^/.]+$/, '')}`;
+
+      setProject(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          rawImages: {
+            ...prev.rawImages,
+            [imageKey]: bytes
+          },
+          imagesMap: {
+            ...prev.imagesMap,
+            [imageKey]: dataUrl
+          }
+        };
+      });
+
+      // Create new layer with parent motion copied or linked
+      const newLayer = createImageLayer(
+        imageKey,
+        layerName,
+        dataUrl,
+        width,
+        height,
+        project.width,
+        project.height,
+        project.totalFrames
+      );
+
+      // Set Alpha Matte parent relation
+      newLayer.clipToLayerId = parentLayer.id;
+      newLayer.sourceLayerId = parentLayer.id;
+      newLayer.blendMode = 'source-atop';
+
+      // Inherit transform & motion keyframes from parent layer so it matches the parent position
+      newLayer.transform = {
+        ...parentLayer.transform,
+        width: Math.min(parentLayer.transform.width, width),
+        height: Math.min(parentLayer.transform.height, height)
+      };
+
+      if (parentLayer.keyframes && parentLayer.keyframes.length > 0) {
+        newLayer.keyframes = JSON.parse(JSON.stringify(parentLayer.keyframes));
+      }
+
+      setLayers(prev => {
+        const pIdx = prev.findIndex(l => l.id === parentLayer.id);
+        const updated = [...prev];
+        if (pIdx >= 0) {
+          updated.splice(pIdx, 0, newLayer); // place directly in front of parent
+        } else {
+          updated.unshift(newLayer);
+        }
+        pushHistory(updated);
+        return updated;
+      });
+
+      setSelectedLayerId(newLayer.id);
+      setSelectedLayerIds([newLayer.id]);
+      setSuccessToast(`تمت إضافة ودمج القطعة (Alpha Matte) بنجاح: ${layerName}`);
+    } catch (err: any) {
+      console.error("Failed to add masked child layer:", err);
+      alert(`فشل دمج القطعة: ${err.message || 'خطأ غير متوقع'}`);
+    }
+  }, [project, layers, pushHistory]);
+
+  // فك ارتباط طبقة مدمجة كقناع (Alpha Matte)
+  const handleUnlinkMaskedChildLayer = useCallback((layerId: string) => {
+    setLayers(prev => {
+      const updated = prev.map(l => l.id === layerId ? { ...l, clipToLayerId: undefined, sourceLayerId: undefined, blendMode: 'source-over' } : l);
+      pushHistory(updated);
+      return updated;
+    });
+    setSuccessToast('تم فك ارتباط الطبقة المدمجة وجعلها طبقة حرة');
+  }, [pushHistory]);
 
   // Add New Shape / Text Layer
   const handleAddShapeLayer = useCallback(async (shapeType: 'rect' | 'circle' | 'star' | 'badge' | 'text', customText?: string) => {
@@ -2008,11 +3532,13 @@ export const SvgaLayerEditor: React.FC<SvgaLayerEditorProps> = ({
   }, [history, historyIndex]);
 
   // Perform SVGA Export and Download
-  const handleExport = async () => {
-    if (!project) return;
+  const handleExport = useCallback(async () => {
+    if (!project || isExporting) return;
     setIsExporting(true);
+    setSuccessToast(`جاري تصدير ملف SVGA مباشرة... ⏳`);
     try {
-      const { blob, fileName } = await exportEditedSvga(project, layers, exportFileName, {
+      const targetFileName = exportFileName || (project.fileName ? project.fileName.replace(/\.[^.]+$/, '') + '_edited.svga' : 'animation_edited.svga');
+      const { blob, fileName } = await exportEditedSvga(project, layers, targetFileName, {
         fadeConfig,
         cropConfig,
         cropFeather
@@ -2026,7 +3552,7 @@ export const SvgaLayerEditor: React.FC<SvgaLayerEditorProps> = ({
       a.click();
       URL.revokeObjectURL(url);
       
-      setSuccessToast(`تم تصدير وحفظ ملف SVGA بنجاح: ${fileName}`);
+      setSuccessToast(`تم تصدير وحفظ ملف SVGA بنجاح: ${fileName} ✓`);
       setShowExportModal(false);
     } catch (err: any) {
       console.error("Export error:", err);
@@ -2034,7 +3560,7 @@ export const SvgaLayerEditor: React.FC<SvgaLayerEditorProps> = ({
     } finally {
       setIsExporting(false);
     }
-  };
+  }, [project, isExporting, layers, exportFileName, fadeConfig, cropConfig, cropFeather]);
 
   // Preview Exported File in SVGA Viewer
   const handlePreviewExported = async () => {
@@ -2062,13 +3588,42 @@ export const SvgaLayerEditor: React.FC<SvgaLayerEditorProps> = ({
   const handleCreateNewProject = () => {
     try {
       const { project: newProj, layers: newLayers } = createNewSvgaProject(newProjectConfig);
+      const newSessionId = `proj_${Date.now()}`;
+      const exportName = (newProjectConfig.name || 'custom_svga_animation').replace(/\.svga$/i, '') + '_edited.svga';
+      const newSession: ProjectSession = {
+        id: newSessionId,
+        name: newProjectConfig.name || `مشروع ${projects.length + 1}`,
+        originalFileName: newProj.fileName,
+        fileType: 'custom',
+        project: newProj,
+        layers: newLayers,
+        history: [createLayersSnapshot(newLayers)],
+        historyIndex: 0,
+        selectedLayerId: null,
+        selectedLayerIds: [],
+        currentFrame: 0,
+        zoom: 100,
+        panOffset: { x: 0, y: 0 },
+        fadeConfig: { top: 0, bottom: 0, left: 0, right: 0 },
+        cropConfig: { top: 0, bottom: 0, left: 0, right: 0 },
+        cropFeather: { top: 0, bottom: 0, left: 0, right: 0 },
+        bgColor: 'transparent',
+        bgImageUrl: bgImageUrl || null,
+        exportFileName: exportName,
+        modifiedAt: Date.now()
+      };
+
+      setProjects(prev => [...prev, newSession]);
+      setActiveProjectId(newSessionId);
       setProject(newProj);
       setLayers(newLayers);
       setSelectedLayerId(null);
+      setSelectedLayerIds([]);
       setCurrentFrame(0);
-      setHistory([JSON.parse(JSON.stringify(newLayers))]);
+      setHistory([createLayersSnapshot(newLayers)]);
       setHistoryIndex(0);
-      setExportFileName(newProjectConfig.name || 'custom_svga_animation');
+      setExportFileName(exportName);
+      setIsOverviewMode(false);
       setShowNewProjectModal(false);
       setSuccessToast(`تم إنشاء المشروع "${newProjectConfig.name}" بمقاس ${newProjectConfig.width}×${newProjectConfig.height} بنجاح!`);
       setTimeout(() => setSuccessToast(null), 3500);
@@ -2078,7 +3633,47 @@ export const SvgaLayerEditor: React.FC<SvgaLayerEditorProps> = ({
     }
   };
 
-  const selectedLayer = layers.find(l => l.id === selectedLayerId) || null;
+  // Keyboard Shortcuts: Space to Play/Pause, Enter to Export directly as SVGA
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      const activeEl = document.activeElement as HTMLElement | null;
+      const isInput = activeEl && (
+        activeEl.tagName === 'INPUT' ||
+        activeEl.tagName === 'TEXTAREA' ||
+        activeEl.tagName === 'SELECT' ||
+        activeEl.isContentEditable ||
+        Boolean(activeEl.closest('input, textarea, select, [contenteditable="true"]'))
+      );
+      if (isInput) return;
+
+      // 1. Spacebar: Play / Pause Project Toggle
+      if (e.code === 'Space' || e.key === ' ') {
+        e.preventDefault();
+        e.stopPropagation();
+        if (project) {
+          setIsPlaying(prev => !prev);
+        }
+        return;
+      }
+
+      // 2. Enter / Tab: Export project immediately as SVGA
+      if (e.code === 'Enter' || e.key === 'Enter' || e.code === 'Tab' || e.key === 'Tab') {
+        // If export modal or another modal is open, don't trigger the direct background export
+        if (showExportModal || showBatchExportModal || showNewProjectModal || showMergeCanvasModal) {
+          return;
+        }
+        e.preventDefault();
+        e.stopPropagation();
+        if (project && !isExporting) {
+          handleExport();
+        }
+        return;
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, [project, isExporting, showExportModal, showBatchExportModal, showNewProjectModal, showMergeCanvasModal, handleExport]);
 
   // Background Swatches
   const bgSwatches = [
@@ -2089,21 +3684,33 @@ export const SvgaLayerEditor: React.FC<SvgaLayerEditorProps> = ({
   ];
 
   return (
-    <div className="fixed inset-0 z-50 bg-[#070b14] text-white flex flex-col font-sans overflow-hidden" dir="ltr">
+    <div className="fixed inset-0 z-50 bg-[#070b14] text-white flex flex-col font-sans overflow-hidden pt-20 sm:pt-24" dir="ltr">
       <input
         type="file"
         ref={fileInputRef}
-        accept=".svga,video/mp4,video/*,.mp4"
+        accept=".svga,.SVGA,.json,.JSON,.lottie,.LOTTIE,.pag,.PAG,.gif,.GIF,.webp,.WEBP,.apng,.APNG,.png,.PNG,.zip,.ZIP,.mp4,.MP4,.mov,.MOV,.webm,.WEBM,.vap,.VAP,.avi,.AVI,.svg,.SVG,video/*,image/*,*/*"
+        multiple
         className="hidden"
         onChange={(e) => {
-          const f = e.target.files?.[0];
-          if (f) {
-            if (f.name.toLowerCase().endsWith('.mp4') || f.type.startsWith('video/')) {
-              setMp4InitialFiles([f]);
-              setShowMp4ImportModal(true);
-            } else {
-              loadSvgaFile(f);
-            }
+          const files = e.target.files ? Array.from(e.target.files) : [];
+          if (files.length > 1) {
+            handleLoadMultipleFiles(files);
+          } else if (files.length === 1) {
+            loadSvgaFile(files[0]);
+          }
+          e.target.value = '';
+        }}
+      />
+
+      <input
+        type="file"
+        ref={multiFileInputRef}
+        accept=".svga,video/mp4,video/*,.avi,.mov,.webm,.vap,image/*,.gif,.webp,.png,.jpg,.jpeg"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          if (e.target.files && e.target.files.length > 0) {
+            handleLoadMultipleFiles(Array.from(e.target.files));
           }
           e.target.value = '';
         }}
@@ -2112,7 +3719,7 @@ export const SvgaLayerEditor: React.FC<SvgaLayerEditorProps> = ({
       <input
         type="file"
         ref={mp4FileInputRef}
-        accept="video/mp4,video/quicktime,video/webm,.mp4"
+        accept="video/mp4,video/quicktime,video/webm,.mp4,.avi,.mov,.webm,.vap,.mkv,video/*"
         multiple
         className="hidden"
         onChange={(e) => {
@@ -2152,30 +3759,32 @@ export const SvgaLayerEditor: React.FC<SvgaLayerEditorProps> = ({
       </AnimatePresence>
 
       {/* Top Navbar */}
-      <header className="h-14 bg-[#0a0f1d] border-b border-white/10 px-6 flex items-center justify-between shrink-0 z-30">
+      <header className="h-14 bg-[#0a0f1d] border-b border-white/10 px-3 lg:px-6 flex items-center justify-between shrink-0 z-30">
         {/* Left: Brand & Back */}
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2 lg:gap-4 overflow-hidden">
           <button
             onClick={onClose}
-            className="flex items-center gap-1.5 text-xs font-bold text-slate-300 hover:text-white bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-xl border border-white/10 transition-all cursor-pointer"
+            className="flex items-center gap-1.5 text-xs font-bold text-slate-300 hover:text-white bg-white/5 hover:bg-white/10 px-2 py-1.5 lg:px-3 lg:py-1.5 rounded-xl border border-white/10 transition-all cursor-pointer shrink-0"
           >
-            <ArrowLeft size={14} /> خروج
+            <ArrowLeft size={14} /> <span className="hidden sm:inline">خروج</span>
           </button>
 
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white shadow-glow-indigo">
               <Layers size={16} />
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="font-black text-sm tracking-tight text-white">تحرير طبقات SVGA</span>
-                <span className="text-[10px] font-mono font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 px-2 py-0.5 rounded-full">
+            <div className="overflow-hidden">
+              <div className="flex items-center gap-1.5 lg:gap-2">
+                <span className="font-black text-xs lg:text-sm tracking-tight text-white truncate">
+                  {isMobile ? 'الاستوديو Pro' : 'تحرير طبقات SVGA'}
+                </span>
+                <span className="hidden sm:inline text-[9px] font-mono font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 px-2 py-0.5 rounded-full shrink-0">
                   Pro Layer Studio
                 </span>
               </div>
               {project && (
-                <p className="text-[10px] text-slate-400 font-mono">
-                  {project.fileName} • {(project.fileSize / 1024).toFixed(1)} KB
+                <p className="text-[9px] lg:text-[10px] text-slate-400 font-mono truncate">
+                  {project.fileName.length > 15 ? project.fileName.substr(0, 12) + '...' : project.fileName} • {(project.fileSize / 1024).toFixed(0)} KB
                 </p>
               )}
             </div>
@@ -2183,7 +3792,7 @@ export const SvgaLayerEditor: React.FC<SvgaLayerEditorProps> = ({
         </div>
 
         {/* Center: Canvas View Controls & Tools */}
-        {project && (
+        {project && !isMobile && (
           <div className="hidden lg:flex items-center gap-3 bg-white/5 p-1 rounded-2xl border border-white/5">
             {/* Tool Modes */}
             <div className="flex items-center gap-1 pr-2 border-r border-white/10">
@@ -2229,81 +3838,105 @@ export const SvgaLayerEditor: React.FC<SvgaLayerEditorProps> = ({
               </button>
             </div>
 
-            {/* Background Color Swatches & Custom Image Upload */}
-            <div className="flex items-center gap-1.5 pl-1">
-              {bgSwatches.map(swatch => (
-                <button
-                  key={swatch.label}
-                  onClick={() => {
-                    setBgColor(swatch.value);
-                    if (bgImageUrl) {
-                      setBgImageUrl(null);
-                    }
-                  }}
-                  className={`w-4 h-4 rounded-full border transition-all cursor-pointer ${
-                    bgColor === swatch.value && !bgImageUrl ? 'scale-125 border-white ring-2 ring-indigo-500/50' : 'border-white/20 hover:scale-110'
-                  }`}
-                  style={{
-                    backgroundColor: swatch.isChecker ? '#1e293b' : swatch.value,
-                    backgroundImage: swatch.isChecker ? 'radial-gradient(circle, #475569 20%, transparent 20%)' : 'none',
-                    backgroundSize: '4px 4px'
-                  }}
-                  title={swatch.label}
+              {/* Background Color Swatches, Library & Custom Image Upload */}
+              <div className="flex items-center gap-1.5 pl-1">
+                {bgSwatches.map(swatch => (
+                  <button
+                    key={swatch.label}
+                    onClick={() => {
+                      setBgColor(swatch.value);
+                      if (bgImageUrl) {
+                        setBgImageUrl(null);
+                        setProjects(prev => prev.map(p => ({ ...p, bgImageUrl: null, bgColor: swatch.value })));
+                      }
+                    }}
+                    className={`w-4 h-4 rounded-full border transition-all cursor-pointer ${
+                      bgColor === swatch.value && !bgImageUrl ? 'scale-125 border-white ring-2 ring-indigo-500/50' : 'border-white/20 hover:scale-110'
+                    }`}
+                    style={{
+                      backgroundColor: swatch.isChecker ? '#1e293b' : swatch.value,
+                      backgroundImage: swatch.isChecker ? 'radial-gradient(circle, #475569 20%, transparent 20%)' : 'none',
+                      backgroundSize: '4px 4px'
+                    }}
+                    title={swatch.label}
+                  />
+                ))}
+
+                <div className="h-3 w-px bg-white/10 mx-0.5" />
+
+                {/* Upload Background Image for Gift Preview (Fixed & Uncropped) */}
+                <input
+                  type="file"
+                  ref={bgFileInputRef}
+                  onChange={handleBackgroundUpload}
+                  accept="image/png,image/jpeg,image/webp,image/jpg"
+                  className="hidden"
                 />
-              ))}
 
-              <div className="h-3 w-px bg-white/10 mx-0.5" />
+                {/* Open Background Library Button (Dashboard + Presets) */}
+                <button
+                  onClick={() => setShowBgLibraryModal(true)}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-xl text-[10px] font-bold border transition-all cursor-pointer shadow-sm hover:scale-105 ${
+                    bgImageUrl 
+                      ? 'bg-indigo-600/30 text-cyan-300 border-indigo-400/50 hover:bg-indigo-600/50'
+                      : 'bg-white/5 hover:bg-indigo-600/20 text-slate-300 hover:text-indigo-200 border-white/10 hover:border-indigo-500/40'
+                  }`}
+                  title="مكتبة خلفيات المنصة والداشبورد (تطبيق أو تنزيل الخلفيات المرفوعة على جميع المشاريع)"
+                >
+                  <ImageIcon size={12} className="text-cyan-400" />
+                  <span>مكتبة الخلفيات</span>
+                </button>
 
-              {/* Upload Background Image for Gift Preview (Fixed & Uncropped) */}
-              <input
-                type="file"
-                ref={bgFileInputRef}
-                onChange={handleBackgroundUpload}
-                accept="image/png,image/jpeg,image/webp,image/jpg"
-                className="hidden"
-              />
-
-              {bgImageUrl ? (
-                <div className="flex items-center gap-1 bg-indigo-950/80 border border-indigo-500/50 rounded-xl px-1.5 py-0.5 shadow-sm">
+                {bgImageUrl ? (
+                  <div className="flex items-center gap-1 bg-indigo-950/80 border border-indigo-500/50 rounded-xl px-1.5 py-0.5 shadow-sm">
+                    <button
+                      onClick={() => setShowBgLibraryModal(true)}
+                      className="flex items-center gap-1 text-[10px] text-cyan-300 hover:text-white font-bold cursor-pointer"
+                      title="فتح مكتبة الخلفيات لتغيير أو استعراض الخلفيات"
+                    >
+                      <img
+                        src={bgImageUrl}
+                        alt="Background Preview"
+                        className="w-4 h-4 rounded object-cover border border-cyan-400/50"
+                      />
+                      <span className="hidden xl:inline text-[9px]">خلفية موحدة ✓</span>
+                    </button>
+                    {/* Direct Download Active Background */}
+                    <button
+                      onClick={() => downloadImageUrl(bgImageUrl, 'background_preview')}
+                      className="p-1 text-slate-400 hover:text-cyan-300 rounded transition-colors cursor-pointer"
+                      title="تحميل وتنزيل صورة الخلفية الحالية على جهازك"
+                    >
+                      <Download size={11} />
+                    </button>
+                    <button
+                      onClick={() => {
+                        handleSelectBackground(null, true);
+                      }}
+                      className="p-1 text-slate-400 hover:text-rose-400 rounded transition-colors cursor-pointer"
+                      title="إزالة صورة الخلفية من جميع المشاريع"
+                    >
+                      <X size={11} />
+                    </button>
+                  </div>
+                ) : (
                   <button
                     onClick={() => bgFileInputRef.current?.click()}
-                    className="flex items-center gap-1 text-[10px] text-cyan-300 hover:text-white font-bold cursor-pointer"
-                    title="تغيير صورة الخلفية المعاينة (الخلفية ثابتة وكاملة)"
+                    className="flex items-center gap-1 px-2 py-1 bg-white/5 hover:bg-indigo-600/20 text-slate-300 hover:text-indigo-200 rounded-xl text-[10px] font-medium border border-white/10 hover:border-indigo-500/40 transition-all cursor-pointer"
+                    title="رفع صورة خلفية جديدة من جهازك وتطبيقها على جميع المشاريع المعروضة"
                   >
-                    <img
-                      src={bgImageUrl}
-                      alt="Background Preview"
-                      className="w-4 h-4 rounded object-cover border border-cyan-400/50"
-                    />
-                    <span className="hidden xl:inline text-[9px]">خلفية ثابتة ✓</span>
+                    <Upload size={11} className="text-indigo-400" />
+                    <span className="hidden lg:inline text-[9px] font-bold">رفع للكل</span>
                   </button>
-                  <button
-                    onClick={() => {
-                      setBgImageUrl(null);
-                      setSuccessToast('تمت إزالة صورة الخلفية والعودة للوضع الافتراضي');
-                    }}
-                    className="p-0.5 text-slate-400 hover:text-rose-400 rounded transition-colors cursor-pointer"
-                    title="إزالة صورة الخلفية"
-                  >
-                    <X size={11} />
-                  </button>
-                </div>
-              ) : (
-                <button
-                  onClick={() => bgFileInputRef.current?.click()}
-                  className="flex items-center gap-1 px-2 py-1 bg-white/5 hover:bg-indigo-600/20 text-slate-300 hover:text-indigo-200 rounded-xl text-[10px] font-medium border border-white/10 hover:border-indigo-500/40 transition-all cursor-pointer"
-                  title="رفع صورة خلفية للمعاينة (تثبيت خلفية حية للهدية بدون قصها)"
-                >
-                  <ImageIcon size={12} className="text-indigo-400" />
-                  <span className="hidden lg:inline text-[9px] font-bold">رفع خلفية</span>
-                </button>
-              )}
-            </div>
+                )}
+              </div>
           </div>
         )}
 
         {/* Right Actions: Undo, Redo, Open, Export */}
         <div className="flex items-center gap-2">
+        {/* Right Actions: Desktop only */}
+        <div className="hidden lg:flex items-center gap-2">
           {project && (
             <>
               <button
@@ -2347,10 +3980,10 @@ export const SvgaLayerEditor: React.FC<SvgaLayerEditorProps> = ({
               setShowMp4ImportModal(true);
             }}
             className="flex items-center gap-1.5 text-xs font-bold text-pink-300 hover:text-white bg-pink-500/10 hover:bg-pink-500/25 px-3.5 py-1.5 rounded-xl border border-pink-500/30 transition-all cursor-pointer shadow-sm hover:scale-105"
-            title="استدعاء فيديو MP4 والتحكم به كملف SVGA كامل أو كطبقة فيديو وتصديره لأي صيغة"
+            title="استدعاء فيديو AVI أو MP4 (أفتر افكت الشفاف) والتحكم به كملف SVGA كامل أو كطبقة فيديو وتصديره لأي صيغة"
           >
             <Film size={13} className="text-pink-400" />
-            <span>استدعاء MP4</span>
+            <span>استدعاء AVI / MP4</span>
           </button>
 
           {project && (
@@ -2393,26 +4026,74 @@ export const SvgaLayerEditor: React.FC<SvgaLayerEditorProps> = ({
 
           {project && (
             <button
-              onClick={() => setShowExportModal(true)}
+              onClick={() => {
+                setShowExportModal(true);
+              }}
               disabled={isExporting}
-              className="flex items-center gap-1.5 text-xs font-black text-white bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 px-4 py-1.5 rounded-xl shadow-lg shadow-indigo-600/30 transition-all cursor-pointer hover:scale-105"
+              className="flex items-center gap-2 text-xs font-black text-white bg-gradient-to-r from-emerald-600 via-teal-600 to-indigo-600 hover:from-emerald-500 hover:to-indigo-500 px-4 py-2 rounded-xl shadow-lg shadow-emerald-600/25 border border-white/20 transition-all cursor-pointer hover:scale-105 active:scale-95"
+              title="تصدير وتنزيل المشروع بكافة الصيغ (SVGA فوري، VAP1.0 الشفاف، وغيرها)"
             >
-              <Download size={13} /> {isExporting ? 'جاري المعالجة...' : 'تصدير SVGA'}
+              <Download size={14} />
+              <span className="text-sm">تصدير / تنزيل</span>
+              <kbd className="hidden sm:inline-block text-[10px] bg-black/40 border border-white/20 px-1.5 py-0.5 rounded text-white/90 font-mono">Enter ↵</kbd>
             </button>
           )}
         </div>
+
+        {/* Mobile Actions Header Bar */}
+        <div className="lg:hidden flex items-center gap-1.5">
+          {project && (
+            <button
+              onClick={() => setShowExportModal(true)}
+              disabled={isExporting}
+              className="flex items-center gap-1.5 text-xs font-black text-white bg-gradient-to-r from-emerald-600 to-indigo-600 hover:from-emerald-500 hover:to-indigo-500 px-3 py-1.5 rounded-xl shadow-md border border-white/20 transition-all cursor-pointer"
+              title="تصدير وتنزيل"
+            >
+              <Download size={13} />
+              <span>تصدير / تنزيل</span>
+            </button>
+          )}
+          <button
+            onClick={() => setShowMobileMenu(true)}
+            className="p-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-slate-300 hover:text-white cursor-pointer"
+            title="خيارات إضافية"
+          >
+            <Sliders size={14} />
+          </button>
+        </div>
+        </div>
       </header>
+
+      {/* Compositions / Projects Tab Bar */}
+      {projects.length > 0 && (
+        <SvgaProjectsTabBar
+          projects={projects}
+          activeProjectId={activeProjectId}
+          onSelectProject={handleSwitchProject}
+          onCloseProject={handleCloseProject}
+          onDuplicateProject={handleDuplicateProject}
+          onRenameProject={handleRenameProject}
+          onAddNewProject={() => setShowNewProjectModal(true)}
+          onOpenFiles={() => multiFileInputRef.current?.click()}
+          onBatchExport={() => setShowBatchExportModal(true)}
+          isOverviewMode={projects.length > 1 && canvasViewMode === 'multi'}
+          onToggleOverviewMode={() => setCanvasViewMode(prev => prev === 'multi' ? 'single' : 'multi')}
+        />
+      )}
 
       {/* Main Workspace Body */}
       {project ? (
-        <div className="flex flex-1 overflow-hidden relative">
+        <div className="flex flex-1 overflow-hidden relative pb-16 lg:pb-0">
           {/* Left Panel: Layers */}
-          <aside className="w-[360px] 2xl:w-[400px] h-full shrink-0 border-r border-white/10 z-10 flex flex-col">
+          <aside className={`h-full shrink-0 border-r border-white/10 z-10 flex-col ${
+            activeMobileTab === 'layers' ? 'w-full flex' : 'hidden lg:flex lg:w-[360px] lg:2xl:w-[400px]'
+          }`}>
             <SvgaLayersList
               layers={layers}
               selectedLayerId={selectedLayerId}
               selectedLayerIds={selectedLayerIds}
               currentFrame={currentFrame}
+              totalFrames={project.totalFrames}
               onSelectLayer={(id, isMulti) => handleSelectLayer(id, isMulti)}
               onToggleLayerSelection={handleToggleLayerSelection}
               onSelectAllLayers={handleSelectAllLayers}
@@ -2444,38 +4125,119 @@ export const SvgaLayerEditor: React.FC<SvgaLayerEditorProps> = ({
           </aside>
 
           {/* Center Viewport: Interactive Canvas + Timeline */}
-          <main className="flex-1 flex flex-col h-full overflow-hidden bg-[#070b14]">
-            <div className="flex-1 relative overflow-hidden">
-              <SvgaDesignCanvas
-                project={project}
-                layers={layers}
-                selectedLayerId={selectedLayerId}
-                selectedLayerIds={selectedLayerIds}
-                currentFrame={currentFrame}
-                activeTool={activeTool}
-                zoom={zoom}
-                panOffset={panOffset}
-                showGrid={showGrid}
-                showRulers={showRulers}
-                showGuides={showGuides}
-                bgColor={bgColor}
-                onSelectLayer={handleSelectLayer}
-                onUpdateLayerTransform={handleUpdateLayerTransform}
-                onBulkUpdateTransforms={handleBulkUpdateTransforms}
-                onZoomChange={setZoom}
-                onPanChange={setPanOffset}
-                onDeleteLayer={handleDeleteLayer}
-                onUpdateProjectDimensions={handleUpdateProjectDimensions}
-                fadeConfig={fadeConfig}
-                cropConfig={cropConfig}
-                cropFeather={cropFeather}
-                bgImageUrl={bgImageUrl}
-                onChromaPickColor={handleChromaPickColor}
-                onChromaHoverColor={setChromaActiveColor}
-              />
+          <main className={`h-full overflow-hidden bg-[#070b14] flex-col ${
+            activeMobileTab === 'canvas' ? 'w-full flex flex-1' : 'hidden lg:flex lg:flex-1'
+          }`}>
+            <div className="flex-1 relative overflow-hidden flex flex-col">
+              {projects.length > 1 && canvasViewMode === 'multi' ? (
+                <SvgaMultiCanvasStage
+                  projects={projects}
+                  activeProjectId={activeProjectId}
+                  activeFadeConfig={fadeConfig}
+                  activeCropConfig={cropConfig}
+                  activeCropFeather={cropFeather}
+                  onSelectProject={handleSwitchProject}
+                  onFocusProjectSingleView={(id) => {
+                    handleSwitchProject(id);
+                    setCanvasViewMode('single');
+                  }}
+                  onCloseProject={handleCloseProject}
+                  onDuplicateProject={handleDuplicateProject}
+                  onRenameProject={handleRenameProject}
+                  onOpenFiles={() => multiFileInputRef.current?.click()}
+                  onOpenMp4Import={() => {
+                    setMp4InitialFiles([]);
+                    setShowMp4ImportModal(true);
+                  }}
+                  onBatchExport={() => setShowBatchExportModal(true)}
+                  onExportSingleProject={(proj) => {
+                    handleSwitchProject(proj.id);
+                    setShowExportModal(true);
+                  }}
+                  onMergeProjectIntoActive={handleMergeProjectIntoActive}
+                  onMergeAllProjectsIntoSingleCanvas={handleMergeAllProjectsIntoSingleCanvas}
+                  isMasterPlaying={isPlaying}
+                  onToggleMasterPlay={() => setIsPlaying(prev => !prev)}
+                  masterCurrentFrame={currentFrame}
+                  onFilesDrop={handleLoadMultipleFiles}
+                  globalBgImageUrl={bgImageUrl}
+                  onOpenBgLibrary={() => setShowBgLibraryModal(true)}
+                />
+              ) : (
+                <>
+                  {projects.length > 1 && (
+                    <div className="absolute top-3 left-3 z-30 flex items-center gap-2 bg-slate-900/95 border border-white/20 rounded-xl px-3 py-1.5 backdrop-blur-md shadow-xl animate-in fade-in duration-150">
+                      <span className="text-[11px] font-bold text-slate-300">وضع الكانفاس الفردي</span>
+                      <button
+                        onClick={() => setCanvasViewMode('multi')}
+                        className="flex items-center gap-1.5 text-xs font-bold text-indigo-300 hover:text-white bg-indigo-600/30 hover:bg-indigo-600/50 px-2.5 py-1 rounded-lg border border-indigo-500/40 transition-all cursor-pointer shadow-sm hover:scale-105"
+                        title="عرض جميع المشاريع والفيديوهات المفتوحة جنباً إلى جنب على الشاشة"
+                      >
+                        <LayoutGrid size={12} className="text-indigo-400" />
+                        <span>عرض الكل على الشاشة ({projects.length})</span>
+                      </button>
+                    </div>
+                  )}
+
+                  <SvgaDesignCanvas
+                    project={project}
+                    layers={layers}
+                    selectedLayerId={selectedLayerId}
+                    selectedLayerIds={selectedLayerIds}
+                    currentFrame={currentFrame}
+                    activeTool={activeTool}
+                    zoom={zoom}
+                    panOffset={panOffset}
+                    showGrid={showGrid}
+                    showRulers={showRulers}
+                    showGuides={showGuides}
+                    bgColor={bgColor}
+                    onSelectLayer={handleSelectLayer}
+                    onUpdateLayerTransform={handleUpdateLayerTransform}
+                    onBulkUpdateTransforms={handleBulkUpdateTransforms}
+                    onZoomChange={setZoom}
+                    onPanChange={setPanOffset}
+                    onDeleteLayer={handleDeleteLayer}
+                    onUpdateProjectDimensions={handleUpdateProjectDimensions}
+                    fadeConfig={fadeConfig}
+                    cropConfig={cropConfig}
+                    cropFeather={cropFeather}
+                    bgImageUrl={bgImageUrl}
+                    onChromaPickColor={handleChromaPickColor}
+                    onChromaHoverColor={setChromaActiveColor}
+                    onUpdateShineConfig={handleUpdateLayerShineConfig}
+                    shinePointStep={shinePointStep}
+                    onShinePointStepChange={setShinePointStep}
+                    onDragEnd={() => pushHistory(layers)}
+                    isChromaPenActive={isChromaPenActive}
+                    chromaSubMode={chromaSubMode}
+                    chromaPenTool={chromaPenTool}
+                    chromaMaskMode={chromaMaskMode}
+                    chromaBrushSize={chromaBrushSize}
+                    chromaPenFeather={chromaPenFeather}
+                    chromaPenOpacity={chromaPenOpacity}
+                    penStrokes={penStrokes}
+                    onAddPenStroke={handleAddPenStroke}
+                    onClearPenStrokes={handleClearPenStrokes}
+                    onUndoPenStroke={handleUndoPenStroke}
+                    onApplyPenMask={handleApplyPenMask}
+                  />
+
+                  {/* Floating Timeline Toggle on Mobile */}
+                  {isMobile && (
+                    <button
+                      onClick={() => setIsTimelineOpenMobile(!isTimelineOpenMobile)}
+                      className="absolute bottom-4 right-4 z-30 flex items-center gap-1.5 text-xs font-bold text-white bg-slate-900/95 border border-white/20 px-3.5 py-2 rounded-2xl backdrop-blur-md shadow-lg cursor-pointer"
+                    >
+                      <Film size={12} className="text-indigo-400" />
+                      <span>{isTimelineOpenMobile ? 'إخفاء التايم لاين' : 'تعديل التايم لاين والتدريج'}</span>
+                    </button>
+                  )}
+                </>
+              )}
             </div>
 
-            {/* Smart Chroma Key Pen Studio Control Panel */}
+            {/* Smart Chroma & Freehand Transparency Pen Studio Control Panel */}
             <SvgaChromaPenStudio
               isActive={isChromaPenActive}
               activeColor={chromaActiveColor}
@@ -2497,6 +4259,21 @@ export const SvgaLayerEditor: React.FC<SvgaLayerEditorProps> = ({
               isProcessing={isChromaProcessing}
               processingProgress={chromaProgress}
               processingStatus={chromaStatus}
+              subMode={chromaSubMode}
+              onSubModeChange={setChromaSubMode}
+              penTool={chromaPenTool}
+              onPenToolChange={setChromaPenTool}
+              maskMode={chromaMaskMode}
+              onMaskModeChange={setChromaMaskMode}
+              brushSize={chromaBrushSize}
+              onBrushSizeChange={setChromaBrushSize}
+              penFeather={chromaPenFeather}
+              onPenFeatherChange={setChromaPenFeather}
+              penOpacity={chromaPenOpacity}
+              onPenOpacityChange={setChromaPenOpacity}
+              pendingStrokesCount={penStrokes.length}
+              onApplyPenMask={handleApplyPenMask}
+              onClearStrokes={handleClearPenStrokes}
               onClose={() => {
                 setIsChromaPenActive(false);
                 setActiveTool('select');
@@ -2504,44 +4281,48 @@ export const SvgaLayerEditor: React.FC<SvgaLayerEditorProps> = ({
             />
 
             {/* Bottom Keyframe & Motion Timeline */}
-            <SvgaMotionTimeline
-              totalFrames={project.totalFrames}
-              currentFrame={currentFrame}
-              fps={project.fps}
-              isPlaying={isPlaying}
-              isLoop={isLoop}
-              selectedLayer={selectedLayer}
-              layers={layers}
-              projectAudios={project.audios}
-              onOpenAudioStudio={() => setShowAudioStudioModal(true)}
-              onSelectLayer={(id) => handleSelectLayer(id, false)}
-              onTogglePlay={() => setIsPlaying(!isPlaying)}
-              onStepFrame={(delta) => {
-                setIsPlaying(false);
-                setCurrentFrame(prev => Math.max(0, Math.min(project.totalFrames - 1, prev + delta)));
-              }}
-              onSeekFrame={(f) => {
-                setIsPlaying(false);
-                setCurrentFrame(Math.max(0, Math.min(project.totalFrames - 1, f)));
-              }}
-              onToggleLoop={() => setIsLoop(!isLoop)}
-              onUpdateLayerTransform={handleUpdateLayerTransform}
-              onUpdateLayerKeyframes={handleUpdateLayerKeyframes}
-              onUpdateProjectDuration={handleUpdateProjectDuration}
-              onUpdateLayerTimeRange={handleUpdateLayerTimeRange}
-              onTrimProject={handleTrimProject}
-              onMergeSvga={() => mergeFileInputRef.current?.click()}
-              onOpenMergeCanvasStudio={() => setShowMergeCanvasModal(true)}
-              onToggleChromaPen={handleToggleChromaPen}
-              isChromaPenActive={isChromaPenActive}
-              onExport={() => setShowExportModal(true)}
-              isExporting={isExporting}
-              isMerging={isMergingLayers}
-            />
+            {(!isMobile || isTimelineOpenMobile) && (
+              <SvgaMotionTimeline
+                totalFrames={project.totalFrames}
+                currentFrame={currentFrame}
+                fps={project.fps}
+                isPlaying={isPlaying}
+                isLoop={isLoop}
+                selectedLayer={selectedLayer}
+                layers={layers}
+                projectAudios={project.audios}
+                onOpenAudioStudio={() => setShowAudioStudioModal(true)}
+                onSelectLayer={(id) => handleSelectLayer(id, false)}
+                onTogglePlay={() => setIsPlaying(!isPlaying)}
+                onStepFrame={(delta) => {
+                  setIsPlaying(false);
+                  setCurrentFrame(prev => Math.max(0, Math.min(project.totalFrames - 1, prev + delta)));
+                }}
+                onSeekFrame={(f) => {
+                  setIsPlaying(false);
+                  setCurrentFrame(Math.max(0, Math.min(project.totalFrames - 1, f)));
+                }}
+                onToggleLoop={() => setIsLoop(!isLoop)}
+                onUpdateLayerTransform={handleUpdateLayerTransform}
+                onUpdateLayerKeyframes={handleUpdateLayerKeyframes}
+                onUpdateProjectDuration={handleUpdateProjectDuration}
+                onUpdateLayerTimeRange={handleUpdateLayerTimeRange}
+                onTrimProject={handleTrimProject}
+                onMergeSvga={() => mergeFileInputRef.current?.click()}
+                onOpenMergeCanvasStudio={() => setShowMergeCanvasModal(true)}
+                onToggleChromaPen={handleToggleChromaPen}
+                isChromaPenActive={isChromaPenActive}
+                onExport={() => setShowExportModal(true)}
+                isExporting={isExporting}
+                isMerging={isMergingLayers}
+              />
+            )}
           </main>
 
           {/* Right Panel: Properties */}
-          <aside className="w-[320px] h-full shrink-0">
+          <aside className={`h-full shrink-0 ${
+            activeMobileTab === 'properties' ? 'w-full flex flex-col' : 'hidden lg:flex lg:w-[320px]'
+          }`}>
             <SvgaPropertiesPanel
               project={project}
               layer={selectedLayer}
@@ -2553,6 +4334,7 @@ export const SvgaLayerEditor: React.FC<SvgaLayerEditorProps> = ({
               onBulkTransform={handleBulkTransform}
               onToggleAspectLock={handleToggleAspectLock}
               onReplaceAsset={handleReplaceAsset}
+              onConvertLayerFormat={handleConvertLayerFormat}
               onResetTransform={handleResetTransform}
               onUpdateFrameRange={handleUpdateFrameRange}
               onMergeSelectedLayers={handleMergeSelectedLayers}
@@ -2578,6 +4360,37 @@ export const SvgaLayerEditor: React.FC<SvgaLayerEditorProps> = ({
               onResetTransparency={handleResetTransparency}
               onUpdateShineConfig={handleUpdateLayerShineConfig}
               onResetShine={handleResetShine}
+              onCreateShineLayer={handleCreateShineLayer}
+              onExportShineLayerOnly={handleExportShineLayerOnly}
+              shinePointStep={shinePointStep}
+              onStartPickShinePoints={() => setShinePointStep('place-start')}
+              onCancelPickShinePoints={() => setShinePointStep('idle')}
+              onLinkMirroredLayer={handleLinkMirroredLayer}
+              onSyncMirroredLayerAsset={handleSyncMirroredLayerAsset}
+              onToggleAutoSyncMirrored={handleToggleAutoSyncMirrored}
+              onToggleAutoFlipMirrored={handleToggleAutoFlipMirrored}
+              onDuplicateLayer={handleDuplicateLayer}
+              onAddMaskedChildLayer={handleAddMaskedChildLayer}
+              onUnlinkMaskedChildLayer={handleUnlinkMaskedChildLayer}
+              onSelectLayer={setSelectedLayerId}
+              onOpenAeMaskedStudio={() => setShowAeMaskedStudioModal(true)}
+              onToggleChromaPen={handleToggleChromaPen}
+              isChromaPenActive={isChromaPenActive}
+              penStrokes={penStrokes}
+              onAddPenStroke={handleAddPenStroke}
+              onClearPenStrokes={handleClearPenStrokes}
+              onUndoPenStroke={handleUndoPenStroke}
+              onApplyPenMask={handleApplyPenMask}
+              chromaPenTool={chromaPenTool}
+              onPenToolChange={setChromaPenTool}
+              chromaMaskMode={chromaMaskMode}
+              onMaskModeChange={setChromaMaskMode}
+              chromaBrushSize={chromaBrushSize}
+              onBrushSizeChange={setChromaBrushSize}
+              chromaPenFeather={chromaPenFeather}
+              onPenFeatherChange={setChromaPenFeather}
+              chromaPenOpacity={chromaPenOpacity}
+              onPenOpacityChange={setChromaPenOpacity}
             />
           </aside>
         </div>
@@ -2588,26 +4401,26 @@ export const SvgaLayerEditor: React.FC<SvgaLayerEditorProps> = ({
           onDragOver={(e) => e.preventDefault()}
           onDrop={(e) => {
             e.preventDefault();
-            const f = e.dataTransfer.files?.[0];
-            if (f) {
-              if (f.name.toLowerCase().endsWith('.mp4') || f.type.startsWith('video/')) {
-                setMp4InitialFiles([f]);
-                setShowMp4ImportModal(true);
-              } else {
-                loadSvgaFile(f);
-              }
+            const files = e.dataTransfer.files ? Array.from(e.dataTransfer.files) : [];
+            if (files.length > 0) {
+              handleLoadMultipleFiles(files);
             }
           }}
         >
-          <div className="max-w-3xl w-full bg-slate-900/60 border border-white/10 rounded-3xl p-8 text-center space-y-6 shadow-2xl backdrop-blur-xl" dir="rtl">
+          <div className="max-w-4xl w-full bg-slate-900/60 border border-white/10 rounded-3xl p-8 text-center space-y-6 shadow-2xl backdrop-blur-xl" dir="rtl">
             <div className="w-20 h-20 rounded-3xl bg-gradient-to-br from-indigo-500/20 to-purple-600/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400 mx-auto shadow-glow-indigo">
               <Layers size={36} />
             </div>
 
             <div className="space-y-2">
-              <h2 className="text-2xl font-black text-white">محرر وفك طبقات SVGA الاحترافي</h2>
-              <p className="text-slate-400 text-xs leading-relaxed max-w-lg mx-auto">
-                أنشئ مشروعاً جديداً بمقاسات مخصصة وصمم من الصفر، أو افتح وفك ضغط أي ملف SVGA، أو استدعِ ملفات فيديو MP4 للتحكم بها كطبقات وحفظها أو تصديرها لأي صيغة متاحة.
+              <h2 className="text-2xl font-black text-white flex items-center justify-center gap-2">
+                <span>محرر وفك طبقات SVGA الاحترافي</span>
+                <span className="text-xs bg-violet-500/20 text-violet-300 border border-violet-500/40 px-3 py-1 rounded-full font-extrabold shadow-sm animate-pulse">
+                  مشغل وتفريغ AVI (After Effects)
+                </span>
+              </h2>
+              <p className="text-slate-400 text-xs leading-relaxed max-w-xl mx-auto">
+                يمكنك رفع 3 إلى 4 مشاريع من أي صيغة (SVGA، AVI، MP4، صور) والعمل عليها في تكوينات مستقلة والتنقل بينها وتصديرها معاً دفعة واحدة بنقرة واحدة!
               </p>
             </div>
 
@@ -2618,9 +4431,30 @@ export const SvgaLayerEditor: React.FC<SvgaLayerEditorProps> = ({
               </div>
             )}
 
-            {/* Quick Actions Cards: 1. New Project, 2. Open SVGA, 3. Import MP4 */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-right">
-              {/* Option 1: Create New Project */}
+            {/* Quick Actions Cards: 1. Multi-Files (3-4 Projects), 2. New Project, 3. Open SVGA/AVI/MP4, 4. Import AVI/MP4 */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-right">
+              {/* Option 1: Multi-Files (3-4 Projects) */}
+              <button
+                onClick={() => multiFileInputRef.current?.click()}
+                className="p-5 bg-gradient-to-b from-teal-600/20 via-emerald-600/15 to-transparent hover:from-teal-600/30 hover:via-emerald-600/25 border border-emerald-500/40 hover:border-emerald-400 rounded-2xl transition-all cursor-pointer group flex flex-col justify-between text-right shadow-lg shadow-emerald-600/10 hover:scale-[1.02]"
+              >
+                <div className="flex items-center justify-between mb-4">
+                  <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center text-white shadow-md shadow-emerald-600/40 group-hover:scale-110 transition-transform">
+                    <Package size={20} />
+                  </div>
+                  <span className="text-[10px] font-black text-emerald-300 bg-emerald-500/20 px-2.5 py-1 rounded-full border border-emerald-500/40">
+                    مشاريع متعددة (3-4)
+                  </span>
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-white group-hover:text-emerald-300 transition-colors">رفع عدة ملفات (SVGA / AVI / MP4)</h3>
+                  <p className="text-[11px] text-slate-400 mt-1.5 leading-relaxed">
+                    رفع ملفات متعددة (SVGA / AVI / MP4 / صور) في تبويبات مستقلة وتصديرها معاً دفعة واحدة
+                  </p>
+                </div>
+              </button>
+
+              {/* Option 2: Create New Project */}
               <button
                 onClick={() => setShowNewProjectModal(true)}
                 className="p-5 bg-gradient-to-b from-indigo-600/20 via-purple-600/15 to-transparent hover:from-indigo-600/30 hover:via-purple-600/25 border border-indigo-500/40 hover:border-indigo-400 rounded-2xl transition-all cursor-pointer group flex flex-col justify-between text-right shadow-lg shadow-indigo-600/10 hover:scale-[1.02]"
@@ -2641,7 +4475,7 @@ export const SvgaLayerEditor: React.FC<SvgaLayerEditorProps> = ({
                 </div>
               </button>
 
-              {/* Option 2: Open / Decompress SVGA File */}
+              {/* Option 3: Open / Decompress SVGA / AVI / MP4 File */}
               <button
                 onClick={() => fileInputRef.current?.click()}
                 className="p-5 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-indigo-400/40 rounded-2xl transition-all cursor-pointer group flex flex-col justify-between text-right shadow-lg hover:scale-[1.02]"
@@ -2651,37 +4485,37 @@ export const SvgaLayerEditor: React.FC<SvgaLayerEditorProps> = ({
                     <Upload size={20} />
                   </div>
                   <span className="text-[10px] font-black text-slate-400 bg-white/5 px-2.5 py-1 rounded-full border border-white/10">
-                    فك ضغط وتحرير
+                    فتح مباشر
                   </span>
                 </div>
                 <div>
-                  <h3 className="text-sm font-black text-white group-hover:text-indigo-300 transition-colors">فتح ملف SVGA موجود</h3>
+                  <h3 className="text-sm font-black text-white group-hover:text-indigo-300 transition-colors">فتح ملف SVGA أو AVI أو MP4</h3>
                   <p className="text-[11px] text-slate-400 mt-1.5 leading-relaxed">
-                    فك ضغط ملف SVGA واستيراد جميع طبقاته وعناصره لتحريرها وتعديل مساراتها
+                    فك ضغط واستيراد ملفات SVGA أو فيديوهات AVI (After Effects الشفاف والعادي) و MP4 للتحرير المباشر
                   </p>
                 </div>
               </button>
 
-              {/* Option 3: Import MP4 Video as SVGA */}
+              {/* Option 4: Import AVI / MP4 Video as SVGA */}
               <button
                 onClick={() => {
                   setMp4InitialFiles([]);
                   setShowMp4ImportModal(true);
                 }}
-                className="p-5 bg-gradient-to-b from-pink-600/20 via-rose-600/15 to-transparent hover:from-pink-600/30 hover:via-rose-600/25 border border-pink-500/40 hover:border-pink-400 rounded-2xl transition-all cursor-pointer group flex flex-col justify-between text-right shadow-lg shadow-pink-600/10 hover:scale-[1.02]"
+                className="p-5 bg-gradient-to-b from-pink-600/20 via-purple-600/15 to-transparent hover:from-pink-600/30 hover:via-purple-600/25 border border-pink-500/40 hover:border-pink-400 rounded-2xl transition-all cursor-pointer group flex flex-col justify-between text-right shadow-lg shadow-pink-600/10 hover:scale-[1.02]"
               >
                 <div className="flex items-center justify-between mb-4">
-                  <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-pink-500 to-rose-600 flex items-center justify-center text-white shadow-md shadow-pink-600/40 group-hover:scale-110 transition-transform">
+                  <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-pink-500 via-rose-600 to-purple-600 flex items-center justify-center text-white shadow-md shadow-pink-600/40 group-hover:scale-110 transition-transform">
                     <Film size={20} />
                   </div>
-                  <span className="text-[10px] font-black text-pink-300 bg-pink-500/20 px-2.5 py-1 rounded-full border border-pink-500/40">
-                    استدعاء MP4
+                  <span className="text-[10px] font-black text-purple-200 bg-purple-500/20 px-2.5 py-1 rounded-full border border-purple-500/40 flex items-center gap-1">
+                    <span>استدعاء AVI / MP4</span>
                   </span>
                 </div>
                 <div>
-                  <h3 className="text-sm font-black text-white group-hover:text-pink-300 transition-colors">استدعاء فيديو MP4</h3>
+                  <h3 className="text-sm font-black text-white group-hover:text-pink-300 transition-colors">استدعاء فيديو AVI / MP4</h3>
                   <p className="text-[11px] text-slate-400 mt-1.5 leading-relaxed">
-                    استدعاء أي فيديو MP4 للتحكم به كـ SVGA (تغيير الحجم والمدة والصوت) وتصديره لأي صيغة
+                    استدعاء فيديو AVI (After Effects الشفاف والعادي) أو MP4 وتفرّيغ الشفافية والتحكم بكل إطار وصوت
                   </p>
                 </div>
               </button>
@@ -2689,11 +4523,11 @@ export const SvgaLayerEditor: React.FC<SvgaLayerEditorProps> = ({
 
             {/* Drop Zone Strip */}
             <div
-              onClick={() => fileInputRef.current?.click()}
-              className="border border-dashed border-white/15 hover:border-indigo-500/40 bg-black/20 hover:bg-black/40 rounded-2xl p-4 transition-all cursor-pointer flex items-center justify-center gap-2 text-xs text-slate-400 hover:text-slate-200"
+              onClick={() => multiFileInputRef.current?.click()}
+              className="border border-dashed border-white/15 hover:border-emerald-500/40 bg-black/20 hover:bg-black/40 rounded-2xl p-4 transition-all cursor-pointer flex items-center justify-center gap-2 text-xs text-slate-400 hover:text-slate-200"
             >
-              <Upload size={15} className="text-indigo-400" />
-              <span>أو اسحب وأفلت أي ملف SVGA أو فيديو MP4 هنا مباشرة للفتح الفوري</span>
+              <Upload size={15} className="text-emerald-400" />
+              <span>أو اسحب وأفلت 3 إلى 4 ملفات (SVGA / AVI / MP4 / صور) هنا مباشرة للفتح والتحرير المتوازي الفوري</span>
             </div>
           </div>
         </div>
@@ -2858,6 +4692,7 @@ export const SvgaLayerEditor: React.FC<SvgaLayerEditorProps> = ({
               cropFeather={cropFeather}
               onOpenViewer={onOpenViewer}
               onSuccessToast={(msg) => setSuccessToast(msg)}
+              initialFormat={initialExportFormat as any}
             />
           </ErrorBoundary>
         )}
@@ -2899,7 +4734,9 @@ export const SvgaLayerEditor: React.FC<SvgaLayerEditorProps> = ({
               hasExistingProject={!!project}
               existingProject={project}
               onImportAsProject={handleImportMp4AsProject}
+              onImportMultipleProjects={handleImportMultipleProjects}
               onImportAsLayer={handleImportMp4AsLayer}
+              onImportMultipleLayers={handleImportMultipleLayers}
             />
           </ErrorBoundary>
         )}
@@ -2923,6 +4760,251 @@ export const SvgaLayerEditor: React.FC<SvgaLayerEditorProps> = ({
           />
         </ErrorBoundary>
       )}
+
+      {/* Batch Multi-Project Export Modal (Export all open 3-4 projects at once) */}
+      {showBatchExportModal && (
+        <ErrorBoundary fallbackTitle="حدث خطأ في واجهة التصدير الجماعي" onReset={() => setShowBatchExportModal(false)}>
+          <SvgaBatchExportModal
+            isOpen={showBatchExportModal}
+            onClose={() => setShowBatchExportModal(false)}
+            projects={projects}
+            onSuccessToast={(msg) => setSuccessToast(msg)}
+          />
+        </ErrorBoundary>
+      )}
+
+      {/* Platform & Dashboard Backgrounds Library Modal */}
+      {showBgLibraryModal && (
+        <ErrorBoundary fallbackTitle="حدث خطأ في مكتبة الخلفيات" onReset={() => setShowBgLibraryModal(false)}>
+          <SvgaBackgroundLibraryModal
+            isOpen={showBgLibraryModal}
+            onClose={() => setShowBgLibraryModal(false)}
+            activeBgUrl={bgImageUrl}
+            onSelectBackground={handleSelectBackground}
+            projectsCount={projects.length}
+          />
+        </ErrorBoundary>
+      )}
+
+      {/* After Effects Alpha Matte Studio Modal */}
+      {showAeMaskedStudioModal && (
+        <ErrorBoundary fallbackTitle="حدث خطأ في استوديو الطبقات المدمجة" onReset={() => setShowAeMaskedStudioModal(false)}>
+          <div className="fixed inset-0 z-[120] bg-black/90 backdrop-blur-xl flex items-center justify-center p-2 sm:p-6 overflow-y-auto animate-in fade-in duration-200">
+            <div className="w-full max-w-7xl bg-slate-950 border border-violet-500/40 rounded-3xl p-4 sm:p-6 shadow-2xl relative my-auto">
+              <AfterEffectsMaskedLayerStudio
+                onClose={() => setShowAeMaskedStudioModal(false)}
+              />
+            </div>
+          </div>
+        </ErrorBoundary>
+      )}
+
+      {/* Mobile Bottom Tab Bar */}
+      {isMobile && (
+        <div className="lg:hidden fixed bottom-0 left-0 right-0 h-16 bg-[#0a0f1d]/95 backdrop-blur-md border-t border-white/10 grid grid-cols-3 z-[45] select-none pb-safe">
+          <button
+            onClick={() => setActiveMobileTab('layers')}
+            className={`flex flex-col items-center justify-center gap-1 cursor-pointer transition-colors ${
+              activeMobileTab === 'layers' ? 'text-indigo-400 font-black' : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Layers size={18} />
+            <span className="text-[10px]">الطبقات ({layers.length})</span>
+          </button>
+
+          <button
+            onClick={() => setActiveMobileTab('canvas')}
+            className={`flex flex-col items-center justify-center gap-1 cursor-pointer transition-colors ${
+              activeMobileTab === 'canvas' ? 'text-indigo-400 font-black' : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Compass size={18} />
+            <span className="text-[10px]">الكانفاس والتايم لاين</span>
+          </button>
+
+          <button
+            onClick={() => setActiveMobileTab('properties')}
+            className={`flex flex-col items-center justify-center gap-1 cursor-pointer transition-colors ${
+              activeMobileTab === 'properties' ? 'text-indigo-400 font-black' : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Sliders size={18} />
+            <span className="text-[10px]">خصائص الطبقة {selectedLayerId ? '✓' : ''}</span>
+          </button>
+        </div>
+      )}
+
+      {/* Mobile Actions Drawer Menu */}
+      <AnimatePresence>
+        {showMobileMenu && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="lg:hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-end justify-center"
+            onClick={() => setShowMobileMenu(false)}
+          >
+            <motion.div
+              initial={{ y: "100%" }}
+              animate={{ y: 0 }}
+              exit={{ y: "100%" }}
+              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+              className="w-full max-h-[85vh] bg-[#0c1224] rounded-t-[2.5rem] border-t border-white/15 p-6 overflow-y-auto flex flex-col gap-5 pb-safe"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between border-b border-white/10 pb-4">
+                <div className="flex items-center gap-2">
+                  <Sparkles size={16} className="text-indigo-400" />
+                  <span className="font-black text-sm text-slate-200">الأدوات والإعدادات المتقدمة</span>
+                </div>
+                <button
+                  onClick={() => setShowMobileMenu(false)}
+                  className="p-2 hover:bg-white/5 rounded-full text-slate-400 hover:text-white cursor-pointer"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {/* Grid of Mobile Actions */}
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  onClick={() => {
+                    setShowNewProjectModal(true);
+                    setShowMobileMenu(false);
+                  }}
+                  className="flex flex-col items-center justify-center p-4 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 rounded-2xl gap-2 text-emerald-300 transition-all font-bold cursor-pointer"
+                >
+                  <Plus size={20} />
+                  <span className="text-[11px]">مشروع جديد</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    fileInputRef.current?.click();
+                    setShowMobileMenu(false);
+                  }}
+                  className="flex flex-col items-center justify-center p-4 bg-white/5 hover:bg-white/10 border border-white/10 rounded-2xl gap-2 text-slate-200 transition-all font-bold cursor-pointer"
+                >
+                  <Upload size={20} className="text-indigo-400" />
+                  <span className="text-[11px]">فتح SVGA</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    setMp4InitialFiles([]);
+                    setShowMp4ImportModal(true);
+                    setShowMobileMenu(false);
+                  }}
+                  className="flex flex-col items-center justify-center p-4 bg-pink-500/10 hover:bg-pink-500/20 border border-pink-500/30 rounded-2xl gap-2 text-pink-300 transition-all font-bold cursor-pointer"
+                >
+                  <Film size={20} className="text-pink-400" />
+                  <span className="text-[11px]">استدعاء MP4</span>
+                </button>
+
+                {project && (
+                  <button
+                    onClick={() => {
+                      setShowAudioStudioModal(true);
+                      setShowMobileMenu(false);
+                    }}
+                    className="flex flex-col items-center justify-center p-4 bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/30 rounded-2xl gap-2 text-indigo-200 transition-all font-bold cursor-pointer"
+                  >
+                    <Music size={20} className="text-indigo-400" />
+                    <span className="text-[11px]">دمج وقص الصوت</span>
+                  </button>
+                )}
+
+                {project && (
+                  <button
+                    onClick={() => {
+                      mergeFileInputRef.current?.click();
+                      setShowMobileMenu(false);
+                    }}
+                    className="flex flex-col items-center justify-center p-4 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 rounded-2xl gap-2 text-purple-200 transition-all font-bold cursor-pointer"
+                  >
+                    <Sparkles size={20} className="text-purple-400" />
+                    <span className="text-[11px]">دمج SVGA +</span>
+                  </button>
+                )}
+
+                {project && layers.length > 1 && (
+                  <button
+                    onClick={() => {
+                      handleMergeAllLayers();
+                      setShowMobileMenu(false);
+                    }}
+                    disabled={isMergingLayers}
+                    className="flex flex-col items-center justify-center p-4 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 rounded-2xl gap-2 text-purple-200 transition-all font-bold disabled:opacity-50 cursor-pointer"
+                  >
+                    <Layers size={20} className="text-purple-400" />
+                    <span className="text-[11px]">دمج كافة الطبقات</span>
+                  </button>
+                )}
+
+                {project && (
+                  <button
+                    onClick={() => {
+                      setShowBgLibraryModal(true);
+                      setShowMobileMenu(false);
+                    }}
+                    className="flex flex-col items-center justify-center p-4 bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/30 rounded-2xl gap-2 text-sky-200 transition-all font-bold cursor-pointer"
+                  >
+                    <ImageIcon size={20} className="text-sky-400" />
+                    <span className="text-[11px]">مكتبة الخلفيات</span>
+                  </button>
+                )}
+
+                {project && (
+                  <button
+                    onClick={() => {
+                      handleToggleChromaPen();
+                      setShowMobileMenu(false);
+                    }}
+                    className={`flex flex-col items-center justify-center p-4 border rounded-2xl gap-2 transition-all font-bold cursor-pointer ${
+                      isChromaPenActive 
+                        ? 'bg-indigo-600/30 border-indigo-400 text-indigo-200' 
+                        : 'bg-white/5 border-white/10 text-slate-200'
+                    }`}
+                  >
+                    <Pipette size={20} className="text-indigo-400" />
+                    <span className="text-[11px]">أداة كروما بن (Chroma)</span>
+                  </button>
+                )}
+              </div>
+
+              {/* Undo / Redo Row */}
+              {project && (
+                <div className="flex gap-2 border-t border-white/10 pt-4">
+                  <button
+                    onClick={() => {
+                      handleUndo();
+                      setShowMobileMenu(false);
+                    }}
+                    disabled={historyIndex <= 0}
+                    className="flex-1 py-3 bg-white/5 disabled:opacity-30 rounded-xl flex items-center justify-center gap-2 border border-white/10 font-bold text-xs text-slate-300 hover:text-white cursor-pointer"
+                  >
+                    <RotateCcw size={14} />
+                    <span>تراجع</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      handleRedo();
+                      setShowMobileMenu(false);
+                    }}
+                    disabled={historyIndex >= history.length - 1}
+                    className="flex-1 py-3 bg-white/5 disabled:opacity-30 rounded-xl flex items-center justify-center gap-2 border border-white/10 font-bold text-xs text-slate-300 hover:text-white cursor-pointer"
+                  >
+                    <RotateCcw size={14} className="scale-x-[-1]" />
+                    <span>إعادة</span>
+                  </button>
+                </div>
+              )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };
+
+export default SvgaLayerEditor;

@@ -4,7 +4,9 @@ import { db, storage } from '../lib/firebase';
 import { collection, getDocs, doc, updateDoc, addDoc, deleteDoc, query, orderBy, Timestamp, setDoc, getDoc, limit, onSnapshot } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { StoreManager } from './StoreManager';
-import { Users, Key, Image as ImageIcon, Settings as SettingsIcon, Trash2, Ban, CheckCircle, Upload, RefreshCw, X, FileText, Link as LinkIcon, Link2, BadgeCheck, Wifi, Smartphone, Store, UserPlus, Lock, Unlock, Shield, ShieldPlus, ShieldOff, GitBranch, Download, ShieldCheck, PowerOff, Power, AlertTriangle, Eye, EyeOff, Copy, Check, CheckCircle2, Loader2, Server, Clock, UserCheck, Search, Filter, Crown, Send, Activity } from 'lucide-react';
+import { Users, Key, Image as ImageIcon, Settings as SettingsIcon, Trash2, Ban, CheckCircle, Upload, RefreshCw, X, FileText, Link as LinkIcon, Link2, BadgeCheck, Wifi, Smartphone, Store, UserPlus, Lock, Unlock, Shield, ShieldPlus, ShieldOff, GitBranch, Download, ShieldCheck, PowerOff, Power, AlertTriangle, Eye, EyeOff, Copy, Check, CheckCircle2, Loader2, Server, Clock, UserCheck, Search, Filter, Crown, Send, Calendar, ArrowUpDown, AlertCircle, Edit, Edit2 } from 'lucide-react';
+import { calculateSubscriptionInfo, parseDate, calculateExtendedExpiry, formatInputDate } from '../utils/subscriptionUtils';
+import { UserSubscriptionModal } from './admin/UserSubscriptionModal';
 import { initializeApp } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword } from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
@@ -12,10 +14,11 @@ import { logActivity } from '../utils/logger';
 import { AccountVersionsTab } from './admin/AccountVersionsTab';
 import { FeatureAccessControlTab } from './admin/FeatureAccessControlTab';
 import { ExternalLinksManagerTab } from './admin/ExternalLinksManagerTab';
-import { UserCacheTab } from './admin/UserCacheTab';
-import { TelegramTab } from './admin/TelegramTab';
-import { ResourceMonitorTab } from './admin/ResourceMonitorTab';
 import { MaintenanceScreen } from './MaintenanceScreen';
+import { TOOLS_REGISTRY } from '../config/toolsRegistry';
+import { useStarredTools } from '../utils/starredTools';
+import { Star } from 'lucide-react';
+import { FeaturePreviewModal } from './FeaturePreviewModal';
 
 // Secondary app for creating users without logging out admin
 const secondaryApp = initializeApp(firebaseConfig, 'SecondaryApp');
@@ -24,12 +27,45 @@ const secondaryAuth = getAuth(secondaryApp);
 interface AdminPanelProps {
   currentUser: UserRecord | null;
   onCancel: () => void;
+  onOpenFeature?: (actionKey: string) => void;
 }
 
 const EXPORT_FORMATS = ['AE Project', 'SVGA 2.0 EX', 'SVGA 2.0', 'Image Sequence', 'GIF (Animation)', 'APNG (Animation)', 'WebM (Video)', 'WebP (Animated)', 'VAP 1.0.5', 'VAP (MP4)', 'SVGA → YYEVA'];
 
-export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, onCancel }) => {
-  const [activeTab, setActiveTab] = useState<'users' | 'store' | 'keys' | 'assets' | 'settings' | 'records' | 'account_versions' | 'features_access' | 'server_outage' | 'external_links' | 'user_cache' | 'telegram' | 'resource_monitor'>('users');
+export const isVideoUrl = (url?: string | null): boolean => {
+  if (!url) return false;
+  const cleanUrl = url.trim().toLowerCase();
+  
+  // Explicit non-video image extensions
+  const isImageExt = cleanUrl.match(/\.(png|jpe?g|svg|ico|webp)(\?.*)?$/) !== null;
+  if (isImageExt && !cleanUrl.includes('.mp4') && !cleanUrl.includes('m_')) {
+    return false;
+  }
+
+  return (
+    cleanUrl.includes('.mp4') ||
+    cleanUrl.includes('.webm') ||
+    cleanUrl.includes('.mov') ||
+    cleanUrl.includes('.ogg') ||
+    cleanUrl.includes('.m4v') ||
+    cleanUrl.includes('.mkv') ||
+    cleanUrl.includes('.avi') ||
+    cleanUrl.includes('.3gp') ||
+    cleanUrl.includes('/m_') ||
+    cleanUrl.includes('top4top') ||
+    cleanUrl.includes('catbox') ||
+    cleanUrl.includes('video') ||
+    cleanUrl.includes('media') ||
+    cleanUrl.includes('stream') ||
+    cleanUrl.startsWith('data:video') ||
+    cleanUrl.startsWith('blob:')
+  );
+};
+
+export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, onCancel, onOpenFeature }) => {
+  const { starredToolIds, isStarred, toggleStar } = useStarredTools();
+  const [activePreviewTool, setActivePreviewTool] = useState<any | null>(null);
+  const [activeTab, setActiveTab] = useState<'users' | 'store' | 'keys' | 'assets' | 'settings' | 'records' | 'account_versions' | 'features_access' | 'server_outage' | 'external_links' | 'vib_features' | 'security_protection'>('users');
   const [dropdownState, setDropdownState] = useState<{ userId: string; x: number; y: number; position: 'top' | 'bottom' } | null>(null);
   const [subDropdownState, setSubDropdownState] = useState<{ userId: string; x: number; y: number; position: 'top' | 'bottom' } | null>(null);
   const [loading, setLoading] = useState(false);
@@ -61,8 +97,19 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, onCancel })
   const [logs, setLogs] = useState<ActivityLog[]>([]);
   const [cache, setCache] = useState<Record<string, { data: any, timestamp: number }>>({});
   const [showCreateUser, setShowCreateUser] = useState(false);
-  const [newUser, setNewUser] = useState({ name: '', email: '', password: '', role: 'user' as 'admin' | 'moderator' | 'user' });
+  const [newUser, setNewUser] = useState({ 
+    name: '', 
+    email: '', 
+    password: '', 
+    role: 'user' as 'admin' | 'moderator' | 'user',
+    subscriptionType: 'none',
+    subscriptionExpiryDate: ''
+  });
   const [creatingUser, setCreatingUser] = useState(false);
+  const [adminSubscriptionUser, setAdminSubscriptionUser] = useState<UserRecord | null>(null);
+  const [adminSubFilter, setAdminSubFilter] = useState<'all' | 'active' | 'expiring_soon' | 'expired' | 'no_subscription'>('all');
+  const [adminSubSort, setAdminSubSort] = useState<'default' | 'expiry_asc' | 'expiry_desc' | 'created_desc'>('default');
+  const [adminUserSearch, setAdminUserSearch] = useState('');
   const [permissionModal, setPermissionModal] = useState<{ userId: string; name: string; permissions: string[] } | null>(null);
 
   // Outage / Server Control States
@@ -86,9 +133,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, onCancel })
 
   const TABS = [
     { id: 'users', label: 'المستخدمين', icon: <Users /> },
-    { id: 'resource_monitor', label: 'مراقبة الموارد و Vercel ⚡', icon: <Activity className="text-emerald-400" /> },
-    { id: 'user_cache', label: 'كاش المستخدمين ☠️', icon: <span className="text-base">☠️</span> },
-    { id: 'telegram', label: 'إرسال لـ Telegram 🚀', icon: <Send className="text-sky-400" /> },
+    { id: 'vib_features', label: 'إدارة ميزات VIB 👑', icon: <Crown className="text-amber-400" /> },
+    { id: 'security_protection', label: 'الأمن وحماية الشاشة 🛡️', icon: <Shield className="text-blue-400" /> },
     { id: 'features_access', label: 'تحديد الوظائف', icon: <ShieldCheck /> },
     { id: 'external_links', label: 'روابط الداشبورد', icon: <Link2 className="text-cyan-400" /> },
     { id: 'server_outage', label: 'تعطيل سيرفر التطبيق', icon: <PowerOff className="text-rose-400" /> },
@@ -180,7 +226,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, onCancel })
     }
   };
 
-  const isSuperAdmin = (user: UserRecord) => user.isSuperAdmin || (user.role === 'admin' && (user.email === 'iejehdgdig@gmail.com' || user.email === 'uhbijnokmpl098900@gmail.com'));
+  const isSuperAdmin = (user: UserRecord) => {
+    const email = (user.email || '').toLowerCase().trim();
+    return user.isSuperAdmin || email === 'ceo@design-svga.com' || email === 'master@design-svga.com' || email === 'sdsdfdfddsfdd@gmail.com' || email === 'admin@streamgifts.com' || email === 'aegy238@gmail.com' || email === 'uhbijnokmpl098900@gmail.com' || email === 'iejehdgdig@gmail.com' || user.role === 'admin';
+  };
 
   const CACHE_DURATION = 30000; // 30 seconds
 
@@ -200,6 +249,28 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, onCancel })
         ? crypto.randomUUID()
         : `dev_${Date.now()}_${Math.random().toString(36).substring(2)}`;
       
+      let finalExpiry: Timestamp | null = null;
+      let finalType: SubscriptionType = 'none';
+      let hasActiveVip = false;
+
+      if (newUser.role === 'admin' || newUser.role === 'moderator') {
+        finalExpiry = Timestamp.fromDate(new Date(Date.now() + 1000 * 60 * 60 * 24 * 365));
+        finalType = 'year';
+        hasActiveVip = true;
+      } else if (newUser.subscriptionExpiryDate) {
+        const d = new Date(newUser.subscriptionExpiryDate + 'T23:59:59');
+        if (!isNaN(d.getTime())) {
+          finalExpiry = Timestamp.fromDate(d);
+          finalType = (newUser.subscriptionType as SubscriptionType) || 'month';
+          hasActiveVip = (newUser.subscriptionType === 'vip');
+        }
+      } else if (newUser.subscriptionType && newUser.subscriptionType !== 'none') {
+        const d = calculateExtendedExpiry(null, newUser.subscriptionType as any);
+        finalExpiry = Timestamp.fromDate(d);
+        finalType = newUser.subscriptionType as SubscriptionType;
+        hasActiveVip = (newUser.subscriptionType === 'vip');
+      }
+
       const userData: UserRecord = {
         id: user.uid,
         name: cleanName,
@@ -208,17 +279,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, onCancel })
         plainPassword: cleanPass,
         role: newUser.role,
         isApproved: true,
-        isVIP: newUser.role === 'admin' || newUser.role === 'moderator',
+        isVIP: hasActiveVip,
         status: 'active',
-        subscriptionType: (newUser.role === 'admin' || newUser.role === 'moderator') ? 'year' : 'none',
-        freeAttempts: (newUser.role === 'admin' || newUser.role === 'moderator') ? 999999 : settings.defaultFreeAttempts,
+        subscriptionType: finalType,
+        freeAttempts: (newUser.role === 'admin' || newUser.role === 'moderator' || hasActiveVip) ? 999999 : settings.defaultFreeAttempts,
         coins: (newUser.role === 'admin' || newUser.role === 'moderator') ? 999999 : 0,
-        subscriptionExpiry: (newUser.role === 'admin' || newUser.role === 'moderator') ? Timestamp.fromDate(new Date(Date.now() + 1000 * 60 * 60 * 24 * 365)) : null,
+        subscriptionStartDate: Timestamp.now(),
+        subscriptionExpiry: finalExpiry,
         createdAt: Timestamp.now(),
         lastLogin: Timestamp.now(),
         deviceId: generatedDeviceId,
         lastIp: '127.0.0.1',
-        hasSvgaExAccess: newUser.role === 'admin' || newUser.role === 'moderator',
+        hasSvgaExAccess: newUser.role === 'admin' || newUser.role === 'moderator' || hasActiveVip,
         permissions: newUser.role === 'moderator' ? ['users'] : []
       };
 
@@ -229,7 +301,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, onCancel })
       
       alert("تم إنشاء الحساب بنجاح");
       setShowCreateUser(false);
-      setNewUser({ name: '', email: '', password: '', role: 'user' });
+      setNewUser({ name: '', email: '', password: '', role: 'user', subscriptionType: 'none', subscriptionExpiryDate: '' });
       fetchData();
     } catch (error: any) {
       console.error("Error creating user:", error);
@@ -718,11 +790,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, onCancel })
   const handleSaveAssetUrl = async (type: 'logo' | 'background') => {
       try {
           if (type === 'logo') {
-              await setDoc(doc(db, 'settings', 'global'), { logoUrl: logoUrlInput }, { merge: true });
-              setSettings(prev => prev ? { ...prev, logoUrl: logoUrlInput } : null);
+              const cleanUrl = logoUrlInput.trim();
+              await setDoc(doc(db, 'settings', 'global'), { logoUrl: cleanUrl }, { merge: true });
+              setSettings(prev => prev ? { ...prev, logoUrl: cleanUrl } : null);
           } else {
-              await setDoc(doc(db, 'settings', 'global'), { backgroundUrl: bgUrlInput }, { merge: true });
-              setSettings(prev => prev ? { ...prev, backgroundUrl: bgUrlInput } : null);
+              const cleanUrl = bgUrlInput.trim();
+              await setDoc(doc(db, 'settings', 'global'), { backgroundUrl: cleanUrl }, { merge: true });
+              setSettings(prev => prev ? { ...prev, backgroundUrl: cleanUrl } : null);
           }
           alert("تم حفظ الرابط بنجاح");
       } catch (error) {
@@ -732,11 +806,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, onCancel })
   };
 
   const handleAddPresetUrl = async () => {
-      if (!presetUrlInput) return;
+      const cleanUrl = presetUrlInput.trim();
+      if (!cleanUrl) return;
       try {
           await addDoc(collection(db, 'presetBackgrounds'), {
-              label: 'External URL',
-              url: presetUrlInput,
+              label: isVideoUrl(cleanUrl) ? 'MP4 Video BG' : 'External Image BG',
+              url: cleanUrl,
               createdAt: Timestamp.now()
           });
           setPresetUrlInput('');
@@ -850,6 +925,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, onCancel })
   const isAccountAdmin = (u: UserRecord) =>
     u.isSuperAdmin === true ||
     u.role === 'admin' ||
+    u.email?.toLowerCase() === 'ceo@design-svga.com' ||
+    u.email?.toLowerCase() === 'master@design-svga.com' ||
+    u.email?.toLowerCase() === 'sdsdfdfddsfdd@gmail.com' ||
+    u.email?.toLowerCase() === 'admin@streamgifts.com' ||
     u.email?.toLowerCase() === 'uhbijnokmpl098900@gmail.com' ||
     u.email?.toLowerCase() === 'aegy238@gmail.com' ||
     u.email?.toLowerCase() === 'iejehdgdig@gmail.com';
@@ -980,20 +1059,202 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, onCancel })
             </div>
           ) : (
             <>
-              {activeTab === 'resource_monitor' && (
-                <ResourceMonitorTab currentUser={currentUser} />
+              {activeTab === 'vib_features' && (
+                <div className="space-y-6" dir="rtl">
+                  <div className="flex items-center gap-3 pb-4 border-b border-white/10">
+                    <Crown className="w-6 h-6 text-amber-400" />
+                    <div>
+                      <h3 className="text-lg font-bold text-white">إدارة ميزات باقة VIB الملكية</h3>
+                      <p className="text-xs text-slate-400">حدد الوظائف الحصرية المتاحة فقط لأعضاء VIP المشتركين.</p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {TOOLS_REGISTRY.map((tool) => {
+                      const isVib = 
+                        tool.isVip ||
+                        tool.id === 'svga-layer-editor' || 
+                        tool.id === 'after-effects-studio' ||
+                        settings.vibFeatures?.includes(tool.id) ||
+                        (tool.dashboardActionKey && settings.vibFeatures?.includes(tool.dashboardActionKey)) ||
+                        (tool.featureAccessKey && settings.vibFeatures?.includes(tool.featureAccessKey));
+                      const starred = isStarred(tool.id);
+                      
+                      return (
+                        <div 
+                          key={tool.id} 
+                          className={`p-4 rounded-2xl border transition-all duration-300 flex flex-col justify-between gap-4 ${
+                            isVib 
+                              ? 'bg-amber-500/10 border-amber-500/40 shadow-[0_0_15px_rgba(245,158,11,0.1)]' 
+                              : 'bg-slate-950/40 border-white/5 hover:border-white/15'
+                          }`}
+                        >
+                          <div className="space-y-2">
+                            <div className="flex items-start gap-3 flex-wrap">
+                              <span className="p-2 rounded-xl bg-slate-900 border border-white/5 text-amber-400 shrink-0">
+                                {React.cloneElement(tool.icon as React.ReactElement<any>, { className: 'w-5 h-5 text-amber-400' })}
+                              </span>
+                              
+                              <div className="flex-1 flex justify-end">
+                                <button
+                                  type="button"
+                                  onClick={() => toggleStar(tool.id)}
+                                  className={`p-1.5 rounded-xl transition-all border cursor-pointer flex items-center justify-center ${
+                                    starred
+                                      ? 'bg-amber-400/20 text-amber-400 border-amber-400/30'
+                                      : 'bg-white/5 text-slate-400 hover:text-white border-white/5'
+                                  }`}
+                                  title={starred ? 'إلغاء التثبيت بنجمة ⭐' : 'تثبيت بنجمة ⭐'}
+                                >
+                                  <Star className={`w-3.5 h-3.5 ${starred ? 'fill-amber-400 text-amber-400' : 'text-slate-400'}`} />
+                                </button>
+                              </div>
+                            </div>
+                            {isVib && (
+                              <div className="flex pt-2">
+                                <span className="text-[10px] font-black px-2 py-1 bg-amber-400 text-slate-950 rounded-full whitespace-nowrap">
+                                  ميزة VIB حصرية 👑
+                                </span>
+                              </div>
+                            )}
+                            <div>
+                              <h4 className="font-bold text-white text-sm">{tool.label}</h4>
+                              <p className="text-xs text-slate-400 leading-relaxed mt-1 line-clamp-2">{tool.descAr}</p>
+                            </div>
+                          </div>
+
+                           <div className="flex items-center justify-between pt-2 border-t border-white/5">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setActivePreviewTool(tool);
+                              }}
+                              className="text-xs font-black text-indigo-400 hover:text-indigo-200 flex items-center gap-1.5 cursor-pointer bg-indigo-500/15 hover:bg-indigo-500/25 px-3 py-2 rounded-xl border border-indigo-500/30 hover:border-indigo-500/50 transition-all shadow-sm active:scale-95"
+                              title="معاينة وتجربة الأداة 👁️"
+                            >
+                              <Eye className="w-4 h-4 text-indigo-400" />
+                              <span>معاينة وتجربة 👁️</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              disabled={tool.id === 'svga-layer-editor' || tool.id === 'after-effects-studio'} // Always VIB/Locked by default
+                              onClick={async () => {
+                                const currentVibs = settings.vibFeatures || [];
+                                const currentlyVip = 
+                                  currentVibs.includes(tool.id) ||
+                                  (tool.dashboardActionKey && currentVibs.includes(tool.dashboardActionKey)) ||
+                                  (tool.featureAccessKey && currentVibs.includes(tool.featureAccessKey));
+
+                                const newVibs = currentlyVip
+                                  ? currentVibs.filter(id => id !== tool.id && id !== tool.dashboardActionKey && id !== tool.featureAccessKey)
+                                  : [...currentVibs, tool.id];
+                                
+                                const updatedSettings = {
+                                  ...settings,
+                                  vibFeatures: newVibs
+                                };
+                                setSettings(updatedSettings);
+
+                                // Save to Firestore global doc
+                                try {
+                                  await setDoc(doc(db, 'settings', 'global'), {
+                                    vibFeatures: newVibs
+                                  }, { merge: true });
+                                } catch (err) {
+                                  console.error("Error toggling VIB feature:", err);
+                                }
+                              }}
+                              className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
+                                isVib 
+                                  ? 'bg-amber-400 text-black hover:bg-amber-300' 
+                                  : 'bg-white/5 hover:bg-white/10 text-slate-300 border border-white/10'
+                              }`}
+                            >
+                              {isVib ? 'تفعيل عام (إلغاء حصرية VIP)' : 'قصر للمشتركين فقط (VIB)'}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
               )}
+
+              {activeTab === 'security_protection' && (
+                <div className="space-y-6 max-w-2xl mx-auto text-right" dir="rtl">
+                  <div className="flex items-center gap-3 pb-4 border-b border-white/10">
+                    <Shield className="w-6 h-6 text-blue-400" />
+                    <div>
+                      <h3 className="text-lg font-bold text-white">إعدادات الأمن وحماية الشاشة</h3>
+                      <p className="text-xs text-slate-400">تفعيل جدران حماية ضد لقطات الشاشة وتسجيل الشاشة ونسخ المحتوى.</p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    {/* Screenshot Protection Toggle */}
+                    <div className="bg-slate-900/40 border border-white/10 rounded-2xl p-5 flex items-start justify-between gap-4">
+                      <div className="space-y-1">
+                        <h4 className="text-sm font-bold text-white flex items-center gap-1.5">
+                          <span>تفعيل حماية لقطات الشاشة (Screenshot Protection)</span>
+                        </h4>
+                        <p className="text-xs text-slate-400 leading-relaxed">
+                          يمنع لقطات الشاشة والطباعة (Ctrl+P)، ويعطل زر الماوس الأيمن لمنع نسخ وحفظ الصور، ويقوم بإدراج علامة مائية (Watermark) شفافة تحتوي على بيانات حساب المستخدم ومُعرّفه الرقمي لحماية ملكية الفيديوهات والتصميمات والملفات من التسريب.
+                        </p>
+                      </div>
+                      <button 
+                        type="button"
+                        onClick={async () => {
+                          const nextVal = !settings.screenshotProtectionEnabled;
+                          const updated = { ...settings, screenshotProtectionEnabled: nextVal };
+                          setSettings(updated);
+                          await setDoc(doc(db, 'settings', 'global'), { screenshotProtectionEnabled: nextVal }, { merge: true });
+                        }}
+                        className={`w-12 h-6 rounded-full transition-all relative shrink-0 ${settings.screenshotProtectionEnabled ? 'bg-blue-500' : 'bg-slate-700'}`}
+                      >
+                        <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${settings.screenshotProtectionEnabled ? 'right-7' : 'right-1'}`}></div>
+                      </button>
+                    </div>
+
+                    {/* Screen Recording Protection Toggle */}
+                    <div className="bg-slate-900/40 border border-white/10 rounded-2xl p-5 flex items-start justify-between gap-4">
+                      <div className="space-y-1">
+                        <h4 className="text-sm font-bold text-white flex items-center gap-1.5">
+                          <span>تفعيل حماية تسجيل الشاشة (Screen Recording Protection)</span>
+                        </h4>
+                        <p className="text-xs text-slate-400 leading-relaxed">
+                          يقوم باكتشاف محاولات تفعيل أدوات البث أو تسجيل الشاشة، ويعمل على حجب وطمس (Blur/طمس ذكي) كامل منطقة العمل والملفات الحساسة تلقائياً بمجرد إلغاء التركيز عن نافذة التطبيق أو ترك التصفح النشط.
+                        </p>
+                      </div>
+                      <button 
+                        type="button"
+                        onClick={async () => {
+                          const nextVal = !settings.screenRecordingProtectionEnabled;
+                          const updated = { ...settings, screenRecordingProtectionEnabled: nextVal };
+                          setSettings(updated);
+                          await setDoc(doc(db, 'settings', 'global'), { screenRecordingProtectionEnabled: nextVal }, { merge: true });
+                        }}
+                        className={`w-12 h-6 rounded-full transition-all relative shrink-0 ${settings.screenRecordingProtectionEnabled ? 'bg-blue-500' : 'bg-slate-700'}`}
+                      >
+                        <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${settings.screenRecordingProtectionEnabled ? 'right-7' : 'right-1'}`}></div>
+                      </button>
+                    </div>
+
+                    {/* Status Box */}
+                    <div className="p-4 rounded-xl bg-blue-500/10 border border-blue-500/20 text-xs text-blue-200 leading-relaxed flex gap-3">
+                      <ShieldCheck className="w-5 h-5 text-blue-400 shrink-0" />
+                      <div>
+                        <strong className="block mb-1">تنبيه حماية الملكية الفكرية:</strong>
+                        هذه الآليات تعمل بكفاءة عالية على متصفحات الويب الحديثة لحماية البيانات والمحتوى الملكي للمنصة لمنع تسريب صور أو تصميمات المستخدمين العاديين، بينما حسابات المديرين والمشرفين مستثنائون تلقائياً من هذه القيود لتسهيل العمل وتحديث الموقع.
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {activeTab === 'features_access' && <FeatureAccessControlTab />}
-              {activeTab === 'user_cache' && (
-                <UserCacheTab 
-                  currentUser={currentUser} 
-                  users={users} 
-                  onRefreshUsers={fetchData} 
-                />
-              )}
-              {activeTab === 'telegram' && (
-                <TelegramTab currentUser={currentUser} />
-              )}
               {activeTab === 'external_links' && (
                 <ExternalLinksManagerTab 
                   settings={settings} 
@@ -1007,42 +1268,196 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, onCancel })
                   currentAdminId={currentUser?.id || 'admin'} 
                 />
               )}
-              {activeTab === 'users' && (
-                <div className="space-y-6">
-                  <div className="flex justify-between items-center mb-4">
-                    <h3 className="text-xl font-bold">إدارة المستخدمين</h3>
-                    <button 
-                      onClick={() => setShowCreateUser(true)}
-                      className="px-4 py-2 bg-indigo-500 hover:bg-indigo-600 text-white rounded-lg text-sm font-bold transition-all flex items-center gap-2 shadow-lg shadow-indigo-500/20"
-                    >
-                      <UserPlus className="w-4 h-4" />
-                      إنشاء مستخدم جديد
-                    </button>
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-right border-collapse">
-                      <thead>
-                        <tr className="border-b border-white/10 text-slate-400 text-sm">
-                          <th className="p-3">الاسم</th>
-                          <th className="p-3">البريد الإلكتروني</th>
-                          <th className="p-3">كلمة المرور 🔑</th>
-                          <th className="p-3">الحالة</th>
-                          <th className="p-3">الاشتراك</th>
-                          <th className="p-3">عضوية VIP</th>
-                          <th className="p-3">الكاش ☠️</th>
-                          <th className="p-3">الإجراءات</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {users.map((user, index) => (
+              {activeTab === 'users' && (() => {
+                const adminSubscriptionStats = {
+                  active: users.filter(u => {
+                    const i = calculateSubscriptionInfo(u);
+                    return i.status === 'active' || i.status === 'lifetime';
+                  }).length,
+                  expiring: users.filter(u => calculateSubscriptionInfo(u).status === 'expiring_soon').length,
+                  expired: users.filter(u => calculateSubscriptionInfo(u).status === 'expired').length,
+                  noSub: users.filter(u => calculateSubscriptionInfo(u).status === 'no_subscription').length,
+                  total: users.length
+                };
+
+                const displayedAdminUsers = users
+                  .filter(u => {
+                    const q = adminUserSearch.toLowerCase().trim();
+                    if (q) {
+                      const matches = (u.name || '').toLowerCase().includes(q) ||
+                        (u.email || '').toLowerCase().includes(q) ||
+                        (u.numericId || '').toString().includes(q);
+                      if (!matches) return false;
+                    }
+                    if (adminSubFilter === 'all') return true;
+                    const info = calculateSubscriptionInfo(u);
+                    if (adminSubFilter === 'active') return info.status === 'active' || info.status === 'lifetime';
+                    if (adminSubFilter === 'expiring_soon') return info.status === 'expiring_soon';
+                    if (adminSubFilter === 'expired') return info.status === 'expired';
+                    if (adminSubFilter === 'no_subscription') return info.status === 'no_subscription';
+                    return true;
+                  })
+                  .sort((a, b) => {
+                    if (adminSubSort === 'expiry_asc') {
+                      const da = parseDate(a.subscriptionExpiry)?.getTime() || 9999999999999;
+                      const db = parseDate(b.subscriptionExpiry)?.getTime() || 9999999999999;
+                      return da - db;
+                    }
+                    if (adminSubSort === 'expiry_desc') {
+                      const da = parseDate(a.subscriptionExpiry)?.getTime() || 0;
+                      const db = parseDate(b.subscriptionExpiry)?.getTime() || 0;
+                      return db - da;
+                    }
+                    if (adminSubSort === 'created_desc') {
+                      const da = parseDate(a.createdAt)?.getTime() || 0;
+                      const db = parseDate(b.createdAt)?.getTime() || 0;
+                      return db - da;
+                    }
+                    return 0;
+                  });
+
+                return (
+                  <div className="space-y-6">
+                    {/* Expiring Soon Alert for Admin */}
+                    {adminSubscriptionStats.expiring > 0 && (
+                      <div className="p-4 bg-amber-500/15 border border-amber-500/40 rounded-2xl flex items-center justify-between gap-3 text-amber-300 shadow-lg shadow-amber-500/10 animate-pulse">
+                        <div className="flex items-center gap-3">
+                          <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0" />
+                          <div className="text-xs sm:text-sm font-bold">
+                            <span>⚠️ تنبيه الإدارة: يوجد </span>
+                            <span className="font-black text-amber-300 underline mx-1">{adminSubscriptionStats.expiring} مستخدمين</span>
+                            <span>اقتربت اشتراكاتهم من الانتهاء خلال 7 أيام!</span>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => setAdminSubFilter('expiring_soon')}
+                          className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black rounded-xl text-xs transition-all shrink-0 shadow"
+                        >
+                          عرض المشتركين
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Top Controls: Search & Create User */}
+                    <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3">
+                      <div className="relative flex-1 max-w-md">
+                        <Search className="absolute right-3.5 top-3 w-4 h-4 text-slate-400" />
+                        <input
+                          type="text"
+                          value={adminUserSearch}
+                          onChange={(e) => setAdminUserSearch(e.target.value)}
+                          placeholder="بحث بالاسم أو البريد الإلكتروني أو الآي دي..."
+                          className="w-full bg-slate-950/50 border border-white/10 rounded-xl pr-10 pl-4 py-2 text-xs text-white focus:outline-none focus:border-indigo-500/50"
+                        />
+                      </div>
+
+                      <button 
+                        onClick={() => setShowCreateUser(true)}
+                        className="px-4 py-2 bg-indigo-500 hover:bg-indigo-600 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 shadow-lg shadow-indigo-500/20 shrink-0"
+                      >
+                        <UserPlus className="w-4 h-4" />
+                        <span>إنشاء مستخدم جديد مع تحديد الاشتراك</span>
+                      </button>
+                    </div>
+
+                    {/* Filter & Sort Pills */}
+                    <div className="bg-slate-950/40 p-3 rounded-2xl border border-white/5 flex flex-wrap items-center justify-between gap-3 text-xs">
+                      {/* Status Filters */}
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="font-bold text-slate-400 ml-1 flex items-center gap-1">
+                          <Filter className="w-3.5 h-3.5" />
+                          <span>فلترة الاشتراكات:</span>
+                        </span>
+                        <button
+                          onClick={() => setAdminSubFilter('all')}
+                          className={`px-3 py-1 rounded-xl font-bold transition-all ${
+                            adminSubFilter === 'all'
+                              ? 'bg-indigo-600 text-white shadow-sm'
+                              : 'bg-white/5 text-slate-400 hover:text-white hover:bg-white/10'
+                          }`}
+                        >
+                          الكل ({adminSubscriptionStats.total})
+                        </button>
+                        <button
+                          onClick={() => setAdminSubFilter('active')}
+                          className={`px-3 py-1 rounded-xl font-bold transition-all flex items-center gap-1.5 ${
+                            adminSubFilter === 'active'
+                              ? 'bg-emerald-600 text-white shadow-sm'
+                              : 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 border border-emerald-500/20'
+                          }`}
+                        >
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                          <span>نشط ({adminSubscriptionStats.active})</span>
+                        </button>
+                        <button
+                          onClick={() => setAdminSubFilter('expiring_soon')}
+                          className={`px-3 py-1 rounded-xl font-bold transition-all flex items-center gap-1.5 ${
+                            adminSubFilter === 'expiring_soon'
+                              ? 'bg-amber-500 text-slate-950 font-black shadow-sm'
+                              : 'bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 border border-amber-500/20'
+                          }`}
+                        >
+                          <AlertTriangle className="w-3 h-3 text-amber-400" />
+                          <span>قريب من الانتهاء ({adminSubscriptionStats.expiring})</span>
+                        </button>
+                        <button
+                          onClick={() => setAdminSubFilter('expired')}
+                          className={`px-3 py-1 rounded-xl font-bold transition-all flex items-center gap-1.5 ${
+                            adminSubFilter === 'expired'
+                              ? 'bg-rose-600 text-white shadow-sm'
+                              : 'bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 border border-rose-500/20'
+                          }`}
+                        >
+                          <span className="w-1.5 h-1.5 rounded-full bg-rose-400" />
+                          <span>منتهي ({adminSubscriptionStats.expired})</span>
+                        </button>
+                        <button
+                          onClick={() => setAdminSubFilter('no_subscription')}
+                          className={`px-3 py-1 rounded-xl font-bold transition-all ${
+                            adminSubFilter === 'no_subscription'
+                              ? 'bg-slate-700 text-white shadow-sm'
+                              : 'bg-white/5 text-slate-500 hover:bg-white/10'
+                          }`}
+                        >
+                          بدون اشتراك ({adminSubscriptionStats.noSub})
+                        </button>
+                      </div>
+
+                      {/* Sort Selector */}
+                      <div className="flex items-center gap-2">
+                        <ArrowUpDown className="w-3.5 h-3.5 text-slate-400" />
+                        <span className="font-bold text-slate-400">ترتيب:</span>
+                        <select
+                          value={adminSubSort}
+                          onChange={(e) => setAdminSubSort(e.target.value as any)}
+                          className="bg-slate-900 border border-white/10 rounded-xl px-2.5 py-1 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 font-bold"
+                        >
+                          <option value="default">الافتراضي</option>
+                          <option value="expiry_asc">تاريخ الانتهاء: الأقرب انتهاءً أولاً</option>
+                          <option value="expiry_desc">تاريخ الانتهاء: الأبعد انتهاءً أولاً</option>
+                          <option value="created_desc">تاريخ التسجيل: الأحدث أولاً</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-right border-collapse">
+                        <thead>
+                          <tr className="border-b border-white/10 text-slate-400 text-xs font-bold">
+                            <th className="p-3">الاسم</th>
+                            <th className="p-3">البريد الإلكتروني</th>
+                            <th className="p-3">كلمة المرور 🔑</th>
+                            <th className="p-3">الحالة</th>
+                            <th className="p-3">الرتبة</th>
+                            <th className="p-3">عضوية VIP</th>
+                            <th className="p-3">الإجراءات</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {displayedAdminUsers.map((user, index) => (
                           <tr key={user.id} className="border-b border-white/5 hover:bg-white/5 transition-colors">
                             <td className="p-3 font-medium flex items-center gap-2">
                                 {user.name}
-                                {user.hasCacheAccess && (
-                                  <span className="px-2 py-0.5 rounded-lg text-[10px] font-black bg-gradient-to-r from-red-950 to-slate-900 text-red-400 border border-red-500/60 shadow-sm flex items-center gap-1">
-                                    ☠️ CACHE
-                                  </span>
-                                )}
                                 {isSuperAdmin(user) && <span title="المدير العام"><BadgeCheck className="w-4 h-4 text-amber-400" /></span>}
                                 {user.role === 'admin' && !isSuperAdmin(user) && <span title="مسؤول"><BadgeCheck className="w-4 h-4 text-blue-400" /></span>}
                                 {user.role === 'moderator' && <span title="مشرف"><Shield className="w-4 h-4 text-green-400" /></span>}
@@ -1116,34 +1531,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, onCancel })
                                 <span>{user.isVIP ? 'VIP 👑' : 'تفعيل'}</span>
                               </button>
                             </td>
-                            <td className="p-3">
-                              <button
-                                onClick={async () => {
-                                  try {
-                                    const nextState = !user.hasCacheAccess;
-                                    await updateDoc(doc(db, 'users', user.id), {
-                                      hasCacheAccess: nextState,
-                                      cachePermissions: { view: true, download: true, copyLink: true, delete: false, manage: false }
-                                    });
-                                    setUsers(prev => prev.map(u => u.id === user.id ? { ...u, hasCacheAccess: nextState } : u));
-                                  } catch (e: any) {
-                                    alert('خطأ في تغيير حالة الكاش: ' + e.message);
-                                  }
-                                }}
-                                className={`px-2.5 py-1 rounded-lg text-xs font-black transition-all flex items-center gap-1.5 border ${
-                                  user.hasCacheAccess
-                                    ? 'bg-gradient-to-r from-red-950 via-slate-900 to-red-950 text-red-400 border-red-500 shadow-sm shadow-red-950/50 hover:brightness-125'
-                                    : 'bg-slate-800/40 text-slate-500 border-white/5 hover:border-red-500/30 hover:text-red-400'
-                                }`}
-                                title={user.hasCacheAccess ? 'الكاش مفعّل (اضغط للتعطيل والإخفاء)' : 'الكاش معطّل ومخفي (اضغط للتفعيل)'}
-                              >
-                                <span>☠️</span>
-                                <span>{user.hasCacheAccess ? 'مفعّل ON' : 'معطّل OFF'}</span>
-                              </button>
-                            </td>
-                            <td className="p-3 flex gap-2">
+                             <td className="p-3 flex gap-2">
                               {!isSuperAdmin(user) && (
                                 <>
+                                  <button 
+                                    onClick={() => setAdminSubscriptionUser(user)}
+                                    className="p-1.5 hover:bg-purple-500/20 text-purple-400 rounded transition-colors"
+                                    title="إدارة وتعديل وتمديد تاريخ انتهاء الاشتراك"
+                                  >
+                                    <Calendar className="w-4 h-4" />
+                                  </button>
                                   <button 
                                     onClick={() => handleOpenResetPassword(user)}
                                     className="p-1.5 hover:bg-indigo-500/20 text-indigo-400 rounded transition-colors"
@@ -1304,7 +1701,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, onCancel })
                     </table>
                   </div>
                 </div>
-              )}
+                );
+              })()}
 
               {/* Fixed Dropdown Portal */}
               {dropdownState && (
@@ -1508,19 +1906,35 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, onCancel })
                     <div className="bg-slate-950/30 border border-white/10 rounded-xl p-6">
                       <h4 className="font-bold mb-4 flex items-center gap-2">
                         <ImageIcon className="w-4 h-4 text-purple-400" />
-                        خلفية الموقع
+                        خلفية الموقع (يدعم الصور وصيغ MP4 للفيديو)
                       </h4>
                       <div className="flex flex-col gap-4">
                         <div className="flex items-center gap-4">
                             {settings?.backgroundUrl && (
-                            <img src={settings.backgroundUrl} alt="Background" className="w-24 h-16 rounded-lg object-cover bg-black/20" />
+                              isVideoUrl(settings.backgroundUrl) ? (
+                                <div className="relative w-28 h-18 rounded-lg overflow-hidden border border-purple-500/40 bg-black/40 shrink-0 shadow-md">
+                                  <video 
+                                    src={settings.backgroundUrl} 
+                                    autoPlay 
+                                    loop 
+                                    muted 
+                                    playsInline 
+                                    className="w-full h-full object-cover" 
+                                  />
+                                  <span className="absolute bottom-1 right-1 text-[9px] bg-purple-600/90 text-white font-bold px-1.5 py-0.5 rounded shadow">
+                                    MP4 فيديو
+                                  </span>
+                                </div>
+                              ) : (
+                                <img src={settings.backgroundUrl} alt="Background" className="w-24 h-16 rounded-lg object-cover bg-black/20 shrink-0" />
+                              )
                             )}
                             <label className="flex-1 cursor-pointer">
                             <div className="border-2 border-dashed border-white/10 hover:border-purple-500/50 rounded-lg p-4 text-center transition-colors">
                                 <Upload className="w-6 h-6 mx-auto mb-2 text-slate-400" />
-                                <span className="text-sm text-slate-400">اختر ملف الخلفية</span>
+                                <span className="text-sm text-slate-400">اختر ملف الخلفية (صورة أو فيديو MP4)</span>
                             </div>
-                            <input type="file" className="hidden" accept="image/*" onChange={(e) => e.target.files?.[0] && handleUploadAsset(e.target.files[0], 'background')} />
+                            <input type="file" className="hidden" accept="image/*,video/*,video/mp4,video/webm" onChange={(e) => e.target.files?.[0] && handleUploadAsset(e.target.files[0], 'background')} />
                             </label>
                         </div>
                         <div className="flex gap-2">
@@ -1528,8 +1942,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, onCancel })
                                 type="text" 
                                 value={bgUrlInput} 
                                 onChange={(e) => setBgUrlInput(e.target.value)}
-                                placeholder="أو أدخل رابط الخلفية مباشرة"
+                                placeholder="أو أدخل رابط الخلفية مباشرة (صورة أو فيديو MP4/WebM)"
                                 className="flex-1 bg-slate-950/50 border border-white/10 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-purple-500/50"
+                                dir="ltr"
                             />
                             <button onClick={() => handleSaveAssetUrl('background')} className="p-2 bg-purple-500/20 text-purple-400 rounded-lg hover:bg-purple-500/30">
                                 <LinkIcon className="w-4 h-4" />
@@ -1542,15 +1957,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, onCancel })
                   {/* Preset Backgrounds */}
                   <div>
                     <div className="flex flex-col md:flex-row justify-between items-center mb-4 gap-4">
-                      <h4 className="font-bold">خلفيات الاستوديو الجاهزة</h4>
+                      <h4 className="font-bold">خلفيات الاستوديو الجاهزة (صور وفيديو MP4)</h4>
                       <div className="flex gap-2 w-full md:w-auto">
                         <div className="flex gap-2 flex-1">
                             <input 
                                 type="text" 
                                 value={presetUrlInput} 
                                 onChange={(e) => setPresetUrlInput(e.target.value)}
-                                placeholder="رابط خلفية جديدة"
+                                placeholder="رابط خلفية جديدة (صورة أو فيديو)"
                                 className="flex-1 bg-slate-950/50 border border-white/10 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-indigo-500/50"
+                                dir="ltr"
                             />
                             <button onClick={handleAddPresetUrl} className="px-3 py-1.5 bg-indigo-500/20 text-indigo-400 rounded-lg text-sm hover:bg-indigo-500/30">
                                 إضافة
@@ -1559,28 +1975,36 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, onCancel })
                         <label className="cursor-pointer px-3 py-1.5 bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-400 rounded-lg text-sm transition-colors border border-indigo-500/30 flex items-center gap-2 whitespace-nowrap">
                             <Upload className="w-4 h-4" />
                             <span>رفع ملف</span>
-                            <input type="file" className="hidden" accept="image/*" onChange={(e) => e.target.files?.[0] && handleUploadAsset(e.target.files[0], 'preset')} />
+                            <input type="file" className="hidden" accept="image/*,video/*,video/mp4" onChange={(e) => e.target.files?.[0] && handleUploadAsset(e.target.files[0], 'preset')} />
                         </label>
                       </div>
                     </div>
                     
                     <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
-                      {backgrounds.map(bg => (
-                        <div key={bg.id} className="group relative aspect-video rounded-lg overflow-hidden border border-white/10">
-                          <img src={bg.url} alt={bg.label} className="w-full h-full object-cover" />
-                          <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                            <button 
-                              onClick={() => handleDeletePreset(bg.id, bg.url)}
-                              className="p-2 bg-red-500/20 text-red-400 rounded-full hover:bg-red-500/40 transition-colors"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                      {backgrounds.map(bg => {
+                        const isVid = isVideoUrl(bg.url);
+                        return (
+                          <div key={bg.id} className="group relative aspect-video rounded-lg overflow-hidden border border-white/10">
+                            {isVid ? (
+                              <video src={bg.url} className="w-full h-full object-cover" autoPlay loop muted playsInline />
+                            ) : (
+                              <img src={bg.url} alt={bg.label} className="w-full h-full object-cover" />
+                            )}
+                            <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                              <button 
+                                onClick={() => handleDeletePreset(bg.id, bg.url)}
+                                className="p-2 bg-red-500/20 text-red-400 rounded-full hover:bg-red-500/40 transition-colors"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                            <div className="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/80 to-transparent text-xs text-white truncate flex items-center justify-between">
+                              <span className="truncate">{bg.label}</span>
+                              {isVid && <span className="text-[8px] bg-purple-600 px-1 rounded font-bold shrink-0">MP4</span>}
+                            </div>
                           </div>
-                          <div className="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/80 to-transparent text-xs text-white truncate">
-                            {bg.label}
-                          </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 </div>
@@ -2175,6 +2599,49 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, onCancel })
                   <option value="admin">مسؤول (Admin)</option>
                 </select>
               </div>
+
+              <div>
+                <label className="block text-slate-400 text-xs font-bold uppercase tracking-widest mb-2 flex items-center gap-1.5">
+                  <Calendar className="w-3.5 h-3.5 text-purple-400" />
+                  <span>نوع الاشتراك ومدة الصلاحية</span>
+                </label>
+                <select 
+                  value={newUser.subscriptionType}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    let exp = '';
+                    if (val !== 'none' && val !== 'custom') {
+                      exp = formatInputDate(calculateExtendedExpiry(null, val as any));
+                    }
+                    setNewUser({ ...newUser, subscriptionType: val, subscriptionExpiryDate: exp });
+                  }}
+                  className="w-full bg-slate-950/50 border border-white/10 rounded-xl px-4 py-3 text-slate-200 focus:outline-none focus:border-indigo-500/50 transition-all text-xs"
+                >
+                  <option value="none">بدون اشتراك (حساب مجاني عادي)</option>
+                  <option value="day">يومي (24 ساعة)</option>
+                  <option value="week">أسبوعي (7 أيام)</option>
+                  <option value="month">شهري (30 يوماً)</option>
+                  <option value="3months">3 أشهر (ربع سنوي)</option>
+                  <option value="year">سنوي (سنة كاملة)</option>
+                  <option value="lifetime">دائم مدى الحياة 👑</option>
+                  <option value="custom">تاريخ مخصص</option>
+                </select>
+              </div>
+
+              {newUser.subscriptionType !== 'none' && (
+                <div>
+                  <label className="block text-slate-400 text-xs font-bold uppercase tracking-widest mb-2 flex items-center gap-1.5">
+                    <Clock className="w-3.5 h-3.5 text-amber-400" />
+                    <span>تاريخ انتهاء الاشتراك المحدد</span>
+                  </label>
+                  <input 
+                    type="date" 
+                    value={newUser.subscriptionExpiryDate}
+                    onChange={(e) => setNewUser({ ...newUser, subscriptionExpiryDate: e.target.value })}
+                    className="w-full bg-slate-950/50 border border-white/10 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-indigo-500/50 transition-all text-xs"
+                  />
+                </div>
+              )}
 
               <button 
                 type="submit"
@@ -2783,6 +3250,40 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, onCancel })
           </div>
         </div>
       )}
+
+      {/* Admin User Subscription Management Modal */}
+      {adminSubscriptionUser && (
+        <UserSubscriptionModal
+          user={adminSubscriptionUser}
+          isOpen={!!adminSubscriptionUser}
+          onClose={() => {
+            setAdminSubscriptionUser(null);
+            fetchData();
+          }}
+          currentAdminEmail={currentUser?.email || 'admin'}
+        />
+      )}
+
+      {/* Feature Preview & Management Modal */}
+      <FeaturePreviewModal
+        tool={activePreviewTool}
+        isOpen={!!activePreviewTool}
+        onClose={() => setActivePreviewTool(null)}
+        currentUser={currentUser}
+        settings={settings}
+        onUpdateSettings={(newSettings) => setSettings(newSettings)}
+        onLaunchFeature={(tool) => {
+          const actionKey = tool.actionKey || tool.dashboardActionKey || tool.id;
+          setActivePreviewTool(null);
+          if (onOpenFeature) {
+            onOpenFeature(actionKey);
+          }
+          const action = (window as any).triggerAppAction;
+          if (action) {
+            action(actionKey);
+          }
+        }}
+      />
     </div>
   );
 };

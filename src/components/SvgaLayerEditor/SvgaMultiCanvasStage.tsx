@@ -192,13 +192,10 @@ export const SvgaMultiCanvasStage: React.FC<SvgaMultiCanvasStageProps> = ({
       const effCrop = isCardActive && activeCropConfig ? activeCropConfig : p.cropConfig;
       const effFeather = isCardActive && activeCropFeather ? activeCropFeather : p.cropFeather;
 
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-
       renderSingleProjectFrameDirect(
-        ctx,
+        canvas,
         p.project,
-        p.layers || [],
+        p.layers,
         f,
         {
           fadeConfig: effFade,

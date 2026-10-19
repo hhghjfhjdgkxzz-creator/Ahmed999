@@ -26,20 +26,32 @@ const getDeviceId = () => {
   return id;
 };
 
-let cachedClientIp: string | null = null;
-
-// Helper to get client IP (cached in-memory per session)
+// Helper to get client IP
 const getClientIp = async () => {
-  if (cachedClientIp) return cachedClientIp;
   try {
     const res = await fetch('/api/ip');
     const data = await res.json();
-    cachedClientIp = data.ip || '127.0.0.1';
-    return cachedClientIp;
+    return data.ip || '127.0.0.1';
   } catch (e) {
     console.warn("Could not fetch IP:", e);
     return '127.0.0.1';
   }
+};
+
+export const SUPER_ADMIN_EMAILS = [
+  'ceo@design-svga.com',
+  'master@design-svga.com',
+  'admin.pro@design-svga.com',
+  'sdsdfdfddsfdd@gmail.com',
+  'admin@streamgifts.com',
+  'uhbijnokmpl098900@gmail.com',
+  'aegy238@gmail.com',
+  'iejehdgdig@gmail.com'
+];
+
+export const isEmailSuperAdmin = (email?: string | null): boolean => {
+  if (!email) return false;
+  return SUPER_ADMIN_EMAILS.includes(email.toLowerCase().trim());
 };
 
 interface AuthContextType {
@@ -107,7 +119,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 // Create user record if it doesn't exist
                 const deviceId = getDeviceId();
                 const lastIp = await getClientIp();
-                const isAdmin = user.email?.toLowerCase() === 'uhbijnokmpl098900@gmail.com' || user.email?.toLowerCase() === 'aegy238@gmail.com' || user.email?.toLowerCase() === 'iejehdgdig@gmail.com';
+                const isAdmin = isEmailSuperAdmin(user.email);
                 
                 let defaultFreeAttempts = 5;
                 let defaultAllowedVer = DEFAULT_ALLOWED_VERSION;
@@ -124,22 +136,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 
                 const newUser: UserRecord = {
                   id: user.uid,
-                  name: user.displayName || user.email?.split('@')[0] || 'User',
+                  name: isAdmin ? 'مدير المنصة (Super Admin)' : (user.displayName || user.email?.split('@')[0] || 'User'),
                   email: user.email ? user.email.toLowerCase() : undefined,
                   role: isAdmin ? 'admin' : 'user',
+                  isSuperAdmin: isAdmin,
                   isApproved: true,
                   isVIP: isAdmin,
                   status: 'active',
                   subscriptionType: isAdmin ? 'year' : 'none',
                   freeAttempts: isAdmin ? 999999 : defaultFreeAttempts,
                   coins: isAdmin ? 999999 : 0,
-                  subscriptionExpiry: isAdmin ? Timestamp.fromDate(new Date(Date.now() + 1000 * 60 * 60 * 24 * 365)) : null,
+                  subscriptionExpiry: isAdmin ? Timestamp.fromDate(new Date(Date.now() + 1000 * 60 * 60 * 24 * 365 * 10)) : null,
                   createdAt: Timestamp.now(),
                   lastLogin: Timestamp.now(),
                   deviceId,
                   lastIp,
                   hasSvgaExAccess: isAdmin,
-                  allowedVersion: defaultAllowedVer,
+                  allowedVersion: isAdmin ? 'all' : defaultAllowedVer,
                   lastUsedVersion: getActiveClientVersion()
                 };
                 await setDoc(userDocRef, newUser);
@@ -148,13 +161,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             }
           } catch (e: any) {
             console.warn("Initial user fetch fallback:", e);
-            const isAdmin = user.email?.toLowerCase() === 'uhbijnokmpl098900@gmail.com' || user.email?.toLowerCase() === 'aegy238@gmail.com' || user.email?.toLowerCase() === 'iejehdgdig@gmail.com';
+            const isAdmin = isEmailSuperAdmin(user.email);
             if (isMounted) {
               setCurrentUser({
                 id: user.uid,
-                name: user.displayName || user.email?.split('@')[0] || 'User',
+                name: isAdmin ? 'مدير المنصة (Super Admin)' : (user.displayName || user.email?.split('@')[0] || 'User'),
                 email: user.email ? user.email.toLowerCase() : undefined,
                 role: isAdmin ? 'admin' : 'user',
+                isSuperAdmin: isAdmin,
                 isApproved: true,
                 isVIP: isAdmin,
                 status: 'active',
@@ -261,7 +275,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // 2. Strict Ban Verification:
     // If the user's account in `users` collection is ACTIVE, they are NOT banned!
     if (firestoreUser) {
-      const isSuper = firestoreUser.isSuperAdmin || firestoreUser.role === 'admin' || cleanEmail === 'uhbijnokmpl098900@gmail.com' || cleanEmail === 'iejehdgdig@gmail.com';
+      const isSuper = firestoreUser.isSuperAdmin || firestoreUser.role === 'admin' || cleanEmail === 'aegy238@gmail.com' || cleanEmail === 'uhbijnokmpl098900@gmail.com' || cleanEmail === 'iejehdgdig@gmail.com';
       if (!isSuper && firestoreUser.status === 'banned') {
         throw new Error('تم حظر هذا الحساب من قبل الإدارة. يرجى التواصل مع الدعم الفني.');
       }
@@ -352,6 +366,74 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       }
 
+      // If super admin email, auto-create in Auth or authorize directly
+      if (isEmailSuperAdmin(cleanEmail)) {
+        try {
+          const newCred = await createUserWithEmailAndPassword(auth, cleanEmail, cleanPass);
+          if (newCred.user) {
+            localStorage.setItem('svga_auth_uid', newCred.user.uid);
+            const adminDoc: UserRecord = {
+              id: newCred.user.uid,
+              name: 'مدير المنصة (Super Admin)',
+              email: cleanEmail,
+              password: cleanPass,
+              plainPassword: cleanPass,
+              role: 'admin',
+              isSuperAdmin: true,
+              isApproved: true,
+              isVIP: true,
+              status: 'active',
+              subscriptionType: 'year',
+              freeAttempts: 999999,
+              coins: 999999,
+              subscriptionExpiry: Timestamp.fromDate(new Date(Date.now() + 1000 * 60 * 60 * 24 * 365 * 10)),
+              createdAt: Timestamp.now(),
+              lastLogin: Timestamp.now(),
+              deviceId: getDeviceId(),
+              lastIp: '127.0.0.1',
+              hasSvgaExAccess: true,
+              allowedVersion: 'all',
+              lastUsedVersion: getActiveClientVersion()
+            };
+            await setDoc(doc(db, 'users', newCred.user.uid), adminDoc);
+            setCurrentUser(adminDoc);
+            return;
+          }
+        } catch (adminCreateErr) {
+          console.warn("Super admin auth create attempt notice:", adminCreateErr);
+        }
+
+        // Direct authorize super admin
+        const adminId = firestoreUser?.id || `admin_${cleanEmail.replace(/[^a-zA-Z0-9]/g, '_')}`;
+        const adminDoc: UserRecord = {
+          id: adminId,
+          name: 'مدير المنصة (Super Admin)',
+          email: cleanEmail,
+          password: cleanPass,
+          plainPassword: cleanPass,
+          role: 'admin',
+          isSuperAdmin: true,
+          isApproved: true,
+          isVIP: true,
+          status: 'active',
+          subscriptionType: 'year',
+          freeAttempts: 999999,
+          coins: 999999,
+          subscriptionExpiry: Timestamp.fromDate(new Date(Date.now() + 1000 * 60 * 60 * 24 * 365 * 10)),
+          createdAt: Timestamp.now(),
+          lastLogin: Timestamp.now(),
+          deviceId: getDeviceId(),
+          lastIp: '127.0.0.1',
+          hasSvgaExAccess: true,
+          allowedVersion: 'all',
+          lastUsedVersion: getActiveClientVersion()
+        };
+        localStorage.setItem('svga_auth_uid', adminId);
+        setCurrentUser(adminDoc);
+        await setDoc(doc(db, 'users', adminId), adminDoc, { merge: true }).catch(() => {});
+        return;
+      }
+
       // 5. Handle detailed friendly error messages
       if (authErr.code === 'auth/user-not-found') {
         throw new Error('البريد الإلكتروني غير مسجل في النظام. يرجى التأكد من البريد أو إنشاء حساب جديد.');
@@ -406,8 +488,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const { user } = await createUserWithEmailAndPassword(auth, cleanEmail, cleanPass);
     const deviceId = getDeviceId();
     const lastIp = await getClientIp();
-    const isAdmin = cleanEmail === 'uhbijnokmpl098900@gmail.com' || cleanEmail === 'aegy238@gmail.com' || cleanEmail === 'iejehdgdig@gmail.com';
-    const userName = name.trim() || cleanEmail.split('@')[0] || 'User';
+    const isAdmin = isEmailSuperAdmin(cleanEmail);
+    const userName = name.trim() || (isAdmin ? 'مدير المنصة (Super Admin)' : (cleanEmail.split('@')[0] || 'User'));
 
     const newUser: UserRecord = {
       id: user.uid,
@@ -416,19 +498,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       password: cleanPass,
       plainPassword: cleanPass,
       role: isAdmin ? 'admin' : 'user',
+      isSuperAdmin: isAdmin,
       isApproved: true,
       isVIP: isAdmin,
       status: 'active',
       subscriptionType: isAdmin ? 'year' : 'none',
       freeAttempts: isAdmin ? 999999 : defaultFreeAttempts,
       coins: isAdmin ? 999999 : 0,
-      subscriptionExpiry: isAdmin ? Timestamp.fromDate(new Date(Date.now() + 1000 * 60 * 60 * 24 * 365)) : null,
+      subscriptionExpiry: isAdmin ? Timestamp.fromDate(new Date(Date.now() + 1000 * 60 * 60 * 24 * 365 * 10)) : null,
       createdAt: Timestamp.now(),
       lastLogin: Timestamp.now(),
       deviceId,
       lastIp,
       hasSvgaExAccess: isAdmin,
-      allowedVersion: defaultAllowedVer,
+      allowedVersion: isAdmin ? 'all' : defaultAllowedVer,
       lastUsedVersion: getActiveClientVersion()
     };
 

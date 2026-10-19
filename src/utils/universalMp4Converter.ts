@@ -460,7 +460,8 @@ async function convertYyevaVapToMp4(
           rgbFrame,
           aFrame,
           10,
-          true
+          true,
+          false
         );
         outCtx.drawImage(glCanvas, 0, 0, outW, outH);
       } else if (scratchCtx) {

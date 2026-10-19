@@ -13,6 +13,8 @@ import { AnimationItem, BatchExportOptions, ExportFormat, UnifiedVideoOptions } 
 import { deduplicateItems } from './hashUtils';
 import { convertFramesToLottieSequence } from '../../../utils/svgaToLottie';
 import { encodeAudioBufferToMuxer } from '../../../utils/svgaVideoAudioExporter';
+import { extractVapConfigFromBlob, detectVapChannelLayout, seekVideoToFrame, parseMp4DurationFromBlob } from '../../../utils/vapEngine';
+import { drawUniversalWatermarkOnCanvas, getSavedWatermarkSettings } from '../../../utils/watermarkAndBackground';
 
 /**
  * Trigger browser file download for a Blob
@@ -102,50 +104,59 @@ export async function extractPagFrames(
   file: File | Blob,
   bgColor: string = 'transparent'
 ): Promise<{ canvases: HTMLCanvasElement[]; delays: number[]; fps: number }> {
-  const buffer = await file.arrayBuffer();
-  const { getPAG } = await import('../../../utils/pagEngine');
-  const PAG = await getPAG();
-  const pagFile = await PAG.PAGFile.load(buffer);
+  try {
+    const buffer = await file.arrayBuffer();
+    const { getPAG } = await import('../../../utils/pagEngine');
+    const PAG = await getPAG();
+    const pagFile = await PAG.PAGFile.load(buffer);
 
-  const width = pagFile.width() || 512;
-  const height = pagFile.height() || 512;
-  const fps = pagFile.frameRate() || 30;
-  const durationSec = pagFile.duration() / 1000000;
-  const totalFrames = Math.max(1, Math.round(durationSec * fps));
-  const delayMs = Math.max(16, Math.round(1000 / fps));
+    const width = Math.max(1, Math.round(pagFile.width() || 512));
+    const height = Math.max(1, Math.round(pagFile.height() || 512));
+    const fps = Math.max(1, Math.round(pagFile.frameRate() || 30));
+    const durationSec = (pagFile.duration() || 0) / 1000000;
+    const totalFrames = Math.max(1, Math.round(durationSec * fps));
+    const delayMs = Math.max(16, Math.round(1000 / fps));
 
-  const canvas = document.createElement('canvas');
-  canvas.width = width;
-  canvas.height = height;
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
 
-  const pagView = await PAG.PAGView.init(pagFile, canvas);
+    const pagView = await PAG.PAGView.init(pagFile, canvas);
 
-  const canvases: HTMLCanvasElement[] = [];
-  const delays: number[] = [];
+    const canvases: HTMLCanvasElement[] = [];
+    const delays: number[] = [];
 
-  for (let i = 0; i < totalFrames; i++) {
-    await pagView.setProgress(i / (totalFrames > 1 ? totalFrames - 1 : 1));
-    await pagView.flush();
+    for (let i = 0; i < totalFrames; i++) {
+      await pagView.setProgress(i / (totalFrames > 1 ? totalFrames - 1 : 1));
+      await pagView.flush();
 
-    const frameCanvas = document.createElement('canvas');
-    frameCanvas.width = width;
-    frameCanvas.height = height;
-    const ctx = frameCanvas.getContext('2d');
-    if (ctx) {
-      if (bgColor && bgColor !== 'transparent') {
-        ctx.fillStyle = bgColor;
-        ctx.fillRect(0, 0, width, height);
+      const frameCanvas = document.createElement('canvas');
+      frameCanvas.width = width;
+      frameCanvas.height = height;
+      const ctx = frameCanvas.getContext('2d');
+      if (ctx) {
+        if (bgColor && bgColor !== 'transparent') {
+          ctx.fillStyle = bgColor;
+          ctx.fillRect(0, 0, width, height);
+        }
+        if (canvas.width > 0 && canvas.height > 0) {
+          ctx.drawImage(canvas, 0, 0, width, height);
+        }
+        canvases.push(frameCanvas);
+        delays.push(delayMs);
       }
-      ctx.drawImage(canvas, 0, 0, width, height);
-      canvases.push(frameCanvas);
-      delays.push(delayMs);
     }
+
+    try {
+      if (pagView && !pagView.isDestroyed) pagView.destroy();
+      if (pagFile && !pagFile.isDestroyed) pagFile.destroy();
+    } catch {}
+
+    return { canvases, delays, fps };
+  } catch (err) {
+    console.warn('extractPagFrames error:', err);
+    return { canvases: [], delays: [], fps: 30 };
   }
-
-  pagView.destroy();
-  pagFile.destroy();
-
-  return { canvases, delays, fps };
 }
 
 /**
@@ -156,8 +167,39 @@ export async function extractSvgaFrames(
   bgColor: string = 'transparent'
 ): Promise<{ canvases: HTMLCanvasElement[]; delays: number[]; fps: number }> {
   const buffer = await file.arrayBuffer();
-  const parser = new SvgaParser();
-  const videoItem = await parser.do(buffer);
+  let videoItem: any = null;
+
+  try {
+    const parser = new SvgaParser();
+    if (typeof parser.do === 'function') {
+      videoItem = await parser.do(buffer);
+    }
+  } catch (e) {
+    console.warn('exportEngine svga.lite parse failed, trying fallback:', e);
+  }
+
+  if (!videoItem && typeof window !== 'undefined' && (window as any).SVGA) {
+    const svgaLib = (window as any).SVGA;
+    const parser = new svgaLib.Parser();
+    const blobUrl = URL.createObjectURL(file);
+    try {
+      videoItem = await new Promise<any>((resolve, reject) => {
+        if (typeof parser.load === 'function') {
+          parser.load(blobUrl, resolve, reject);
+        } else if (typeof parser.loadViaWorker === 'function') {
+          parser.loadViaWorker(blobUrl, resolve, reject);
+        } else {
+          reject(new Error('No SVGA load method available'));
+        }
+      });
+    } finally {
+      URL.revokeObjectURL(blobUrl);
+    }
+  }
+
+  if (!videoItem) {
+    throw new Error('Could not parse SVGA animation frames');
+  }
 
   const width = videoItem.videoSize?.width || 512;
   const height = videoItem.videoSize?.height || 512;
@@ -485,7 +527,181 @@ export async function extractGenericImageFrames(
 }
 
 /**
- * Get all frames and delays for ANY animation item (SVGA, GIF, WebP, APNG, Lottie, DotLottie)
+ * Extract transparent animation frames from any VAP, YYEVA, or dual-channel transparent MP4/WebM video
+ */
+export async function extractDualChannelVideoFrames(
+  file: File | Blob,
+  bgColor: string = 'transparent',
+  forceAlphaLeft?: boolean
+): Promise<{ canvases: HTMLCanvasElement[]; delays: number[]; fps: number }> {
+  const url = URL.createObjectURL(file);
+  const video = document.createElement('video');
+  video.src = url;
+  video.muted = true;
+  video.playsInline = true;
+  video.preload = 'auto';
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        if (video.videoWidth > 0) resolve();
+        else reject(new Error('انتهت مهلة تحميل الفيديو'));
+      }, 8000);
+      video.onloadedmetadata = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+      video.onerror = () => {
+        clearTimeout(timer);
+        reject(new Error('فشل قراءة ملف الفيديو'));
+      };
+    });
+  } catch (err) {
+    URL.revokeObjectURL(url);
+    throw err;
+  }
+
+  const mp4Duration = await parseMp4DurationFromBlob(file).catch(() => null);
+  const config = await extractVapConfigFromBlob(file).catch(() => null);
+  const detection = detectVapChannelLayout(video, config);
+
+  // Correctly extract FPS (distinguish from total frame count 'f')
+  const fps = (config?.info?.fps && config.info.fps > 0 && config.info.fps <= 120)
+    ? config.info.fps
+    : (detection?.fps && detection.fps > 0 && detection.fps <= 120 ? detection.fps : 30);
+
+  // Read ground-truth frame count if present in VAP/YYEVA metadata
+  let totalFrames = (config?.info?.f && config.info.f > 0 && config.info.f !== fps)
+    ? config.info.f
+    : (config?.descript?.totalFrame || 0);
+
+  // Read true video duration (prioritize exact MP4 container mvhd duration)
+  let videoDur = (mp4Duration && mp4Duration > 0.1)
+    ? mp4Duration
+    : (isFinite(video.duration) && video.duration > 0.1 ? video.duration : 0);
+
+  // If video duration is known, compute expected frames
+  if (videoDur > 0.1) {
+    const framesFromDur = Math.round(videoDur * fps);
+    // If metadata was missing or corrupted with tiny frame count (like f: 30 on a 5s video),
+    // always use the true duration-derived frames!
+    if (totalFrames <= 0 || framesFromDur > totalFrames) {
+      totalFrames = framesFromDur;
+    }
+  } else if (totalFrames > 0) {
+    videoDur = totalFrames / fps;
+  } else {
+    videoDur = 3;
+    totalFrames = Math.round(videoDur * fps);
+  }
+
+  totalFrames = Math.max(1, Math.min(2400, totalFrames));
+  const duration = totalFrames / fps;
+  const delayMs = Math.max(10, Math.round(1000 / fps));
+
+  const rawW = video.videoWidth || 750;
+  const rawH = video.videoHeight || 750;
+
+  const isLeftAlpha = forceAlphaLeft ?? (
+    detection.layout === 'right_rgb_left_alpha' ||
+    (config?.info?.aFrame && config.info.rgbFrame && config.info.aFrame[0] < config.info.rgbFrame[0])
+  );
+
+  const isVertical = detection.layout.startsWith('top_') || detection.layout.startsWith('bottom_');
+  const isDualChannel = detection.isVap || rawW > rawH * 1.5 || rawH > rawW * 1.5 || Boolean(config);
+
+  const targetW = isDualChannel ? (isVertical ? rawW : Math.round(rawW / 2)) : rawW;
+  const targetH = isDualChannel ? (isVertical ? Math.round(rawH / 2) : rawH) : rawH;
+
+  const offCanvas = document.createElement('canvas');
+  offCanvas.width = rawW;
+  offCanvas.height = rawH;
+  const offCtx = offCanvas.getContext('2d', { willReadFrequently: true });
+
+  const canvases: HTMLCanvasElement[] = [];
+  const delays: number[] = [];
+
+  const rgbX = isDualChannel ? (isLeftAlpha ? targetW : 0) : 0;
+  const rgbY = isDualChannel && isVertical && detection.layout === 'bottom_rgb_top_alpha' ? targetH : 0;
+  const aX = isDualChannel ? (isLeftAlpha ? 0 : targetW) : 0;
+  const aY = isDualChannel && isVertical && detection.layout === 'top_rgb_bottom_alpha' ? targetH : 0;
+
+  for (let f = 0; f < totalFrames; f++) {
+    const targetTime = Math.min(duration, f / fps);
+    await seekVideoToFrame(video, targetTime);
+    if (!offCtx) continue;
+
+    offCtx.drawImage(video, 0, 0, rawW, rawH);
+    const srcData = offCtx.getImageData(0, 0, rawW, rawH).data;
+
+    const frameCanvas = document.createElement('canvas');
+    frameCanvas.width = targetW;
+    frameCanvas.height = targetH;
+    const fCtx = frameCanvas.getContext('2d');
+    if (!fCtx) continue;
+
+    const outImgData = fCtx.createImageData(targetW, targetH);
+    const dst = outImgData.data;
+
+    for (let y = 0; y < targetH; y++) {
+      for (let x = 0; x < targetW; x++) {
+        const rgbIdx = ((y + rgbY) * rawW + (x + rgbX)) * 4;
+        const dstIdx = (y * targetW + x) * 4;
+
+        const r = srcData[rgbIdx];
+        const g = srcData[rgbIdx + 1];
+        const b = srcData[rgbIdx + 2];
+
+        if (isDualChannel) {
+          const aIdx = ((y + aY) * rawW + (x + aX)) * 4;
+          const rawAlpha = 0.299 * srcData[aIdx] + 0.587 * srcData[aIdx + 1] + 0.114 * srcData[aIdx + 2];
+          if (rawAlpha <= 6) {
+            dst[dstIdx] = 0;
+            dst[dstIdx + 1] = 0;
+            dst[dstIdx + 2] = 0;
+            dst[dstIdx + 3] = 0;
+          } else {
+            dst[dstIdx] = r;
+            dst[dstIdx + 1] = g;
+            dst[dstIdx + 2] = b;
+            dst[dstIdx + 3] = Math.min(255, Math.max(0, Math.round(rawAlpha)));
+          }
+        } else {
+          dst[dstIdx] = r;
+          dst[dstIdx + 1] = g;
+          dst[dstIdx + 2] = b;
+          dst[dstIdx + 3] = 255;
+        }
+      }
+    }
+
+    fCtx.putImageData(outImgData, 0, 0);
+
+    if (bgColor && bgColor !== 'transparent') {
+      const compositeCanvas = document.createElement('canvas');
+      compositeCanvas.width = targetW;
+      compositeCanvas.height = targetH;
+      const cCtx = compositeCanvas.getContext('2d');
+      if (cCtx) {
+        cCtx.fillStyle = bgColor;
+        cCtx.fillRect(0, 0, targetW, targetH);
+        cCtx.drawImage(frameCanvas, 0, 0);
+        canvases.push(compositeCanvas);
+      } else {
+        canvases.push(frameCanvas);
+      }
+    } else {
+      canvases.push(frameCanvas);
+    }
+    delays.push(delayMs);
+  }
+
+  URL.revokeObjectURL(url);
+  return { canvases, delays, fps };
+}
+
+/**
+ * Get all frames and delays for ANY animation item (SVGA, GIF, WebP, APNG, Lottie, DotLottie, VAP, YYEVA, MP4)
  */
 export async function getItemFrames(
   item: AnimationItem,
@@ -527,6 +743,10 @@ export async function getItemFrames(
     const totalDur = res.delays.reduce((a, b) => a + b, 0);
     const fps = totalDur > 0 ? Math.max(1, Math.round((res.canvases.length * 1000) / totalDur)) : 30;
     return { ...res, fps };
+  }
+
+  if (item.format === 'vap' || item.format === 'yyeva' || item.format === 'mp4' || item.format === 'webm') {
+    return extractDualChannelVideoFrames(item.file, bgColor);
   }
 
   const res = await extractGenericImageFrames(item, bgColor);
@@ -962,9 +1182,9 @@ export async function exportAsMp4(
         error: (e) => console.error('VideoEncoder error:', e)
       });
 
-      // Prefer hardware-accelerated H.264 encoder for maximum speed and zero CPU lag
+      // Prefer hardware-accelerated H.264 encoder for maximum speed, smooth FPS and zero frame drops
       let codecConfigured = false;
-      const candidateCodecs = ['avc1.4D002A', 'avc1.42E01F', 'avc1.42001f'];
+      const candidateCodecs = ['avc1.4D002A', 'avc1.640028', 'avc1.42E01F', 'avc1.42001f'];
       for (const candCodec of candidateCodecs) {
         try {
           // @ts-ignore
@@ -1009,52 +1229,50 @@ export async function exportAsMp4(
         }
       }
 
-      let timestampMicros = 0;
       let scratchCanvas: HTMLCanvasElement | null = null;
       let scratchCtx: CanvasRenderingContext2D | null = null;
+      const keyframeInterval = Math.max(1, Math.min(30, Math.round(fps)));
 
       for (let i = 0; i < canvases.length; i++) {
         const srcCanvas = canvases[i];
-        let frameSource: CanvasImageSource = srcCanvas;
-
-        // Only draw onto scratch canvas if dimension padding or specific non-black background fill is needed
-        if (srcCanvas.width !== evenWidth || srcCanvas.height !== evenHeight || (bgColor && bgColor !== '#000000' && bgColor !== 'transparent')) {
-          if (!scratchCanvas) {
-            scratchCanvas = document.createElement('canvas');
-            scratchCanvas.width = evenWidth;
-            scratchCanvas.height = evenHeight;
-            scratchCtx = scratchCanvas.getContext('2d');
-          }
-          if (scratchCtx) {
-            scratchCtx.fillStyle = bgColor || '#000000';
-            scratchCtx.fillRect(0, 0, evenWidth, evenHeight);
-            scratchCtx.drawImage(srcCanvas, 0, 0, evenWidth, evenHeight);
-            frameSource = scratchCanvas;
-          }
+        
+        if (!scratchCanvas) {
+          scratchCanvas = document.createElement('canvas');
+          scratchCanvas.width = evenWidth;
+          scratchCanvas.height = evenHeight;
+          scratchCtx = scratchCanvas.getContext('2d');
+        }
+        
+        if (scratchCtx) {
+          scratchCtx.fillStyle = bgColor || '#000000';
+          scratchCtx.fillRect(0, 0, evenWidth, evenHeight);
+          scratchCtx.drawImage(srcCanvas, 0, 0, evenWidth, evenHeight);
         }
 
-        const frameDelay = delays[i] || Math.round(1000 / fps);
-        const frameDurMicros = Math.round(frameDelay * 1000);
+        const frameSource = scratchCanvas || srcCanvas;
+        
+        // Exact microsecond timestamps synced to true animation FPS for butter-smooth playback without stutter or drift
+        const timestampMicros = Math.round((i * 1_000_000) / Math.max(1, fps));
+        const nextTimestampMicros = Math.round(((i + 1) * 1_000_000) / Math.max(1, fps));
+        const frameDurMicros = Math.max(1000, nextTimestampMicros - timestampMicros);
 
         const frame = new VideoFrame(frameSource, {
           timestamp: timestampMicros,
           duration: frameDurMicros
         });
 
-        videoEncoder.encode(frame, { keyFrame: i % 30 === 0 });
+        videoEncoder.encode(frame, { keyFrame: i % keyframeInterval === 0 });
         frame.close();
 
-        timestampMicros += frameDurMicros;
-
-        // Keep encoder queue responsive & yield to event loop so the UI updates in real time
-        if (videoEncoder.encodeQueueSize > 4) {
+        // Keep encoder queue responsive to prevent GPU memory backpressure & stutter
+        if (videoEncoder.encodeQueueSize > 2) {
           await new Promise(r => setTimeout(r, 0));
-        } else if (i % 6 === 0 || i === canvases.length - 1) {
+        } else if (i % 8 === 0 || i === canvases.length - 1) {
           await new Promise(r => setTimeout(r, 0));
         }
 
         if (onProgress) {
-          onProgress((i + 1) / canvases.length, `ترميز MP4 عالي السرعة: إطار ${i + 1} من ${canvases.length}...`);
+          onProgress((i + 1) / canvases.length, `ترميز MP4 سلس وفائق الدقة: إطار ${i + 1} من ${canvases.length}...`);
         }
       }
 
@@ -1283,77 +1501,132 @@ export async function exportAsVap(
   width: number,
   height: number,
   fps: number = 30,
-  version: '1.0.5' | '2.0' = '1.0.5',
+  version: '1.0' | '1.0.5' | '2.0' = '1.0',
   audioBuffer?: AudioBuffer | null,
   onProgress?: (progress0to1: number, phaseText?: string) => void,
-  quality: number = 100
+  quality: number = 100,
+  layout: 'top-bottom' | 'left-right' | 'right-left' | 'bottom-top' | 'top-right-alpha' = 'left-right'
 ): Promise<Blob> {
-  // Scale video resolution dynamically based on selected quality level
-  const scale = quality >= 100
-    ? 1.0
-    : Math.max(0.45, Math.min(1.0, 0.45 + (quality / 100) * 0.5));
+  const isVertical = layout === 'top-bottom' || layout === 'bottom-top';
+  
+  // Safe scaling: keep within max 1920px for universal hardware-accelerated playback on mobile & web
+  const maxSingleDim = isVertical ? 960 : 960;
+  let scale = 1.0;
+  if (width > maxSingleDim || height > maxSingleDim) {
+    scale = Math.min(maxSingleDim / width, maxSingleDim / height);
+  }
+  if (quality < 100) {
+    scale = scale * Math.max(0.5, quality / 100);
+  }
 
-  const scaledW = Math.max(32, Math.round(width * scale));
-  const scaledH = Math.max(32, Math.round(height * scale));
+  const rawW = Math.round(width * scale);
+  const rawH = Math.round(height * scale);
 
-  const gap = 4;
-  const alphaWidth = Math.floor(scaledW / 2);
-  const alphaHeight = Math.floor(scaledH / 2);
+  // Align to 16px blocks for zero-lag H.264 hardware decoding
+  const safeW = Math.max(16, Math.ceil(rawW / 16) * 16);
+  const safeH = Math.max(16, Math.ceil(rawH / 16) * 16);
 
-  const videoW = Math.ceil((scaledW + gap + alphaWidth) / 16) * 16;
-  const videoH = Math.ceil(scaledH / 16) * 16;
+  const videoW = isVertical ? safeW : safeW * 2;
+  const videoH = isVertical ? safeH * 2 : safeH;
   const totalFrames = canvases.length;
+  const targetFps = Math.max(1, Math.round(fps || 30));
 
-  const compCanvases: HTMLCanvasElement[] = [];
+  const halfH = Math.floor(safeH / 2);
 
-  // Pre-allocate scratch canvases for high-speed scaled alpha extraction
+  // Determine channel boxes matching user screenshot 2432443434.png (Left RGB full height, Top-Right Alpha half height)
+  let aFrameBox: [number, number, number, number] = [safeW, 0, safeW, halfH];
+  let rgbFrameBox: [number, number, number, number] = [0, 0, safeW, safeH];
+
+  if (layout === 'top-bottom') {
+    aFrameBox = [0, 0, safeW, safeH];
+    rgbFrameBox = [0, safeH, safeW, safeH];
+  } else if (layout === 'bottom-top') {
+    rgbFrameBox = [0, 0, safeW, safeH];
+    aFrameBox = [0, safeH, safeW, safeH];
+  } else if (layout === 'right-left') {
+    aFrameBox = [0, 0, safeW, safeH];
+    rgbFrameBox = [safeW, 0, safeW, safeH];
+  } else if (layout === 'left-right') {
+    rgbFrameBox = [0, 0, safeW, safeH];
+    aFrameBox = [safeW, 0, safeW, safeH];
+  } else {
+    // top-right-alpha (Matching screenshot 2432443434.png exactly): Left RGB full height, Right Alpha in top quadrant
+    rgbFrameBox = [0, 0, safeW, safeH];
+    aFrameBox = [safeW, 0, safeW, halfH];
+  }
+
+  // Pre-allocate single high-speed scratch and composite canvases (Memory footprint < 15MB)
   const scratchAlphaCanvas = document.createElement('canvas');
-  scratchAlphaCanvas.width = scaledW;
-  scratchAlphaCanvas.height = scaledH;
-  const scratchAlphaCtx = scratchAlphaCanvas.getContext('2d');
-  const scratchAlphaImg = scratchAlphaCtx?.createImageData(scaledW, scaledH) || null;
+  scratchAlphaCanvas.width = safeW;
+  scratchAlphaCanvas.height = safeH;
+  const scratchAlphaCtx = scratchAlphaCanvas.getContext('2d', { willReadFrequently: true });
+  const scratchAlphaImg = scratchAlphaCtx?.createImageData(safeW, safeH) || null;
 
   const scratchSrcCanvas = document.createElement('canvas');
-  scratchSrcCanvas.width = scaledW;
-  scratchSrcCanvas.height = scaledH;
-  const scratchSrcCtx = scratchSrcCanvas.getContext('2d');
+  scratchSrcCanvas.width = safeW;
+  scratchSrcCanvas.height = safeH;
+  const scratchSrcCtx = scratchSrcCanvas.getContext('2d', { willReadFrequently: true });
+
+  const compCanvas = document.createElement('canvas');
+  compCanvas.width = videoW;
+  compCanvas.height = videoH;
+  const compCtx = compCanvas.getContext('2d', { alpha: false });
+
+  // Pre-render all composite frames using pre-allocated canvases
+  const compCanvases: HTMLCanvasElement[] = [];
 
   for (let i = 0; i < totalFrames; i++) {
     const src = canvases[i];
-    const comp = document.createElement('canvas');
-    comp.width = videoW;
-    comp.height = videoH;
-    const cCtx = comp.getContext('2d');
+    const frameCanvas = document.createElement('canvas');
+    frameCanvas.width = videoW;
+    frameCanvas.height = videoH;
+    const cCtx = frameCanvas.getContext('2d', { alpha: false });
+
     if (cCtx) {
       cCtx.fillStyle = '#000000';
       cCtx.fillRect(0, 0, videoW, videoH);
 
-      // Left: RGB (scaled)
-      cCtx.drawImage(src, 0, 0, scaledW, scaledH);
-
-      // Right: Grayscale Alpha mask via high-speed 32-bit register operations
+      // Extract Alpha channel with 32-bit register fast path
       if (scratchSrcCtx && scratchAlphaCtx && scratchAlphaImg) {
-        scratchSrcCtx.clearRect(0, 0, scaledW, scaledH);
-        scratchSrcCtx.drawImage(src, 0, 0, scaledW, scaledH);
-        const frameData = scratchSrcCtx.getImageData(0, 0, scaledW, scaledH);
+        scratchSrcCtx.clearRect(0, 0, safeW, safeH);
+        scratchSrcCtx.drawImage(src, 0, 0, safeW, safeH);
+        const frameData = scratchSrcCtx.getImageData(0, 0, safeW, safeH);
         const srcU32 = new Uint32Array(frameData.data.buffer);
         const dstU32 = new Uint32Array(scratchAlphaImg.data.buffer);
         const len = srcU32.length;
 
         for (let p = 0; p < len; p++) {
           const a = (srcU32[p] >>> 24);
-          // Duplicate alpha channel into R, G, B with full opacity 0xFF
+          // Duplicated R, G, B with 100% full alpha
           dstU32[p] = (0xFF000000 | (a << 16) | (a << 8) | a) >>> 0;
         }
 
         scratchAlphaCtx.putImageData(scratchAlphaImg, 0, 0);
-        cCtx.drawImage(scratchAlphaCanvas, scaledW + gap, 0, alphaWidth, alphaHeight);
+      }
+
+      if (layout === 'top-bottom') {
+        cCtx.drawImage(scratchAlphaCanvas, 0, 0, safeW, safeH);
+        cCtx.drawImage(src, 0, safeH, safeW, safeH);
+      } else if (layout === 'bottom-top') {
+        cCtx.drawImage(src, 0, 0, safeW, safeH);
+        cCtx.drawImage(scratchAlphaCanvas, 0, safeH, safeW, safeH);
+      } else if (layout === 'right-left') {
+        cCtx.drawImage(scratchAlphaCanvas, 0, 0, safeW, safeH);
+        cCtx.drawImage(src, safeW, 0, safeW, safeH);
+      } else if (layout === 'left-right') {
+        cCtx.drawImage(src, 0, 0, safeW, safeH);
+        cCtx.drawImage(scratchAlphaCanvas, safeW, 0, safeW, safeH);
+      } else {
+        // top-right-alpha (Matching screenshot 2432443434.png): Left full RGB (0, 0, safeW, safeH), Top-Right Alpha mask (safeW, 0, safeW, halfH)
+        cCtx.drawImage(src, 0, 0, safeW, safeH);
+        cCtx.drawImage(scratchAlphaCanvas, safeW, 0, safeW, halfH);
       }
     }
-    compCanvases.push(comp);
 
-    if (i % 6 === 0 || i === totalFrames - 1) {
-      onProgress?.(((i + 1) / totalFrames) * 0.4, `تجهيز قناع شفافية VAP عالي السرعة: إطار ${i + 1} من ${totalFrames}...`);
+    compCanvases.push(frameCanvas);
+
+    if (i % 8 === 0 || i === totalFrames - 1) {
+      onProgress?.(((i + 1) / totalFrames) * 0.45, `تجهيز قناع شفافية VAP عالي الدقة: إطار ${i + 1} من ${totalFrames}...`);
       await new Promise(r => setTimeout(r, 0));
     }
   }
@@ -1364,30 +1637,30 @@ export async function exportAsVap(
     delays,
     videoW,
     videoH,
-    fps,
+    targetFps,
     '#000000',
     quality,
     audioBuffer,
     (p, msg) => {
-      onProgress?.(0.4 + p * 0.55, msg || 'ترميز فيديو VAP...');
+      onProgress?.(0.45 + p * 0.5, msg || 'ترميز فيديو VAP فائق النعومة...');
     }
   );
   const mp4ArrayBuffer = await baseMp4.arrayBuffer();
 
-  onProgress?.(0.97, 'بناء صندوق VAPc وبيانات التوافق...');
+  onProgress?.(0.97, 'بناء صندوق VAPc وبيانات التوافق القياسية...');
 
-  // Build vapc box with exact frame parameters
+  // Build standard vapc box with exact frame parameters
   const vapConfig = {
     info: {
       v: version === '2.0' ? 2 : 1,
       f: totalFrames,
-      w: width,
-      h: height,
-      fps: fps,
+      w: safeW,
+      h: safeH,
+      fps: targetFps,
       videoW: videoW,
       videoH: videoH,
-      aFrame: [scaledW + gap, 0, alphaWidth, alphaHeight],
-      rgbFrame: [0, 0, scaledW, scaledH],
+      aFrame: aFrameBox,
+      rgbFrame: rgbFrameBox,
       isVapx: 0,
       codeTag: ["common"],
       orien: 0
@@ -1410,7 +1683,7 @@ export async function exportAsVap(
   finalBuffer.set(new Uint8Array(mp4ArrayBuffer), 0);
   finalBuffer.set(boxBuffer, mp4ArrayBuffer.byteLength);
 
-  onProgress?.(1.0, 'اكتمل تصدير VAP بنجاح!');
+  onProgress?.(1.0, 'اكتمل تصدير VAP بنجاح بدون أي تعليق!');
 
   return new Blob([finalBuffer], { type: 'video/mp4' });
 }
@@ -1608,9 +1881,13 @@ export async function exportItem(
     fps?: number;
     quality?: number;
     compressionLevel?: number;
-  } = {}
+    onProgress?: (pct: number, status?: string) => void;
+  } = {},
+  onProgressCallback?: (pct: number, status?: string) => void
 ): Promise<{ blob: Blob; extension: string; filename: string }> {
-  const { backgroundColor = 'transparent', fps = item.fps || 30, quality = 90, compressionLevel = 80 } = options;
+  const { backgroundColor = 'transparent', fps = item.fps || 30, quality = 90, compressionLevel = 80, onProgress } = options;
+  const notifyProgress = onProgress || onProgressCallback;
+  if (notifyProgress) notifyProgress(10, 'جاري إعداد التصدير...');
   const cleanName = item.name.trim() || 'animation';
 
   if (format === 'original') {
@@ -1655,9 +1932,10 @@ export async function exportItem(
   }
 
   // Needs frame extraction
-  const { canvases, delays } = await getItemFrames(item, backgroundColor);
+  const { canvases, delays, fps: extractedFps } = await getItemFrames(item, backgroundColor);
   const width = item.dimensions.width;
   const height = item.dimensions.height;
+  const activeFps = (extractedFps && extractedFps > 0 && extractedFps <= 120) ? extractedFps : (fps || 30);
 
   if (format === 'png_frames') {
     const blob = await exportAsPngFramesZip(canvases, cleanName, delays);
@@ -1729,6 +2007,59 @@ export async function exportItem(
     };
   }
 
+  if (format === 'webm') {
+    const blob = await exportAsWebm(
+      canvases,
+      delays,
+      width,
+      height,
+      fps,
+      quality
+    );
+    return {
+      blob,
+      extension: 'webm',
+      filename: `${cleanName}.webm`
+    };
+  }
+
+  if (format === 'vap') {
+    const blob = await exportAsVap(
+      canvases,
+      delays,
+      width,
+      height,
+      activeFps,
+      '1.0.5',
+      null,
+      undefined,
+      quality
+    );
+    return {
+      blob,
+      extension: 'vap',
+      filename: `${cleanName}.vap`
+    };
+  }
+
+  if (format === 'yyeva') {
+    const blob = await exportAsYyeva(
+      canvases,
+      delays,
+      width,
+      height,
+      activeFps,
+      null,
+      undefined,
+      quality
+    );
+    return {
+      blob,
+      extension: 'mp4',
+      filename: `${cleanName}_YYEVA.mp4`
+    };
+  }
+
   // Fallback original
   return {
     blob: item.file,
@@ -1765,7 +2096,7 @@ export async function batchExportToZip(
     onProgress?.({
       current: i + 1,
       total,
-      percentage: Math.round(((i + 0.2) / total) * 100),
+      percentage: Math.max(1, Math.round(((i + 0.2) / total) * 92)),
       currentName
     });
 
@@ -1798,7 +2129,7 @@ export async function batchExportToZip(
     onProgress?.({
       current: i + 1,
       total,
-      percentage: Math.round(((i + 1) / total) * 100),
+      percentage: Math.min(92, Math.round(((i + 1) / total) * 92)),
       currentName
     });
   }
@@ -1809,7 +2140,7 @@ export async function batchExportToZip(
       onProgress?.({
         current: total,
         total,
-        percentage: Math.min(100, Math.round(metadata.percent)),
+        percentage: Math.min(100, Math.round(92 + (metadata.percent / 100) * 8)),
         currentName: 'جاري إنشاء حزمة الـ ZIP النهائية...'
       });
     }

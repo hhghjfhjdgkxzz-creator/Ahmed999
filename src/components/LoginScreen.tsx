@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Mail, Lock, Mic, Globe, User as UserIcon, Calendar, Check, ChevronRight, ChevronLeft } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
-import { db } from '../firebase';
+import { db, loginWithGoogle } from '../firebase';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -212,8 +212,19 @@ export default function LoginScreen() {
                   <div className="relative flex justify-center text-sm"><span className="px-4 bg-transparent text-gray-400 font-medium">أو</span></div>
                 </div>
 
+                {/* Google Login Button */}
                 <button 
-                  onClick={() => login(email, password)}
+                  onClick={async () => {
+                    setError('');
+                    setIsLoading(true);
+                    try {
+                      await loginWithGoogle();
+                    } catch (err: any) {
+                      setError(err.message || 'فشل تسجيل الدخول بواسطة جوجل');
+                    } finally {
+                      setIsLoading(false);
+                    }
+                  }}
                   type="button"
                   className="mt-6 w-full bg-white/10 border border-white/10 text-white font-bold py-3.5 px-4 rounded-2xl shadow-sm hover:bg-white/20 transition-colors flex items-center justify-center gap-3 backdrop-blur-md"
                 >

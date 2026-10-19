@@ -28,8 +28,15 @@ import {
   Film,
   Smartphone,
   Disc,
-  Shapes
+  Shapes,
+  Cloud,
+  PenTool,
+  Pipette,
+  Paintbrush
 } from 'lucide-react';
+import { ChromaPenSubMode } from './SvgaChromaPenStudio';
+
+import { PenMaskStroke } from './svgaSmartChromaEngine';
 
 interface SvgaTransparencyPanelProps {
   fadeConfig: FadeConfig;
@@ -39,6 +46,24 @@ interface SvgaTransparencyPanelProps {
   onUpdateCropConfig: (config: CropConfig) => void;
   onUpdateCropFeather: (feather: CropFeather) => void;
   onResetTransparency: () => void;
+  onOpenChromaPen?: (mode?: ChromaPenSubMode) => void;
+  isChromaPenActive?: boolean;
+
+  penStrokes?: PenMaskStroke[];
+  onAddPenStroke?: (stroke: PenMaskStroke) => void;
+  onClearPenStrokes?: () => void;
+  onUndoPenStroke?: () => void;
+  onApplyPenMask?: () => void;
+  chromaPenTool?: 'brush' | 'lasso' | 'rect' | 'circle';
+  onPenToolChange?: (tool: 'brush' | 'lasso' | 'rect' | 'circle') => void;
+  chromaMaskMode?: 'erase' | 'keep';
+  onMaskModeChange?: (mode: 'erase' | 'keep') => void;
+  chromaBrushSize?: number;
+  onBrushSizeChange?: (size: number) => void;
+  chromaPenFeather?: number;
+  onPenFeatherChange?: (feather: number) => void;
+  chromaPenOpacity?: number;
+  onPenOpacityChange?: (opacity: number) => void;
 }
 
 type PresetKey = 
@@ -60,7 +85,12 @@ type PresetKey =
   | 'squircleCard'
   | 'diamondSoft'
   | 'cinematicWidescreen'
-  | 'verticalStory';
+  | 'verticalStory'
+  | 'cloudTopBottom'
+  | 'cloudSides'
+  | 'cloudCircular'
+  | 'cloudVignette'
+  | 'deepCloudMist';
 
 export const SvgaTransparencyPanel: React.FC<SvgaTransparencyPanelProps> = ({
   fadeConfig,
@@ -69,9 +99,26 @@ export const SvgaTransparencyPanel: React.FC<SvgaTransparencyPanelProps> = ({
   onUpdateFadeConfig,
   onUpdateCropConfig,
   onUpdateCropFeather,
-  onResetTransparency
+  onResetTransparency,
+  onOpenChromaPen,
+  isChromaPenActive = false,
+  penStrokes = [],
+  onAddPenStroke,
+  onClearPenStrokes,
+  onUndoPenStroke,
+  onApplyPenMask,
+  chromaPenTool = 'brush',
+  onPenToolChange,
+  chromaMaskMode = 'erase',
+  onMaskModeChange,
+  chromaBrushSize = 30,
+  onBrushSizeChange,
+  chromaPenFeather = 8,
+  onPenFeatherChange,
+  chromaPenOpacity = 100,
+  onPenOpacityChange
 }) => {
-  const [selectedCategory, setSelectedCategory] = useState<'all' | 'square' | 'circle' | 'rounded' | 'cinematic'>('all');
+  const [selectedCategory, setSelectedCategory] = useState<'all' | 'square' | 'circle' | 'rounded' | 'cinematic' | 'cloud'>('all');
   const isActive = isTransparencyActive(fadeConfig, cropConfig);
   const currentShape: CropShape = cropConfig.shape || 'rect';
 
@@ -162,6 +209,28 @@ export const SvgaTransparencyPanel: React.FC<SvgaTransparencyPanelProps> = ({
       onUpdateCropConfig({ top: 2, bottom: 2, left: 12, right: 12, shape: 'rounded-rect', cornerRadius: 20 });
       onUpdateCropFeather({ top: 6, bottom: 6, left: 6, right: 6 });
     }
+    // 6. Cloud & Mist Presets (أنظمة الشفافية السحابية والضبابية)
+    else if (preset === 'cloudTopBottom') {
+      onUpdateFadeConfig({ top: 25, bottom: 25, left: 0, right: 0 });
+      onUpdateCropConfig({ top: 12, bottom: 12, left: 0, right: 0, shape: 'rect' });
+      onUpdateCropFeather({ top: 24, bottom: 24, left: 0, right: 0 });
+    } else if (preset === 'cloudSides') {
+      onUpdateFadeConfig({ top: 0, bottom: 0, left: 25, right: 25 });
+      onUpdateCropConfig({ top: 0, bottom: 0, left: 12, right: 12, shape: 'rect' });
+      onUpdateCropFeather({ top: 0, bottom: 0, left: 24, right: 24 });
+    } else if (preset === 'cloudCircular') {
+      onUpdateFadeConfig({ top: 15, bottom: 15, left: 15, right: 15 });
+      onUpdateCropConfig({ top: 10, bottom: 10, left: 10, right: 10, shape: 'circle' });
+      onUpdateCropFeather({ top: 35, bottom: 35, left: 35, right: 35 });
+    } else if (preset === 'cloudVignette') {
+      onUpdateFadeConfig({ top: 15, bottom: 15, left: 15, right: 15 });
+      onUpdateCropConfig({ top: 10, bottom: 10, left: 10, right: 10, shape: 'rounded-rect', cornerRadius: 35 });
+      onUpdateCropFeather({ top: 22, bottom: 22, left: 22, right: 22 });
+    } else if (preset === 'deepCloudMist') {
+      onUpdateFadeConfig({ top: 38, bottom: 38, left: 0, right: 0 });
+      onUpdateCropConfig({ top: 15, bottom: 15, left: 0, right: 0, shape: 'rect' });
+      onUpdateCropFeather({ top: 40, bottom: 40, left: 0, right: 0 });
+    }
   };
 
   const handleSelectShape = (shape: CropShape) => {
@@ -205,6 +274,13 @@ export const SvgaTransparencyPanel: React.FC<SvgaTransparencyPanelProps> = ({
     { id: 'diamondSoft', label: 'شكل ألماسي متدرج', category: 'cinematic', icon: Diamond },
     { id: 'cinematicWidescreen', label: 'شاشة سينمائية 16:9', category: 'cinematic', icon: Film },
     { id: 'verticalStory', label: 'إطار ستوري عمودي', category: 'cinematic', icon: Smartphone },
+
+    // Cloud & Mist Presets (أنظمة الشفافية الضبابية والسحابية الطائرة)
+    { id: 'cloudTopBottom', label: 'سحابة تلاشي علوي وسفلي ☁️', category: 'cloud', icon: Cloud },
+    { id: 'cloudSides', label: 'سحابة تلاشي جانبية ☁️', category: 'cloud', icon: Cloud },
+    { id: 'cloudCircular', label: 'سحابة ضبابية دائرية ☁️', category: 'cloud', icon: Cloud },
+    { id: 'cloudVignette', label: 'إطار سحابي ناعم كامل ☁️', category: 'cloud', icon: Cloud },
+    { id: 'deepCloudMist', label: 'ضباب سحابي كثيف وعميق ☁️', category: 'cloud', icon: Cloud },
   ];
 
   const filteredPresets = selectedCategory === 'all' 
@@ -690,6 +766,17 @@ export const SvgaTransparencyPanel: React.FC<SvgaTransparencyPanelProps> = ({
             }`}
           >
             سينمائي وتلاشي 🎬
+          </button>
+          <button
+            type="button"
+            onClick={() => setSelectedCategory('cloud')}
+            className={`px-2 py-0.5 rounded-full whitespace-nowrap transition-all cursor-pointer ${
+              selectedCategory === 'cloud'
+                ? 'bg-sky-500 text-slate-950 font-bold shadow-sm'
+                : 'bg-white/5 text-slate-400 hover:text-white hover:bg-white/10'
+            }`}
+          >
+            تأثيرات سحابية ☁️
           </button>
         </div>
 

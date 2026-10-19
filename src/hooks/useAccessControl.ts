@@ -31,11 +31,38 @@ export const useAccessControl = () => {
 
     // Check subscription
     const now = new Date();
-    const rawExp = currentUser.subscriptionExpiry as any;
-    const expiry = rawExp?.toDate?.() || 
-                 (rawExp instanceof Date ? rawExp : (typeof rawExp === 'string' || typeof rawExp === 'number' ? new Date(rawExp) : null));
+    const expiry = currentUser.subscriptionExpiry?.toDate?.() || 
+                 (currentUser.subscriptionExpiry instanceof Date ? currentUser.subscriptionExpiry : null);
     
-    const isSubscribed = expiry && expiry > now;
+    const isSubscribed = !!(expiry && expiry > now);
+
+    // Get cached global settings for VIP feature checks
+    let vibs: string[] = [];
+    try {
+      const cachedSettings = localStorage.getItem('appSettings');
+      if (cachedSettings) {
+        const parsed = JSON.parse(cachedSettings);
+        vibs = parsed.vibFeatures || [];
+      }
+    } catch (e) {}
+
+    const normalizedFeature = (featureName || '').toLowerCase();
+    const isVipFeature = 
+      normalizedFeature.includes('after effects') ||
+      normalizedFeature.includes('svga layer') ||
+      vibs.some(v => v && normalizedFeature.includes(v.toLowerCase()));
+
+    const isUserVip = !!(
+      (currentUser.role as string) === 'admin' ||
+      (currentUser.role as string) === 'moderator' ||
+      currentUser.isSuperAdmin ||
+      (currentUser.isVIP === true && isSubscribed)
+    );
+
+    if (isVipFeature && !isUserVip) {
+      console.log(`[AccessControl] Feature "${featureName}" is VIP-only. User ${currentUser.id} is NOT VIP.`);
+      return { allowed: false, reason: 'subscription' };
+    }
 
     if (isSubscribed) {
       console.log(`[AccessControl] User ${currentUser.id} has active subscription. Access granted for: ${featureName}`);

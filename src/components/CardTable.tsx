@@ -44,7 +44,7 @@ export const CardTable: React.FC<CardTableProps> = ({
         sound.playWinFanfare();
 
         // Trigger celebratory confetti if current user won!
-        if (table.currentWinnerIds && table.currentWinnerIds.includes(currentUserId as any)) {
+        if (table.currentWinnerIds.includes(currentUserId)) {
           confetti({
             particleCount: 80,
             spread: 70,
@@ -134,8 +134,8 @@ export const CardTable: React.FC<CardTableProps> = ({
                 seatIndex={2}
                 isSelf={seat2?.id === currentUserId}
                 phase={table.phase}
-                isWinner={Boolean(table.currentWinnerIds && seat2?.id && table.currentWinnerIds.includes(seat2.id as any))}
-                evaluation={seat2 && table.evaluations ? table.evaluations[seat2.id] : undefined}
+                isWinner={table.currentWinnerIds.includes(seat2?.id || '')}
+                evaluation={seat2 ? table.evaluations[seat2.id] : undefined}
                 totalPot={table.totalPot}
               />
             </div>
@@ -147,8 +147,8 @@ export const CardTable: React.FC<CardTableProps> = ({
                 seatIndex={1}
                 isSelf={seat1?.id === currentUserId}
                 phase={table.phase}
-                isWinner={Boolean(table.currentWinnerIds && seat1?.id && table.currentWinnerIds.includes(seat1.id as any))}
-                evaluation={seat1 && table.evaluations ? table.evaluations[seat1.id] : undefined}
+                isWinner={table.currentWinnerIds.includes(seat1?.id || '')}
+                evaluation={seat1 ? table.evaluations[seat1.id] : undefined}
                 totalPot={table.totalPot}
               />
             </div>
@@ -221,8 +221,8 @@ export const CardTable: React.FC<CardTableProps> = ({
               seatIndex={0}
               isSelf={seat0?.id === currentUserId}
               phase={table.phase}
-              isWinner={Boolean(table.currentWinnerIds && seat0?.id && table.currentWinnerIds.includes(seat0.id as any))}
-              evaluation={seat0 && table.evaluations ? table.evaluations[seat0.id] : undefined}
+              isWinner={table.currentWinnerIds.includes(seat0?.id || '')}
+              evaluation={seat0 ? table.evaluations[seat0.id] : undefined}
               totalPot={table.totalPot}
             />
           </div>

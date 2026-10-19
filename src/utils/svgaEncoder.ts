@@ -3,6 +3,13 @@ import pako from 'pako';
 import protobuf from 'protobufjs';
 import { svgaSchema } from '../svga-proto';
 
+export interface VideoMetadata {
+  width: number;
+  height: number;
+  duration: number;
+  fps?: number;
+}
+
 const root = protobuf.parse(svgaSchema).root;
 const MovieEntity = root.lookupType("com.opensource.svga.MovieEntity");
 

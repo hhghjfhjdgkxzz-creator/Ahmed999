@@ -70,7 +70,7 @@ export const AeCompositionSettingsModal: React.FC<AeCompositionSettingsModalProp
       try {
         const { parseSvgaToProject } = await import('./SvgaLayerEditor/svgaParserEngine');
         const res = await parseSvgaToProject(file);
-        const proj = (res as any)?.project || res;
+        const proj = res?.project;
         if (proj) {
           setWidth(proj.width || 500);
           setHeight(proj.height || 500);

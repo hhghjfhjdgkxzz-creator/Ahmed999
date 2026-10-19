@@ -491,7 +491,7 @@ export const PrintDocumentModal: React.FC<PrintDocumentModalProps> = ({
                     <div>
                       <strong>{lang === 'ar' ? 'إجمالي المبيعات:' : 'Total Revenue:'}</strong>{' '}
                       <span className="font-mono font-bold text-emerald-700">
-                        $ {allDeliveries.reduce((acc, curr) => acc + curr.price, 0).toLocaleString()} USD
+                        $ {allDeliveries.reduce((acc, curr) => acc + (curr.price || 0), 0).toLocaleString()} USD
                       </span>
                     </div>
                   </div>
@@ -543,7 +543,7 @@ export const PrintDocumentModal: React.FC<PrintDocumentModalProps> = ({
                   <div className="font-bold text-slate-900">
                     {lang === 'ar' ? 'الإجمالي العام:' : 'Grand Total:'}{' '}
                     <span className="font-mono text-emerald-700 text-sm">
-                      $ {allDeliveries.reduce((acc, curr) => acc + curr.price, 0).toLocaleString()} USD
+                      $ {allDeliveries.reduce((acc, curr) => acc + (curr.price || 0), 0).toLocaleString()} USD
                     </span>
                   </div>
                 </div>

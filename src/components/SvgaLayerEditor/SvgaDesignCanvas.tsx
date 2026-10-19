@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
-import { EditableLayer, SVGAProjectData, CanvasTool, GuideLine, FadeConfig, CropConfig, CropFeather } from './types';
+import { EditableLayer, SVGAProjectData, CanvasTool, GuideLine, FadeConfig, CropConfig, CropFeather, ShineVectorPoint } from './types';
 import { getLayerAnimatedTransform } from './motionEngine';
 import { applyTransparencyEffects } from './transparencyEngine';
 import { renderLayerShine } from './shineEngine';
@@ -7,9 +7,10 @@ import {
   ZoomIn, ZoomOut, RefreshCw, Maximize2, 
   Grid, Compass, Eye, Shield, RotateCcw,
   Focus, ChevronUp, ChevronDown, ChevronLeft, ChevronRight,
-  Move, Crosshair, Scaling, Check, Lock, Unlock, X, Sliders, Pipette
+  Move, Crosshair, Scaling, Check, Lock, Unlock, X, Sliders, Pipette,
+  PenTool, Brush, Lasso, Square, Circle, Eraser, Scissors, Trash2
 } from 'lucide-react';
-import { ChromaTargetColor, rgbToHex, identifyColorType } from './svgaSmartChromaEngine';
+import { ChromaTargetColor, rgbToHex, identifyColorType, PenMaskStroke } from './svgaSmartChromaEngine';
 
 interface SvgaDesignCanvasProps {
   project: SVGAProjectData;
@@ -33,13 +34,34 @@ interface SvgaDesignCanvasProps {
   onUpdateProjectDimensions?: (width: number, height: number, scaleLayers?: boolean) => void;
   onChromaPickColor?: (color: ChromaTargetColor) => void;
   onChromaHoverColor?: (color: ChromaTargetColor | null) => void;
+  onUpdateShineConfig?: (layerId: string, shineDelta: any, targetScope?: any) => void;
   fadeConfig?: FadeConfig;
   cropConfig?: CropConfig;
   cropFeather?: CropFeather;
   bgImageUrl?: string | null;
+  shinePointStep?: 'idle' | 'place-start' | 'place-end';
+  onShinePointStepChange?: (step: 'idle' | 'place-start' | 'place-end') => void;
+  onDragEnd?: () => void;
+
+  // Freehand Pen Mask & Cutout Props
+  isChromaPenActive?: boolean;
+  chromaSubMode?: 'picker' | 'pen-mask' | 'mask-draw';
+  chromaPenTool?: 'brush' | 'lasso' | 'rect' | 'circle';
+  chromaMaskMode?: 'erase' | 'keep';
+  chromaBrushSize?: number;
+  chromaPenFeather?: number;
+  chromaPenOpacity?: number;
+  penStrokes?: PenMaskStroke[];
+  onAddPenStroke?: (stroke: PenMaskStroke) => void;
+  onClearPenStrokes?: () => void;
+  onUndoPenStroke?: () => void;
+  onApplyPenMask?: () => void;
+  onPenToolChange?: (tool: 'brush' | 'lasso' | 'rect' | 'circle') => void;
+  onMaskModeChange?: (mode: 'erase' | 'keep') => void;
+  onBrushSizeChange?: (size: number) => void;
 }
 
-type DragHandleType = 'move' | 'nw' | 'ne' | 'se' | 'sw' | 'n' | 's' | 'e' | 'w' | 'rot' | 'pan';
+type DragHandleType = 'move' | 'nw' | 'ne' | 'se' | 'sw' | 'n' | 's' | 'e' | 'w' | 'rot' | 'pan' | 'shine-start' | 'shine-end' | 'shine-mid';
 
 interface Point {
   x: number;
@@ -454,10 +476,29 @@ export const SvgaDesignCanvas: React.FC<SvgaDesignCanvasProps> = ({
   onUpdateProjectDimensions,
   onChromaPickColor,
   onChromaHoverColor,
+  onUpdateShineConfig,
   fadeConfig,
   cropConfig,
   cropFeather,
-  bgImageUrl
+  bgImageUrl,
+  shinePointStep: externalShinePointStep,
+  onShinePointStepChange,
+  onDragEnd,
+  isChromaPenActive = false,
+  chromaSubMode = 'pen-mask',
+  chromaPenTool = 'brush',
+  chromaMaskMode = 'erase',
+  chromaBrushSize = 30,
+  chromaPenFeather = 8,
+  chromaPenOpacity = 100,
+  penStrokes = [],
+  onAddPenStroke,
+  onClearPenStrokes,
+  onUndoPenStroke,
+  onApplyPenMask,
+  onPenToolChange,
+  onMaskModeChange,
+  onBrushSizeChange
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -467,6 +508,12 @@ export const SvgaDesignCanvas: React.FC<SvgaDesignCanvasProps> = ({
   const bgImageRef = useRef<HTMLImageElement | null>(null);
   const imagesCache = useRef<Record<string, HTMLImageElement>>({});
 
+  // Freehand Pen Mask Drawing State
+  const [isDrawingPen, setIsDrawingPen] = useState<boolean>(false);
+  const [currentDrawingPoints, setCurrentDrawingPoints] = useState<Point[]>([]);
+  const isDrawingPenRef = useRef<boolean>(false);
+  const currentDrawingPointsRef = useRef<Point[]>([]);
+
   // Smart Chroma Pen Magnifier Loupe State
   const [chromaLoupe, setChromaLoupe] = useState<{
     clientX: number;
@@ -475,6 +522,13 @@ export const SvgaDesignCanvas: React.FC<SvgaDesignCanvasProps> = ({
     canvasY: number;
     color: ChromaTargetColor;
   } | null>(null);
+
+  // Interactive Click-to-Place Shine Vector Points State
+  const [internalShinePointStep, setInternalShinePointStep] = useState<'idle' | 'place-start' | 'place-end'>('idle');
+  const shinePointStep = externalShinePointStep !== undefined ? externalShinePointStep : internalShinePointStep;
+  const setShinePointStep = onShinePointStepChange || setInternalShinePointStep;
+  const [tempShineStart, setTempShineStart] = useState<ShineVectorPoint | null>(null);
+  const [hoverCanvasCoords, setHoverCanvasCoords] = useState<{ x: number; y: number } | null>(null);
 
   // Project Dimensions Controls State
   const [showDimensionsMenu, setShowDimensionsMenu] = useState<boolean>(false);
@@ -502,8 +556,41 @@ export const SvgaDesignCanvas: React.FC<SvgaDesignCanvasProps> = ({
   const [dragStart, setDragStart] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [initialTransform, setInitialTransform] = useState<EditableLayer['transform'] | null>(null);
   const [initialTransformsMap, setInitialTransformsMap] = useState<Record<string, EditableLayer['transform']>>({});
+  const activeDragLayerIdRef = useRef<string | null>(null);
   const [activeGuides, setActiveGuides] = useState<GuideLine[]>([]);
   const [cacheVersion, setCacheVersion] = useState<number>(0);
+
+  // Real-time live shine preview time to animate and display shine color live on the layer
+  const [liveShineTime, setLiveShineTime] = useState<number>(() => performance.now() / 1000);
+  const shineAnimRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const hasShine = layers.some(l => l.shineConfig?.enabled);
+    if (!hasShine) {
+      if (shineAnimRef.current) cancelAnimationFrame(shineAnimRef.current);
+      return;
+    }
+
+    // Trigger instant render with updated color
+    setLiveShineTime(performance.now() / 1000);
+
+    let isSubscribed = true;
+    let lastTime = performance.now();
+    const tick = (now: number) => {
+      if (!isSubscribed) return;
+      if (now - lastTime >= 30) {
+        lastTime = now;
+        setLiveShineTime(now / 1000);
+      }
+      shineAnimRef.current = requestAnimationFrame(tick);
+    };
+
+    shineAnimRef.current = requestAnimationFrame(tick);
+    return () => {
+      isSubscribed = false;
+      if (shineAnimRef.current) cancelAnimationFrame(shineAnimRef.current);
+    };
+  }, [layers]);
 
   const selectedLayer = useMemo(() => {
     return layers.find(l => l.id === selectedLayerId) || null;
@@ -846,6 +933,10 @@ export const SvgaDesignCanvas: React.FC<SvgaDesignCanvasProps> = ({
     if (canvas.width !== width) canvas.width = width;
     if (canvas.height !== height) canvas.height = height;
 
+    // Ensure maximum crispness and high-quality filtering for downscaled/resized layers
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+
     ctx.clearRect(0, 0, width, height);
 
     // 1. Draw Background:
@@ -913,6 +1004,8 @@ export const SvgaDesignCanvas: React.FC<SvgaDesignCanvasProps> = ({
     }
     const layersCtx = layersCanvas.getContext('2d');
     if (!layersCtx) return;
+    layersCtx.imageSmoothingEnabled = true;
+    layersCtx.imageSmoothingQuality = 'high';
     layersCtx.clearRect(0, 0, width, height);
 
     // 3. Leaf sprite drawing helper
@@ -1021,8 +1114,38 @@ export const SvgaDesignCanvas: React.FC<SvgaDesignCanvasProps> = ({
         targetCtx.drawImage(cachedImg, 0, 0, drawW, drawH);
 
         if (layerItem.shineConfig && layerItem.shineConfig.enabled) {
-          renderLayerShine(targetCtx, drawW, drawH, currentFrame, project.totalFrames, layerItem.shineConfig);
+          renderLayerShine(
+            targetCtx,
+            drawW,
+            drawH,
+            currentFrame,
+            project.totalFrames,
+            layerItem.shineConfig,
+            project.width,
+            project.height,
+            finalTotalMatrix,
+            project.fps || 30,
+            true,
+            liveShineTime
+          );
         }
+      } else if (layerItem.shineConfig && layerItem.shineConfig.enabled) {
+        const drawW = layerItem.transform.width || project.width;
+        const drawH = layerItem.transform.height || project.height;
+        renderLayerShine(
+          targetCtx,
+          drawW,
+          drawH,
+          currentFrame,
+          project.totalFrames,
+          layerItem.shineConfig,
+          project.width,
+          project.height,
+          finalTotalMatrix,
+          project.fps || 30,
+          true,
+          liveShineTime
+        );
       }
 
       targetCtx.restore();
@@ -1126,6 +1249,8 @@ export const SvgaDesignCanvas: React.FC<SvgaDesignCanvasProps> = ({
           }
           const offCtx = offCanvas.getContext('2d');
           if (offCtx) {
+            offCtx.imageSmoothingEnabled = true;
+            offCtx.imageSmoothingQuality = 'high';
             offCtx.clearRect(0, 0, width, height);
 
             // 1. Draw source layer (the effect / light streak / shine)
@@ -1166,6 +1291,52 @@ export const SvgaDesignCanvas: React.FC<SvgaDesignCanvasProps> = ({
             layersCtx.restore();
             return;
           }
+        }
+      }
+
+      // ⭐️ Alpha Matte Child Layers Rendering (دمج وقص القطع المدمجة داخل الطبقة الأم) ⭐️
+      const childPieces = layers.filter(c => c.clipToLayerId === layerItem.id && c.visible);
+      if (childPieces.length > 0) {
+        if (!offscreenCanvasRef.current) {
+          offscreenCanvasRef.current = document.createElement('canvas');
+        }
+        const tempCanvas = offscreenCanvasRef.current;
+        if (tempCanvas.width !== width || tempCanvas.height !== height) {
+          tempCanvas.width = width;
+          tempCanvas.height = height;
+        }
+        const tempCtx = tempCanvas.getContext('2d');
+        if (tempCtx) {
+          tempCtx.imageSmoothingEnabled = true;
+          tempCtx.imageSmoothingQuality = 'high';
+          tempCtx.clearRect(0, 0, width, height);
+          renderLeafSprite(tempCtx, layerItem, currentTotalMatrix, currentAlpha);
+
+          for (const child of childPieces) {
+            const childAnim = getLayerAnimatedTransform(child, currentFrame);
+            const childAlpha = Math.max(0, Math.min(1, (childAnim.opacity !== undefined ? childAnim.opacity : child.transform.opacity) / 100));
+            const childInitial = child.initialBounds || { x: 0, y: 0, width: 100, height: 100 };
+            const cRad = (childAnim.rotation * Math.PI) / 180;
+            const cCos = Math.cos(cRad);
+            const cSin = Math.sin(cRad);
+            const cPivotX = childInitial.x + childInitial.width / 2;
+            const cPivotY = childInitial.y + childInitial.height / 2;
+            const cA = childAnim.scaleX * cCos;
+            const cB = childAnim.scaleX * cSin;
+            const cC = -childAnim.scaleY * cSin;
+            const cD = childAnim.scaleY * cCos;
+            const cTx = (cPivotX + childAnim.x - childInitial.x) - (cA * cPivotX + cC * cPivotY);
+            const cTy = (cPivotY + childAnim.y - childInitial.y) - (cB * cPivotX + cD * cPivotY);
+            const mUserChild: [number, number, number, number, number, number] = [cA, cB, cC, cD, cTx, cTy];
+
+            tempCtx.save();
+            tempCtx.globalCompositeOperation = (child.blendMode as any) || 'source-atop';
+            renderLeafSprite(tempCtx, child, mUserChild, childAlpha);
+            tempCtx.restore();
+          }
+
+          layersCtx.drawImage(tempCanvas, 0, 0);
+          return;
         }
       }
 
@@ -1210,17 +1381,142 @@ export const SvgaDesignCanvas: React.FC<SvgaDesignCanvasProps> = ({
       if (isLayerMatteTemplate(layer)) {
         continue;
       }
+      if (layer.clipToLayerId && layers.some(p => p.id === layer.clipToLayerId)) {
+        continue;
+      }
       renderLayerRecursive(layer, null, 1.0);
     }
 
     // 3.5 Apply Edge Fade & Advanced Edge Crop to the GIFT LAYERS ONLY on layersCtx!
     // (Notice: The uploaded background image on ctx is untouched, so it remains full, crisp, and fixed!)
     if (fadeConfig && cropConfig && cropFeather) {
-      applyTransparencyEffects(layersCtx, width, height, fadeConfig, cropConfig, cropFeather);
+      applyTransparencyEffects(layersCtx, width, height, fadeConfig, cropConfig, cropFeather, currentFrame, project.totalFrames || 30);
     }
 
     // 3.6 Draw the rendered & faded gift layers directly on top of the pristine background!
     ctx.drawImage(layersCanvas, 0, 0);
+
+    // 3.7 Draw Pending & Live Freehand Pen Mask Cutout Overlay
+    if (penStrokes && penStrokes.length > 0) {
+      ctx.save();
+      for (const stroke of penStrokes) {
+        if (!stroke.points || stroke.points.length === 0) continue;
+        ctx.save();
+        const strokeColor = stroke.mode === 'erase' ? 'rgba(244, 63, 94, 0.5)' : 'rgba(16, 185, 129, 0.5)';
+        const strokeBorder = stroke.mode === 'erase' ? '#f43f5e' : '#10b981';
+
+        ctx.fillStyle = strokeColor;
+        ctx.strokeStyle = strokeBorder;
+        ctx.lineWidth = stroke.brushSize;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+
+        if (stroke.type === 'brush') {
+          if (stroke.points.length === 1) {
+            ctx.beginPath();
+            ctx.arc(stroke.points[0].x, stroke.points[0].y, stroke.brushSize / 2, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+          } else {
+            ctx.beginPath();
+            ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
+            for (let i = 1; i < stroke.points.length; i++) {
+              ctx.lineTo(stroke.points[i].x, stroke.points[i].y);
+            }
+            ctx.stroke();
+          }
+        } else if (stroke.type === 'lasso') {
+          ctx.beginPath();
+          ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
+          for (let i = 1; i < stroke.points.length; i++) {
+            ctx.lineTo(stroke.points[i].x, stroke.points[i].y);
+          }
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+        } else if (stroke.type === 'rect' && stroke.points.length >= 2) {
+          const p1 = stroke.points[0];
+          const p2 = stroke.points[stroke.points.length - 1];
+          const rx = Math.min(p1.x, p2.x);
+          const ry = Math.min(p1.y, p2.y);
+          const rw = Math.abs(p2.x - p1.x);
+          const rh = Math.abs(p2.y - p1.y);
+          ctx.fillRect(rx, ry, rw, rh);
+          ctx.strokeRect(rx, ry, rw, rh);
+        } else if (stroke.type === 'circle' && stroke.points.length >= 2) {
+          const p1 = stroke.points[0];
+          const p2 = stroke.points[stroke.points.length - 1];
+          const cx = (p1.x + p2.x) / 2;
+          const cy = (p1.y + p2.y) / 2;
+          const radius = Math.hypot(p2.x - p1.x, p2.y - p1.y) / 2;
+          ctx.beginPath();
+          ctx.arc(cx, cy, Math.max(1, radius), 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+      ctx.restore();
+    }
+
+    if (currentDrawingPoints && currentDrawingPoints.length > 0) {
+      ctx.save();
+      const activeMode = chromaMaskMode || 'erase';
+      const strokeColor = activeMode === 'erase' ? 'rgba(244, 63, 94, 0.65)' : 'rgba(16, 185, 129, 0.65)';
+      const strokeBorder = activeMode === 'erase' ? '#ffe4e6' : '#d1fae5';
+
+      ctx.fillStyle = strokeColor;
+      ctx.strokeStyle = strokeBorder;
+      ctx.lineWidth = chromaBrushSize || 30;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+
+      const tool = chromaPenTool || 'brush';
+      if (tool === 'brush') {
+        if (currentDrawingPoints.length === 1) {
+          ctx.beginPath();
+          ctx.arc(currentDrawingPoints[0].x, currentDrawingPoints[0].y, (chromaBrushSize || 30) / 2, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+        } else {
+          ctx.beginPath();
+          ctx.moveTo(currentDrawingPoints[0].x, currentDrawingPoints[0].y);
+          for (let i = 1; i < currentDrawingPoints.length; i++) {
+            ctx.lineTo(currentDrawingPoints[i].x, currentDrawingPoints[i].y);
+          }
+          ctx.stroke();
+        }
+      } else if (tool === 'lasso') {
+        ctx.beginPath();
+        ctx.moveTo(currentDrawingPoints[0].x, currentDrawingPoints[0].y);
+        for (let i = 1; i < currentDrawingPoints.length; i++) {
+          ctx.lineTo(currentDrawingPoints[i].x, currentDrawingPoints[i].y);
+        }
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      } else if (tool === 'rect' && currentDrawingPoints.length >= 2) {
+        const p1 = currentDrawingPoints[0];
+        const p2 = currentDrawingPoints[currentDrawingPoints.length - 1];
+        const rx = Math.min(p1.x, p2.x);
+        const ry = Math.min(p1.y, p2.y);
+        const rw = Math.abs(p2.x - p1.x);
+        const rh = Math.abs(p2.y - p1.y);
+        ctx.fillRect(rx, ry, rw, rh);
+        ctx.strokeRect(rx, ry, rw, rh);
+      } else if (tool === 'circle' && currentDrawingPoints.length >= 2) {
+        const p1 = currentDrawingPoints[0];
+        const p2 = currentDrawingPoints[currentDrawingPoints.length - 1];
+        const cx = (p1.x + p2.x) / 2;
+        const cy = (p1.y + p2.y) / 2;
+        const radius = Math.hypot(p2.x - p1.x, p2.y - p1.y) / 2;
+        ctx.beginPath();
+        ctx.arc(cx, cy, Math.max(1, radius), 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
 
     // 4. Draw Active Smart Alignment Guides
     if (showGuides && activeGuides.length > 0) {
@@ -1364,7 +1660,7 @@ export const SvgaDesignCanvas: React.FC<SvgaDesignCanvasProps> = ({
         ctx.restore();
       }
     }
-  }, [project, layers, selectedLayer, activeSelectedIds, selectedLayerId, currentFrame, bgColor, showGrid, showGuides, activeGuides, computeLayerMatrix, getLayerFrameState, cacheVersion, fadeConfig, cropConfig, cropFeather]);
+  }, [project, layers, selectedLayer, activeSelectedIds, selectedLayerId, currentFrame, bgColor, showGrid, showGuides, activeGuides, computeLayerMatrix, getLayerFrameState, cacheVersion, fadeConfig, cropConfig, cropFeather, liveShineTime]);
 
   useEffect(() => {
     drawScene();
@@ -1373,6 +1669,8 @@ export const SvgaDesignCanvas: React.FC<SvgaDesignCanvasProps> = ({
   // Hit test to find layer under cursor (search foreground to background: layers[0] to layers[last])
   // Locked layers are completely skipped so they cannot be clicked/selected on canvas
   const hitTestLayer = useCallback((cx: number, cy: number): string | null => {
+    const candidates: Array<{ id: string; area: number; index: number }> = [];
+
     for (let i = 0; i < layers.length; i++) {
       const layer = layers[i];
       if (!layer.visible || layer.locked || layer.isMatteMask) continue;
@@ -1420,7 +1718,6 @@ export const SvgaDesignCanvas: React.FC<SvgaDesignCanvasProps> = ({
       const localPointX = invA * cx + invC * cy + invTx;
       const localPointY = invB * cx + invD * cy + invTy;
 
-      // Generous hit tolerance for small layers so clicking near them easily grabs them
       const hitMargin = (localW < 40 || localH < 40) ? 14 : 8;
 
       if (
@@ -1429,11 +1726,39 @@ export const SvgaDesignCanvas: React.FC<SvgaDesignCanvasProps> = ({
         localPointY >= localY - hitMargin &&
         localPointY <= localY + localH + hitMargin
       ) {
-        return layer.id;
+        const area = Math.abs(localW * localH);
+        candidates.push({ id: layer.id, area, index: i });
       }
     }
-    return null;
-  }, [layers, currentFrame, computeLayerMatrix, getLayerFrameState]);
+
+    if (candidates.length === 0) return null;
+
+    // Prioritize smaller/focused elements over massive full-canvas layers
+    candidates.sort((a, b) => {
+      const canvasArea = (project.width || 500) * (project.height || 500);
+      const aIsFull = a.area >= canvasArea * 0.7;
+      const bIsFull = b.area >= canvasArea * 0.7;
+      if (aIsFull !== bIsFull) {
+        return aIsFull ? 1 : -1;
+      }
+      
+      // If one candidate is significantly smaller, prioritize the smaller element (e.g. icon over background panel)
+      const areaRatio = a.area / Math.max(1, b.area);
+      if (areaRatio > 2.0) return 1;
+      if (areaRatio < 0.5) return -1;
+
+      // If currently selected layer is one of the candidates of similar size, keep it
+      if (selectedLayer) {
+        if (a.id === selectedLayer.id) return -1;
+        if (b.id === selectedLayer.id) return 1;
+      }
+
+      // Otherwise top-most in z-stack (smaller index in layers array) wins
+      return a.index - b.index;
+    });
+
+    return candidates[0].id;
+  }, [layers, currentFrame, computeLayerMatrix, getLayerFrameState, selectedLayer, project.width, project.height]);
 
   // Determine handle under mouse for selected layer
   const getHandleUnderMouse = useCallback((cx: number, cy: number): DragHandleType | null => {
@@ -1490,6 +1815,23 @@ export const SvgaDesignCanvas: React.FC<SvgaDesignCanvasProps> = ({
     const rotOffset = isTinyElement ? 36 : isSmallElement ? 32 : 28;
     const rotHandle = { x: midTop.x + normalX * rotOffset, y: midTop.y + normalY * rotOffset };
 
+    // 0. Shine vector path handles check (if shine enabled on selected layer)
+    if (selectedLayer.shineConfig?.enabled && selectedLayer.shineConfig.editPathOnCanvas !== false) {
+      const sPt = selectedLayer.shineConfig.startPoint || {
+        x: Math.round(selectedLayer.transform.x + selectedLayer.transform.width / 2),
+        y: Math.max(0, Math.round(selectedLayer.transform.y - 30))
+      };
+      const ePt = selectedLayer.shineConfig.endPoint || {
+        x: Math.round(selectedLayer.transform.x + selectedLayer.transform.width / 2),
+        y: Math.round(selectedLayer.transform.y + selectedLayer.transform.height + 30)
+      };
+      const mPt = { x: (sPt.x + ePt.x) / 2, y: (sPt.y + ePt.y) / 2 };
+
+      if (Math.hypot(cx - sPt.x, cy - sPt.y) <= 26) return 'shine-start';
+      if (Math.hypot(cx - ePt.x, cy - ePt.y) <= 26) return 'shine-end';
+      if (Math.hypot(cx - mPt.x, cy - mPt.y) <= 24) return 'shine-mid';
+    }
+
     // 1. Rotation knob test (tested first, outside the box)
     if (Math.hypot(cx - rotHandle.x, cy - rotHandle.y) <= (isTinyElement ? 10 : 12)) return 'rot';
 
@@ -1509,40 +1851,74 @@ export const SvgaDesignCanvas: React.FC<SvgaDesignCanvasProps> = ({
     if (Math.hypot(cx - p2.x, cy - p2.y) <= cornerHitDist) return 'se';
     if (Math.hypot(cx - p3.x, cy - p3.y) <= cornerHitDist) return 'sw';
 
-    // 4. Check inside polygon (or generous perimeter) for move
-    const clickedLayerId = hitTestLayer(cx, cy);
-    if (clickedLayerId === selectedLayer.id) return 'move';
-
     return null;
-  }, [selectedLayer, currentFrame, computeLayerMatrix, hitTestLayer]);
+  }, [selectedLayer, currentFrame, computeLayerMatrix, getLayerFrameState]);
+
+  // Global Window MouseUp Listener for Freehand Pen Drawing
+  useEffect(() => {
+    const handleGlobalMouseUp = () => {
+      if (isDrawingPenRef.current) {
+        isDrawingPenRef.current = false;
+        setIsDrawingPen(false);
+        const points = currentDrawingPointsRef.current;
+        if (points && points.length > 0) {
+          const stroke: PenMaskStroke = {
+            type: chromaPenTool || 'brush',
+            points: [...points],
+            brushSize: chromaBrushSize || 30,
+            mode: chromaMaskMode || 'erase',
+            feather: chromaPenFeather || 8,
+            opacity: chromaPenOpacity || 100
+          };
+          onAddPenStroke?.(stroke);
+        }
+        currentDrawingPointsRef.current = [];
+        setCurrentDrawingPoints([]);
+      }
+    };
+    window.addEventListener('mouseup', handleGlobalMouseUp);
+    return () => window.removeEventListener('mouseup', handleGlobalMouseUp);
+  }, [chromaPenTool, chromaBrushSize, chromaMaskMode, chromaPenFeather, chromaPenOpacity, onAddPenStroke]);
 
   // Dynamic Hover Cursor
   const [canvasCursor, setCanvasCursor] = useState<string>('default');
 
   // Mouse Down Event Handler
   const handleMouseDown = (e: React.MouseEvent) => {
-    if (activeTool === 'chroma-pen') {
-      if (canvasRef.current && onChromaPickColor) {
-        const rect = canvasRef.current.getBoundingClientRect();
-        const scaleX = project.width / rect.width;
-        const scaleY = project.height / rect.height;
-        const cx = Math.round((e.clientX - rect.left) * scaleX);
-        const cy = Math.round((e.clientY - rect.top) * scaleY);
-        if (cx >= 0 && cx < project.width && cy >= 0 && cy < project.height) {
-          const ctx = canvasRef.current.getContext('2d');
-          if (ctx) {
-            const p = ctx.getImageData(cx, cy, 1, 1).data;
-            const color: ChromaTargetColor = {
-              r: p[0],
-              g: p[1],
-              b: p[2],
-              hex: rgbToHex(p[0], p[1], p[2])
-            };
-            onChromaPickColor(color);
+    if (activeTool === 'chroma-pen' || isChromaPenActive) {
+      if (chromaSubMode === 'picker') {
+        if (canvasRef.current && onChromaPickColor) {
+          const rect = canvasRef.current.getBoundingClientRect();
+          const scaleX = project.width / rect.width;
+          const scaleY = project.height / rect.height;
+          const cx = Math.round((e.clientX - rect.left) * scaleX);
+          const cy = Math.round((e.clientY - rect.top) * scaleY);
+          if (cx >= 0 && cx < project.width && cy >= 0 && cy < project.height) {
+            const ctx = canvasRef.current.getContext('2d');
+            if (ctx) {
+              const p = ctx.getImageData(cx, cy, 1, 1).data;
+              const color: ChromaTargetColor = {
+                r: p[0],
+                g: p[1],
+                b: p[2],
+                hex: rgbToHex(p[0], p[1], p[2])
+              };
+              onChromaPickColor(color);
+            }
           }
         }
+        return;
       }
-      return;
+
+      // Freehand Pen Mask Cutout Drawing
+      if (e.button === 0) {
+        const coords = clientToCanvasCoords(e.clientX, e.clientY);
+        setIsDrawingPen(true);
+        isDrawingPenRef.current = true;
+        currentDrawingPointsRef.current = [coords];
+        setCurrentDrawingPoints([coords]);
+        return;
+      }
     }
 
     if (e.button === 1 || activeTool === 'hand') {
@@ -1554,8 +1930,27 @@ export const SvgaDesignCanvas: React.FC<SvgaDesignCanvasProps> = ({
 
     if (e.button !== 0) return;
 
-    const isModifierKey = e.ctrlKey || e.metaKey || e.shiftKey;
     const coords = clientToCanvasCoords(e.clientX, e.clientY);
+
+    // Interactive Step-by-Step Shine Point Placement (Start -> End)
+    if (shinePointStep === 'place-start' && selectedLayer?.shineConfig && onUpdateShineConfig) {
+      setTempShineStart(coords);
+      setShinePointStep('place-end');
+      return;
+    }
+    if (shinePointStep === 'place-end' && selectedLayer?.shineConfig && onUpdateShineConfig && tempShineStart) {
+      const angle = Math.round((Math.atan2(coords.y - tempShineStart.y, coords.x - tempShineStart.x) * 180) / Math.PI);
+      onUpdateShineConfig(selectedLayer.id, {
+        startPoint: tempShineStart,
+        endPoint: coords,
+        angleDeg: (angle + 360) % 360
+      });
+      setShinePointStep('idle');
+      setTempShineStart(null);
+      return;
+    }
+
+    const isModifierKey = e.ctrlKey || e.metaKey || e.shiftKey;
     const handle = getHandleUnderMouse(coords.x, coords.y);
 
     if (handle) {
@@ -1563,48 +1958,27 @@ export const SvgaDesignCanvas: React.FC<SvgaDesignCanvasProps> = ({
       setDragHandle(handle);
       setDragStart(coords);
 
-      // Snapshot all selected layers transforms for simultaneous collective delta manipulation
-      const initialMap: Record<string, EditableLayer['transform']> = {};
-      layers.forEach(l => {
-        if (activeSelectedIds.includes(l.id)) {
-          initialMap[l.id] = { ...l.transform };
-        }
-      });
-      setInitialTransformsMap(initialMap);
-
       if (selectedLayer) {
+        activeDragLayerIdRef.current = selectedLayer.id;
         setInitialTransform({ ...selectedLayer.transform });
+        setInitialTransformsMap({ [selectedLayer.id]: { ...selectedLayer.transform } });
       }
     } else {
       const clickedId = hitTestLayer(coords.x, coords.y);
       if (clickedId) {
-        if (isModifierKey) {
-          onSelectLayer(clickedId, true);
-        } else {
-          // If clicking an unselected layer without Ctrl/Shift, select it
-          // If clicking one of the already selected multiple layers, keep selection to drag together
-          if (!activeSelectedIds.includes(clickedId)) {
-            onSelectLayer(clickedId, false);
-          }
-        }
-
-        const effectiveIds = activeSelectedIds.includes(clickedId) ? activeSelectedIds : [clickedId];
-        const initialMap: Record<string, EditableLayer['transform']> = {};
-        layers.forEach(l => {
-          if (effectiveIds.includes(l.id)) {
-            initialMap[l.id] = { ...l.transform };
-          }
-        });
-        setInitialTransformsMap(initialMap);
+        onSelectLayer(clickedId, false);
 
         const targetLayer = layers.find(l => l.id === clickedId);
         if (targetLayer) {
+          activeDragLayerIdRef.current = targetLayer.id;
           setIsInteracting(true);
           setDragHandle('move');
           setDragStart(coords);
           setInitialTransform({ ...targetLayer.transform });
+          setInitialTransformsMap({ [clickedId]: { ...targetLayer.transform } });
         }
       } else {
+        activeDragLayerIdRef.current = null;
         if (!isModifierKey) {
           onSelectLayer(null, false);
         }
@@ -1614,6 +1988,23 @@ export const SvgaDesignCanvas: React.FC<SvgaDesignCanvasProps> = ({
 
   // Mouse Move Event Handler
   const handleMouseMove = (e: React.MouseEvent) => {
+    if (isDrawingPenRef.current) {
+      const coords = clientToCanvasCoords(e.clientX, e.clientY);
+      const prev = currentDrawingPointsRef.current;
+      if (prev.length === 0) {
+        currentDrawingPointsRef.current = [coords];
+        setCurrentDrawingPoints([coords]);
+      } else {
+        const last = prev[prev.length - 1];
+        if (Math.hypot(coords.x - last.x, coords.y - last.y) >= 2) {
+          const updated = [...prev, coords];
+          currentDrawingPointsRef.current = updated;
+          setCurrentDrawingPoints(updated);
+        }
+      }
+      return;
+    }
+
     if (!isInteracting) {
       if (activeTool === 'chroma-pen') {
         setCanvasCursor('crosshair');
@@ -1655,10 +2046,19 @@ export const SvgaDesignCanvas: React.FC<SvgaDesignCanvasProps> = ({
         return;
       }
       const coords = clientToCanvasCoords(e.clientX, e.clientY);
+      setHoverCanvasCoords(coords);
+
+      if (shinePointStep !== 'idle') {
+        setCanvasCursor('crosshair');
+        return;
+      }
+
       const handle = getHandleUnderMouse(coords.x, coords.y);
 
       if (handle) {
         if (handle === 'rot') setCanvasCursor('crosshair');
+        else if (handle === 'shine-start' || handle === 'shine-end') setCanvasCursor('pointer');
+        else if (handle === 'shine-mid') setCanvasCursor('grab');
         else if (handle === 'nw' || handle === 'se') setCanvasCursor('nwse-resize');
         else if (handle === 'ne' || handle === 'sw') setCanvasCursor('nesw-resize');
         else if (handle === 'n' || handle === 's') setCanvasCursor('ns-resize');
@@ -1684,60 +2084,85 @@ export const SvgaDesignCanvas: React.FC<SvgaDesignCanvasProps> = ({
       return;
     }
 
-    if (!selectedLayer || !initialTransform) return;
-
     const coords = clientToCanvasCoords(e.clientX, e.clientY);
+
+    if (dragHandle === 'shine-start' && selectedLayer?.shineConfig && onUpdateShineConfig) {
+      const ePt = selectedLayer.shineConfig.endPoint || {
+        x: Math.round(selectedLayer.transform.x + selectedLayer.transform.width / 2),
+        y: Math.round(selectedLayer.transform.y + selectedLayer.transform.height + 30)
+      };
+      const newStart = { x: Math.round(coords.x), y: Math.round(coords.y) };
+      const angle = Math.round((Math.atan2(ePt.y - newStart.y, ePt.x - newStart.x) * 180) / Math.PI);
+      onUpdateShineConfig(selectedLayer.id, { startPoint: newStart, angleDeg: (angle + 360) % 360 });
+      return;
+    }
+
+    if (dragHandle === 'shine-end' && selectedLayer?.shineConfig && onUpdateShineConfig) {
+      const sPt = selectedLayer.shineConfig.startPoint || {
+        x: Math.round(selectedLayer.transform.x + selectedLayer.transform.width / 2),
+        y: Math.max(0, Math.round(selectedLayer.transform.y - 30))
+      };
+      const newEnd = { x: Math.round(coords.x), y: Math.round(coords.y) };
+      const angle = Math.round((Math.atan2(newEnd.y - sPt.y, newEnd.x - sPt.x) * 180) / Math.PI);
+      onUpdateShineConfig(selectedLayer.id, { endPoint: newEnd, angleDeg: (angle + 360) % 360 });
+      return;
+    }
+
+    if (dragHandle === 'shine-mid' && selectedLayer?.shineConfig && onUpdateShineConfig) {
+      const deltaX = coords.x - dragStart.x;
+      const deltaY = coords.y - dragStart.y;
+      const sPt = selectedLayer.shineConfig.startPoint || {
+        x: Math.round(selectedLayer.transform.x + selectedLayer.transform.width / 2),
+        y: Math.max(0, Math.round(selectedLayer.transform.y - 30))
+      };
+      const ePt = selectedLayer.shineConfig.endPoint || {
+        x: Math.round(selectedLayer.transform.x + selectedLayer.transform.width / 2),
+        y: Math.round(selectedLayer.transform.y + selectedLayer.transform.height + 30)
+      };
+      onUpdateShineConfig(selectedLayer.id, {
+        startPoint: { x: Math.round(sPt.x + deltaX), y: Math.round(sPt.y + deltaY) },
+        endPoint: { x: Math.round(ePt.x + deltaX), y: Math.round(ePt.y + deltaY) }
+      });
+      setDragStart(coords);
+      return;
+    }
+
+    const currentDragId = activeDragLayerIdRef.current || selectedLayer?.id;
+    const targetDragLayer = layers.find(l => l.id === currentDragId) || selectedLayer;
+    if (!targetDragLayer || !initialTransform) return;
+
     const deltaX = coords.x - dragStart.x;
     const deltaY = coords.y - dragStart.y;
 
-    const isBulk = activeSelectedIds.length > 1 && onBulkUpdateTransforms;
-
     if (dragHandle === 'move') {
-      if (isBulk) {
-        // Bulk move all selected layers simultaneously
-        const updates = activeSelectedIds.map(id => {
-          const orig = initialTransformsMap[id] || layers.find(l => l.id === id)?.transform;
-          if (!orig) return null;
-          return {
-            id,
-            transform: {
-              x: Math.round(orig.x + deltaX),
-              y: Math.round(orig.y + deltaY)
-            }
-          };
-        }).filter(Boolean) as Array<{ id: string; transform: Partial<EditableLayer['transform']> }>;
+      let newX = Math.round(initialTransform.x + deltaX);
+      let newY = Math.round(initialTransform.y + deltaY);
 
-        onBulkUpdateTransforms(updates);
-      } else {
-        let newX = Math.round(initialTransform.x + deltaX);
-        let newY = Math.round(initialTransform.y + deltaY);
+      // Smart Snapping to Canvas Center / Borders
+      const guides: GuideLine[] = [];
+      const cx = newX + targetDragLayer.initialBounds.width / 2;
+      const cy = newY + targetDragLayer.initialBounds.height / 2;
+      const snapThreshold = 6;
 
-        // Smart Snapping to Canvas Center / Borders
-        const guides: GuideLine[] = [];
-        const cx = newX + selectedLayer.initialBounds.width / 2;
-        const cy = newY + selectedLayer.initialBounds.height / 2;
-        const snapThreshold = 6;
-
-        // Horizontal Center snap
-        if (Math.abs(cx - project.width / 2) <= snapThreshold) {
-          newX = Math.round(project.width / 2 - selectedLayer.initialBounds.width / 2);
-          guides.push({ type: 'vertical', position: project.width / 2 });
-        }
-        // Vertical Center snap
-        if (Math.abs(cy - project.height / 2) <= snapThreshold) {
-          newY = Math.round(project.height / 2 - selectedLayer.initialBounds.height / 2);
-          guides.push({ type: 'horizontal', position: project.height / 2 });
-        }
-
-        setActiveGuides(guides);
-        onUpdateLayerTransform(selectedLayer.id, { x: newX, y: newY });
+      // Horizontal Center snap
+      if (Math.abs(cx - project.width / 2) <= snapThreshold) {
+        newX = Math.round(project.width / 2 - targetDragLayer.initialBounds.width / 2);
+        guides.push({ type: 'vertical', position: project.width / 2 });
       }
+      // Vertical Center snap
+      if (Math.abs(cy - project.height / 2) <= snapThreshold) {
+        newY = Math.round(project.height / 2 - targetDragLayer.initialBounds.height / 2);
+        guides.push({ type: 'horizontal', position: project.height / 2 });
+      }
+
+      setActiveGuides(guides);
+      onUpdateLayerTransform(targetDragLayer.id, { x: newX, y: newY });
     } else if (dragHandle === 'rot') {
       // Rotation Handle Dragging
-      const pivotX = selectedLayer.initialBounds.x + selectedLayer.initialBounds.width / 2;
-      const pivotY = selectedLayer.initialBounds.y + selectedLayer.initialBounds.height / 2;
-      const centerCanvasX = pivotX + (initialTransform.x - selectedLayer.initialBounds.x);
-      const centerCanvasY = pivotY + (initialTransform.y - selectedLayer.initialBounds.y);
+      const pivotX = targetDragLayer.initialBounds.x + targetDragLayer.initialBounds.width / 2;
+      const pivotY = targetDragLayer.initialBounds.y + targetDragLayer.initialBounds.height / 2;
+      const centerCanvasX = pivotX + (initialTransform.x - targetDragLayer.initialBounds.x);
+      const centerCanvasY = pivotY + (initialTransform.y - targetDragLayer.initialBounds.y);
 
       const angleRad = Math.atan2(coords.y - centerCanvasY, coords.x - centerCanvasX);
       let angleDeg = Math.round((angleRad * 180) / Math.PI) + 90;
@@ -1749,27 +2174,11 @@ export const SvgaDesignCanvas: React.FC<SvgaDesignCanvasProps> = ({
         angleDeg = Math.round(angleDeg / 45) * 45;
       }
 
-      if (isBulk) {
-        const rotDelta = angleDeg - initialTransform.rotation;
-        const updates = activeSelectedIds.map(id => {
-          const orig = initialTransformsMap[id] || layers.find(l => l.id === id)?.transform;
-          if (!orig) return null;
-          return {
-            id,
-            transform: {
-              rotation: Math.round((orig.rotation + rotDelta) % 360)
-            }
-          };
-        }).filter(Boolean) as Array<{ id: string; transform: Partial<EditableLayer['transform']> }>;
-
-        onBulkUpdateTransforms(updates);
-      } else {
-        onUpdateLayerTransform(selectedLayer.id, { rotation: angleDeg });
-      }
+      onUpdateLayerTransform(targetDragLayer.id, { rotation: angleDeg });
     } else if (['nw', 'ne', 'se', 'sw', 'n', 's', 'e', 'w'].includes(dragHandle || '')) {
       // Scaling Resize Handles
-      const initW = Math.max(10, selectedLayer.initialBounds.width);
-      const initH = Math.max(10, selectedLayer.initialBounds.height);
+      const initW = Math.max(10, targetDragLayer.initialBounds.width);
+      const initH = Math.max(10, targetDragLayer.initialBounds.height);
       const origW = initW * initialTransform.scaleX;
       const origH = initH * initialTransform.scaleY;
 
@@ -1818,7 +2227,7 @@ export const SvgaDesignCanvas: React.FC<SvgaDesignCanvasProps> = ({
         if (dragHandle?.includes('s')) factorY = 1 + (localDeltaY * 2) / (initH * initialTransform.scaleY);
         if (dragHandle?.includes('n')) factorY = 1 - (localDeltaY * 2) / (initH * initialTransform.scaleY);
 
-        if (selectedLayer.aspectRatioLocked || e.shiftKey) {
+        if (targetDragLayer.aspectRatioLocked || e.shiftKey) {
           const factor = Math.max(factorX, factorY);
           factorX = factor;
           factorY = factor;
@@ -1839,46 +2248,23 @@ export const SvgaDesignCanvas: React.FC<SvgaDesignCanvasProps> = ({
       const newX = Math.round(initialTransform.x + worldShiftX);
       const newY = Math.round(initialTransform.y + worldShiftY);
 
-      if (isBulk) {
-        const multX = newScaleX / initialTransform.scaleX;
-        const multY = newScaleY / initialTransform.scaleY;
-        const updates = activeSelectedIds.map(id => {
-          const orig = initialTransformsMap[id] || layers.find(l => l.id === id)?.transform;
-          const targetL = layers.find(l => l.id === id);
-          if (!orig || !targetL) return null;
-          const targetInitW = Math.max(10, targetL.initialBounds.width);
-          const targetInitH = Math.max(10, targetL.initialBounds.height);
-          const sX = Math.max(0.05, Math.min(10, orig.scaleX * multX));
-          const sY = Math.max(0.05, Math.min(10, orig.scaleY * multY));
-          return {
-            id,
-            transform: {
-              x: Math.round(orig.x + worldShiftX),
-              y: Math.round(orig.y + worldShiftY),
-              scaleX: parseFloat(sX.toFixed(3)),
-              scaleY: parseFloat(sY.toFixed(3)),
-              width: Math.round(targetInitW * sX),
-              height: Math.round(targetInitH * sY)
-            }
-          };
-        }).filter(Boolean) as Array<{ id: string; transform: Partial<EditableLayer['transform']> }>;
-
-        onBulkUpdateTransforms(updates);
-      } else {
-        onUpdateLayerTransform(selectedLayer.id, {
-          x: newX,
-          y: newY,
-          scaleX: parseFloat(newScaleX.toFixed(3)),
-          scaleY: parseFloat(newScaleY.toFixed(3)),
-          width: Math.round(newW),
-          height: Math.round(newH)
-        });
-      }
+      onUpdateLayerTransform(targetDragLayer.id, {
+        x: newX,
+        y: newY,
+        scaleX: parseFloat(newScaleX.toFixed(3)),
+        scaleY: parseFloat(newScaleY.toFixed(3)),
+        width: Math.round(newW),
+        height: Math.round(newH)
+      });
     }
   };
 
   // Mouse Up Handler
   const handleMouseUp = () => {
+    if (isInteracting && dragHandle && dragHandle !== 'pan') {
+      onDragEnd?.();
+    }
+    activeDragLayerIdRef.current = null;
     setIsInteracting(false);
     setDragHandle(null);
     setInitialTransform(null);
@@ -2237,8 +2623,118 @@ export const SvgaDesignCanvas: React.FC<SvgaDesignCanvasProps> = ({
           width={project.width}
           height={project.height}
           className="block pointer-events-none"
+          style={{
+            imageRendering: 'auto'
+          }}
         />
+
+        {/* Interactive Shine Vector Path Overlay on Canvas */}
+        {selectedLayer?.shineConfig?.enabled && selectedLayer.shineConfig.editPathOnCanvas !== false && (() => {
+          const sPt = tempShineStart || selectedLayer.shineConfig.startPoint || {
+            x: Math.round(selectedLayer.transform.x + selectedLayer.transform.width / 2),
+            y: Math.max(0, Math.round(selectedLayer.transform.y - 30))
+          };
+          const ePt = (shinePointStep === 'place-end' && hoverCanvasCoords) 
+            ? hoverCanvasCoords 
+            : (selectedLayer.shineConfig.endPoint || {
+                x: Math.round(selectedLayer.transform.x + selectedLayer.transform.width / 2),
+                y: Math.round(selectedLayer.transform.y + selectedLayer.transform.height + 30)
+              });
+          const mPt = { x: (sPt.x + ePt.x) / 2, y: (sPt.y + ePt.y) / 2 };
+          const len = Math.round(Math.hypot(ePt.x - sPt.x, ePt.y - sPt.y));
+
+          return (
+            <svg
+              className="absolute inset-0 w-full h-full pointer-events-none z-20 overflow-visible select-none"
+              viewBox={`0 0 ${project.width} ${project.height}`}
+            >
+              <defs>
+                <linearGradient id="shineVectorGrad" x1={sPt.x} y1={sPt.y} x2={ePt.x} y2={ePt.y} gradientUnits="userSpaceOnUse">
+                  <stop offset="0%" stopColor="#10b981" />
+                  <stop offset="50%" stopColor="#06b6d4" />
+                  <stop offset="100%" stopColor="#a855f7" />
+                </linearGradient>
+                <filter id="shinePinGlow" x="-30%" y="-30%" width="160%" height="160%">
+                  <feDropShadow dx="0" dy="2" stdDeviation="3" floodColor="#000000" floodOpacity="0.8" />
+                </filter>
+              </defs>
+
+              {/* Dashed trajectory line */}
+              <line
+                x1={sPt.x}
+                y1={sPt.y}
+                x2={ePt.x}
+                y2={ePt.y}
+                stroke="url(#shineVectorGrad)"
+                strokeWidth="2.8"
+                strokeDasharray="6 4"
+              />
+
+              {/* Middle Trajectory Drag Handle */}
+              {shinePointStep === 'idle' && (
+                <g transform={`translate(${mPt.x}, ${mPt.y})`} filter="url(#shinePinGlow)" className="pointer-events-auto cursor-grab">
+                  <circle r="12" fill="#06b6d4" stroke="#ffffff" strokeWidth="2" />
+                  <path d="M-4 0 L4 0 M0 -4 L0 4" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" />
+                  <rect x="-42" y="16" width="84" height="20" rx="10" fill="rgba(15, 23, 42, 0.95)" stroke="#06b6d4" strokeWidth="1.2" />
+                  <text x="0" y="29.5" textAnchor="middle" fill="#38bdf8" fontSize="10" fontWeight="bold" fontFamily="sans-serif">
+                    سحب ({len}px)
+                  </text>
+                </g>
+              )}
+
+              {/* Start Point Pin (Green) */}
+              <g transform={`translate(${sPt.x}, ${sPt.y})`} filter="url(#shinePinGlow)" className="pointer-events-auto cursor-pointer">
+                <circle r="14" fill="#10b981" stroke="#ffffff" strokeWidth="2.5" />
+                <text x="0" y="4" textAnchor="middle" fill="#ffffff" fontSize="11" fontWeight="900" fontFamily="sans-serif">
+                  S
+                </text>
+                {/* Start Label Badge */}
+                <rect x="-48" y="-28" width="96" height="20" rx="10" fill="rgba(15, 23, 42, 0.95)" stroke="#10b981" strokeWidth="1.2" />
+                <text x="0" y="-14.5" textAnchor="middle" fill="#34d399" fontSize="10" fontWeight="bold" fontFamily="sans-serif">
+                  بداية اللمعة (Start)
+                </text>
+              </g>
+
+              {/* End Point Pin (Purple) */}
+              {(shinePointStep === 'idle' || shinePointStep === 'place-end') && (
+                <g transform={`translate(${ePt.x}, ${ePt.y})`} filter="url(#shinePinGlow)" className="pointer-events-auto cursor-pointer">
+                  <circle r="14" fill="#a855f7" stroke="#ffffff" strokeWidth="2.5" />
+                  <text x="0" y="4" textAnchor="middle" fill="#ffffff" fontSize="11" fontWeight="900" fontFamily="sans-serif">
+                    E
+                  </text>
+                  {/* End Label Badge */}
+                  <rect x="-48" y="-28" width="96" height="20" rx="10" fill="rgba(15, 23, 42, 0.95)" stroke="#a855f7" strokeWidth="1.2" />
+                  <text x="0" y="-14.5" textAnchor="middle" fill="#c084fc" fontSize="10" fontWeight="bold" fontFamily="sans-serif">
+                    نهاية اللمعة (End)
+                  </text>
+                </g>
+              )}
+            </svg>
+          );
+        })()}
       </div>
+
+      {/* Floating Guidance Banner when placing Shine Points */}
+      {shinePointStep !== 'idle' && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-slate-900/95 border border-emerald-500/60 shadow-2xl px-5 py-3 rounded-2xl backdrop-blur-md text-white animate-in slide-in-from-top-2 duration-150">
+          <div className="w-3 h-3 rounded-full bg-emerald-400 animate-ping" />
+          <span className="text-sm font-bold text-emerald-300">
+            {shinePointStep === 'place-start' 
+              ? '📌 الخطوة 1: انقر بالماوس على المكان الذي تبدأ منه حركة اللمعة (نقطة البداية S)' 
+              : '🎯 الخطوة 2: انقر بالماوس على المكان الذي تريد أن تصل إليه اللمعة (نقطة النهاية E)'}
+          </span>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setShinePointStep('idle');
+              setTempShineStart(null);
+            }}
+            className="px-3 py-1 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 rounded-xl text-xs font-semibold transition-colors"
+          >
+            إلغاء
+          </button>
+        </div>
+      )}
 
       {/* Interactive Smart Chroma Magnifier Loupe */}
       {activeTool === 'chroma-pen' && chromaLoupe && (
@@ -2284,6 +2780,143 @@ export const SvgaDesignCanvas: React.FC<SvgaDesignCanvasProps> = ({
               {identifyColorType(chromaLoupe.color.r, chromaLoupe.color.g, chromaLoupe.color.b).label}
             </span>
             <span className="text-[9px] text-slate-300 font-medium">انقر بالماوس لحذف هذا اللون</span>
+          </div>
+        </div>
+      )}
+
+      {/* Floating Canvas Top Stage Controls Bar for Freehand Pen Cutout Tool */}
+      {(isChromaPenActive || activeTool === 'chroma-pen') && chromaSubMode !== 'picker' && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 bg-slate-950/95 border border-emerald-500/50 backdrop-blur-2xl rounded-2xl px-3.5 py-2 flex items-center gap-2.5 text-white shadow-2xl text-xs select-none animate-in fade-in slide-in-from-top-4 duration-150 flex-wrap justify-center ring-1 ring-emerald-400/30" dir="rtl">
+          <div className="flex items-center gap-1.5 font-black text-emerald-300">
+            <PenTool size={15} />
+            <span className="text-xs">قلم القص والتفريغ المباشر</span>
+          </div>
+
+          <div className="h-4 w-px bg-white/20 hidden sm:block" />
+
+          {/* SubTool Buttons */}
+          <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-xl border border-white/10">
+            <button
+              type="button"
+              onClick={() => onPenToolChange?.('brush')}
+              className={`px-2.5 py-1 rounded-lg font-bold text-[11px] flex items-center gap-1 transition-all cursor-pointer ${
+                chromaPenTool === 'brush' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
+              }`}
+              title="فرشاة رسم حر"
+            >
+              <Brush size={13} />
+              <span>فرشاة</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => onPenToolChange?.('lasso')}
+              className={`px-2.5 py-1 rounded-lg font-bold text-[11px] flex items-center gap-1 transition-all cursor-pointer ${
+                chromaPenTool === 'lasso' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
+              }`}
+              title="تحديد لاسو حر"
+            >
+              <Lasso size={13} />
+              <span>لاسو</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => onPenToolChange?.('rect')}
+              className={`px-2 py-1 rounded-lg font-bold text-[11px] flex items-center gap-1 transition-all cursor-pointer ${
+                chromaPenTool === 'rect' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
+              }`}
+              title="تحديد مستطيل"
+            >
+              <Square size={12} />
+              <span>مستطيل</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => onPenToolChange?.('circle')}
+              className={`px-2 py-1 rounded-lg font-bold text-[11px] flex items-center gap-1 transition-all cursor-pointer ${
+                chromaPenTool === 'circle' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
+              }`}
+              title="تحديد دائري"
+            >
+              <Circle size={12} />
+              <span>دائري</span>
+            </button>
+          </div>
+
+          <div className="h-4 w-px bg-white/20 hidden sm:block" />
+
+          {/* Mask Mode: Erase vs Keep */}
+          <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-xl border border-white/10">
+            <button
+              type="button"
+              onClick={() => onMaskModeChange?.('erase')}
+              className={`px-2.5 py-1 rounded-lg font-bold text-[11px] flex items-center gap-1 transition-all cursor-pointer ${
+                chromaMaskMode === 'erase' ? 'bg-rose-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <Eraser size={13} />
+              <span>تفريغ (قص)</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => onMaskModeChange?.('keep')}
+              className={`px-2.5 py-1 rounded-lg font-bold text-[11px] flex items-center gap-1 transition-all cursor-pointer ${
+                chromaMaskMode === 'keep' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <Scissors size={13} />
+              <span>عزل (إبقاء)</span>
+            </button>
+          </div>
+
+          <div className="h-4 w-px bg-white/20 hidden sm:block" />
+
+          {/* Size Slider */}
+          <div className="flex items-center gap-1.5 text-[11px]">
+            <span className="text-slate-300 font-bold">الحجم:</span>
+            <input
+              type="range"
+              min={5}
+              max={120}
+              value={chromaBrushSize || 30}
+              onChange={(e) => onBrushSizeChange?.(Number(e.target.value))}
+              className="w-20 accent-emerald-400 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
+            />
+            <span className="font-mono text-emerald-300 font-bold text-[10px]">{chromaBrushSize || 30}px</span>
+          </div>
+
+          <div className="h-4 w-px bg-white/20 hidden sm:block" />
+
+          {/* Action Buttons */}
+          <div className="flex items-center gap-1.5">
+            {penStrokes && penStrokes.length > 0 && (
+              <button
+                type="button"
+                onClick={onUndoPenStroke}
+                className="p-1 rounded-lg bg-white/10 hover:bg-white/20 text-slate-200 cursor-pointer"
+                title="تراجع عن آخر خطوة"
+              >
+                <RotateCcw size={14} />
+              </button>
+            )}
+            {penStrokes && penStrokes.length > 0 && (
+              <button
+                type="button"
+                onClick={onClearPenStrokes}
+                className="p-1 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 cursor-pointer"
+                title="مسح كافة التحديدات"
+              >
+                <Trash2 size={14} />
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onApplyPenMask}
+              disabled={!penStrokes || penStrokes.length === 0}
+              className="px-3 py-1 rounded-xl bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 hover:from-emerald-400 hover:to-cyan-400 text-slate-950 font-black text-xs transition-all shadow-md shadow-emerald-500/30 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer flex items-center gap-1 active:scale-95"
+            >
+              <Check size={14} />
+              <span>تطبيق القص المباشر ({penStrokes?.length || 0})</span>
+            </button>
           </div>
         </div>
       )}

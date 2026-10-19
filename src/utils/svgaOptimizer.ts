@@ -1,6 +1,46 @@
 import JSZip from 'jszip';
-import { MediaAssetItem, OptimizationOptions, OptimizationTask, SvgaStructureInfo } from '../types';
 import { uploadMediaToServer, saveMediaToIndexedDb } from './mediaStorage';
+
+export interface MediaAssetItem {
+  id: string;
+  name: string;
+  type: string;
+  size?: number;
+  originalSize?: number;
+  hash?: string;
+  usageCount?: number;
+  lastUsed?: any;
+  mimeType?: string;
+  url?: string;
+  compressedUrl?: string;
+  [key: string]: any;
+}
+
+export interface OptimizationOptions {
+  quality: number;
+  format: string;
+  compressionMode?: string;
+  deduplicateSprites?: boolean;
+  keepOriginalBackup?: boolean;
+}
+
+export interface OptimizationTask {
+  id: string;
+  status: string;
+}
+
+export interface SvgaStructureInfo {
+  version: string;
+  fps: number;
+  frames: number;
+  duration?: number;
+  width?: number;
+  height?: number;
+  layersCount?: number;
+  spritesCount?: number;
+  uniqueSpritesCount?: number;
+  [key: string]: any;
+}
 
 /**
  * Calculates a genuine SHA-256 hex string from ArrayBuffer or Blob
@@ -457,24 +497,12 @@ export function extractVideoMetadata(file: File): Promise<{ width: number; heigh
       hasResolved = true;
       try {
         const canvas = document.createElement('canvas');
-        const maxDim = 400;
-        let w = video.videoWidth || 720;
-        let h = video.videoHeight || 1280;
-        if (w > maxDim || h > maxDim) {
-          if (w > h) {
-            h = Math.round((h * maxDim) / w);
-            w = maxDim;
-          } else {
-            w = Math.round((w * maxDim) / h);
-            h = maxDim;
-          }
-        }
-        canvas.width = Math.max(1, w);
-        canvas.height = Math.max(1, h);
+        canvas.width = video.videoWidth || 720;
+        canvas.height = video.videoHeight || 1280;
         const ctx = canvas.getContext('2d');
         if (ctx) {
           ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-          const posterUrl = canvas.toDataURL('image/jpeg', 0.75);
+          const posterUrl = canvas.toDataURL('image/jpeg', 0.88);
           resolve({
             width: video.videoWidth || 720,
             height: video.videoHeight || 1280,

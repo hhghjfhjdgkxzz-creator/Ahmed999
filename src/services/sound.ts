@@ -224,6 +224,22 @@ class SoundService {
     }
   }
 
+  public playSuccessSound() {
+    this.playWinSound();
+  }
+
+  public playErrorSound() {
+    this.playCountdownBeep(true);
+  }
+
+  public playToggleSound() {
+    this.playTickSound();
+  }
+
+  public playClickSound() {
+    this.playChipSound();
+  }
+
   public isMusicActive(): boolean {
     return this.musicPlaying;
   }
@@ -231,16 +247,32 @@ class SoundService {
 
 export const soundManager = new SoundService();
 
-export function playSound(type: 'click' | 'win' | 'bonus' | 'tick' | 'success' | 'error' | 'beep' = 'click') {
-  if (type === 'win' || type === 'success') {
-    soundManager.playWinSound();
-  } else if (type === 'bonus') {
-    soundManager.playSpecialBonusSound();
-  } else if (type === 'tick') {
-    soundManager.playTickSound();
-  } else if (type === 'error' || type === 'beep') {
-    soundManager.playCountdownBeep(true);
-  } else {
-    soundManager.playButtonClick();
+/**
+ * Universal sound effect player helper
+ */
+export function playSound(type: 'success' | 'error' | 'click' | 'toggle' | 'chip' | 'tick' | 'export' | string = 'success'): void {
+  try {
+    switch (type) {
+      case 'success':
+      case 'export':
+        soundManager.playWinSound();
+        break;
+      case 'error':
+        soundManager.playCountdownBeep(true);
+        break;
+      case 'toggle':
+      case 'tick':
+        soundManager.playTickSound();
+        break;
+      case 'chip':
+      case 'click':
+      default:
+        soundManager.playChipSound();
+        break;
+    }
+  } catch (err) {
+    // Ignore audio autoplay restrictions
   }
 }
+
+

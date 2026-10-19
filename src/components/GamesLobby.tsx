@@ -27,7 +27,8 @@ import {
   Home,
   Gamepad2,
   ChevronRight,
-  Globe
+  Globe,
+  DollarSign
 } from 'lucide-react';
 import { useLanguage } from '../lib/i18n';
 import { UserProfile } from '../types/game';
@@ -73,35 +74,35 @@ const AVAILABLE_GAMES: GameItem[] = [
     titleAr: 'صاروخ الحظ (Rocket Crash 3D)',
     titleEn: 'Rocket Crash 3D',
     category: 'crash',
-    categoryLabelAr: 'ألعاب الصاروخ والسرعة • مباشر',
-    categoryLabelEn: 'Rocket & Crash • Live',
-    descriptionAr: 'صاروخ فضائي يصعد بمضاعفات أرباح تصاعدية حتى 100X! اسحب أرباحك بضغطة زر قبل لحظة الانفجار.',
-    descriptionEn: 'Ascending 3D space rocket with exponential multipliers up to 100X! Cash out before the crash explosion!',
+    categoryLabelAr: 'ألعاب السرعة • مباشر',
+    categoryLabelEn: 'Rocket & Speed • Live',
+    descriptionAr: 'صاروخ فضائي يصعد بمضاعفات أرباح تصاعدية حتى 100X! اسحب أرباحك قبل لحظة الانفجار.',
+    descriptionEn: 'Ascending 3D space rocket with multipliers up to 100X! Cash out before the crash!',
     minBet: 50,
     maxBet: 50000,
     activePlayers: 1420,
     isLive: true,
-    badge: '🔥 HOT CRASH',
-    accentColor: 'border-rose-500/80 shadow-rose-500/25',
-    bgGradient: 'from-rose-950/50 via-purple-950/30 to-slate-900',
+    badge: '🔥 HOT',
+    accentColor: 'border-rose-500/80 shadow-rose-500/20',
+    bgGradient: 'from-[#140b0d] via-[#11090a] to-[#0a0506]',
     thumbnailIcon: '🚀',
   },
   {
     id: 'mines',
-    titleAr: 'كاشف القنابل والألماس (Mines)',
+    titleAr: 'كاشف الألماس (Mines)',
     titleEn: 'Mines & Gems',
     category: 'table',
-    categoryLabelAr: 'ألعاب التوقع والألماس • استراتيجية',
+    categoryLabelAr: 'ألعاب التوقع • استراتيجية',
     categoryLabelEn: 'Strategy & Gems • Grid',
-    descriptionAr: 'شبكة 5x5 مليئة بالألماس اللامع والقنابل الخفية! اختر عدد القنابل واكشف الألماس لمضاعفة أرباحك.',
-    descriptionEn: 'Exciting 5x5 grid with glittering gems and hidden bombs! Choose your risk level and cash out anytime!',
+    descriptionAr: 'شبكة 5x5 مليئة بالألماس اللامع والقنابل الخفية! اكشف الألماس لمضاعفة أرباحك بحذر.',
+    descriptionEn: 'Exciting 5x5 grid with glittering gems and hidden bombs! Choose your risk level.',
     minBet: 50,
     maxBet: 50000,
     activePlayers: 1180,
     isLive: true,
-    badge: '💎 POPULAR',
-    accentColor: 'border-teal-500/80 shadow-teal-500/25',
-    bgGradient: 'from-teal-950/50 via-cyan-950/30 to-slate-900',
+    badge: '💎 TRENDING',
+    accentColor: 'border-cyan-500/50 shadow-cyan-500/20',
+    bgGradient: 'from-[#081215] via-[#050a0c] to-[#030607]',
     thumbnailIcon: '💣',
   },
   {
@@ -111,51 +112,51 @@ const AVAILABLE_GAMES: GameItem[] = [
     category: 'crash',
     categoryLabelAr: 'سباقات خيل حية • ديربي',
     categoryLabelEn: 'Live Derby Races • Turf',
-    descriptionAr: 'مضمار سباق خيول عربي حي بـ 6 متسابقين وفرسان حقيقيين ومضاعفات تصل إلى 25X مع منصة التتويج والتعليق الصوتي.',
-    descriptionEn: 'Live Arabian turf horse race with 6 thoroughbreds, realistic race physics, odds up to 25X and podium honors.',
+    descriptionAr: 'مضمار سباق عربي بـ 6 متسابقين حقيقيين ومضاعفات تصل إلى 25X مع منصة التتويج.',
+    descriptionEn: 'Live turf horse race with 6 thoroughbreds, realistic race physics, odds up to 25X.',
     minBet: 50,
     maxBet: 50000,
     activePlayers: 940,
     isLive: true,
-    badge: '🐎 DERBY LIVE',
-    accentColor: 'border-emerald-500/80 shadow-emerald-500/25',
-    bgGradient: 'from-emerald-950/50 via-teal-950/30 to-slate-900',
+    badge: '🏇 LIVE DERBY',
+    accentColor: 'border-emerald-500/60 shadow-emerald-500/20',
+    bgGradient: 'from-[#091510] via-[#050b08] to-[#030604]',
     thumbnailIcon: '🏇',
   },
   {
     id: 'happy-cake',
-    titleAr: 'عجلة الكعكة (Happy Cake Wheel)',
-    titleEn: 'Happy Cake Fruit Wheel',
+    titleAr: 'عجلة الحظ (Happy Cake)',
+    titleEn: 'Happy Cake Wheel',
     category: 'live',
-    categoryLabelAr: 'عجلة الحظ المباشرة • فواكه',
-    categoryLabelEn: 'Live Fruit Wheel • Casino',
-    descriptionAr: 'عجلة فواكه حية ثابتة يدور حولها مؤشر حركي ذهبي يختار الفائز مع مضاعفات خيالية واحتفالات بصرية مميزة.',
-    descriptionEn: 'Live fruit wheel with a sweeping selector indicator around all fruits and festive multiplier celebrations.',
+    categoryLabelAr: 'عجلة الحظ • كازينو مباشر',
+    categoryLabelEn: 'Live Wheel • Casino',
+    descriptionAr: 'عجلة فواكه حية يدور حولها مؤشر حركي لاختيار الفائز مع مضاعفات خيالية.',
+    descriptionEn: 'Live fruit wheel with a sweeping selector indicator and festive multipliers.',
     minBet: 50,
     maxBet: 50000,
     activePlayers: 860,
     isLive: true,
-    badge: '🍰 LIVE WHEEL',
-    accentColor: 'border-pink-500/80 shadow-pink-500/25',
-    bgGradient: 'from-pink-950/50 via-rose-950/30 to-slate-900',
+    badge: '🎡 WHEEL',
+    accentColor: 'border-purple-500/60 shadow-purple-500/20',
+    bgGradient: 'from-[#140b15] via-[#0b050c] to-[#060307]',
     thumbnailIcon: '🎂',
   },
   {
     id: 'lucky-7',
-    titleAr: 'السبعتين (7 Up 7 Down)',
+    titleAr: 'نرد السبعتين (7 Up 7 Down)',
     titleEn: '7 Up 7 Down Dice',
     category: 'table',
-    categoryLabelAr: 'ألعاب النرد الملكية • كلاسيك',
-    categoryLabelEn: 'Royal Dice Games • Classic',
-    descriptionAr: 'لعبة النرد الكلاسيكية الشهيرة! توقع مجموع النردين: أقل من 7، سبعة ذهبية 5X، أو أكثر من 7 على طاولة كازينو مخملية.',
-    descriptionEn: 'The famous classic dice game! Predict the total of two dice: 7 Down, Lucky 7 (5X), or 7 Up on luxury green felt.',
+    categoryLabelAr: 'نرد الطاولة • كلاسيك',
+    categoryLabelEn: 'Dice Games • Classic',
+    descriptionAr: 'توقع مجموع النردين: أقل من 7، 7 ذهبية 5X، أو أكثر من 7 على طاولة مخملية.',
+    descriptionEn: 'Predict the total of two dice: 7 Down, Lucky 7 (5X), or 7 Up on luxury green felt.',
     minBet: 50,
     maxBet: 50000,
     activePlayers: 780,
     isLive: true,
-    badge: '🎲 DICE',
-    accentColor: 'border-amber-500/80 shadow-amber-500/25',
-    bgGradient: 'from-amber-950/50 via-yellow-950/30 to-slate-900',
+    badge: '🎲 CLASSIC',
+    accentColor: 'border-amber-600/60 shadow-amber-600/20',
+    bgGradient: 'from-[#171003] via-[#0d0901] to-[#080500]',
     thumbnailIcon: '🎲',
   },
   {
@@ -165,15 +166,15 @@ const AVAILABLE_GAMES: GameItem[] = [
     category: 'cards',
     categoryLabelAr: 'مبارزة البطاقات • مباشر',
     categoryLabelEn: 'Card Duel • Live',
-    descriptionAr: 'نزال أسطوري سريع ببطاقتين بين التنين والنمر! راهن على الطرف الفائز أو التعادل الملكي 8:1 مع كشف بطاقات دراماتيكي.',
-    descriptionEn: 'Legendary fast 2-card clash between Dragon and Tiger! Bet on the winner or Super Tie 8:1 with dramatic reveals.',
+    descriptionAr: 'نزال ببطاقتين بين التنين والنمر! راهن على الفائز أو التعادل 8:1 مع كشف دراماتيكي.',
+    descriptionEn: 'Fast 2-card clash between Dragon & Tiger! Bet on winner or Super Tie 8:1.',
     minBet: 50,
     maxBet: 50000,
     activePlayers: 920,
     isLive: true,
     badge: '🐉 VIP DUEL',
-    accentColor: 'border-cyan-500/80 shadow-cyan-500/25',
-    bgGradient: 'from-cyan-950/50 via-indigo-950/30 to-slate-900',
+    accentColor: 'border-red-600/60 shadow-red-600/20',
+    bgGradient: 'from-[#1a0808] via-[#0d0404] to-[#080202]',
     thumbnailIcon: '🐉',
   },
   {
@@ -181,17 +182,17 @@ const AVAILABLE_GAMES: GameItem[] = [
     titleAr: 'تين باتي رويال (Teen Patti)',
     titleEn: 'Teen Patti Royal 3-Cards',
     category: 'cards',
-    categoryLabelAr: 'ألعاب الورق • مباشر',
-    categoryLabelEn: 'Card Games • Live',
-    descriptionAr: 'لعبة البوكر الهندية الملكية الكلاسيكية بـ 3 بطاقات مع رهان 3 كراسي (A, B, C) وموزع آلي فوري وجوائز متصاعدة.',
-    descriptionEn: 'Flagship 3-card Indian poker with 3 betting chairs (A, B, C), live automatic dealer and instant pot showdowns.',
+    categoryLabelAr: 'ألعاب الورق الملكية • مباشر',
+    categoryLabelEn: 'Royal Cards • Live',
+    descriptionAr: 'لعبة البوكر الكلاسيكية بـ 3 بطاقات مع رهان الكراسي المتعددة وجوائز متصاعدة.',
+    descriptionEn: 'Flagship 3-card Indian poker with multiple betting chairs and live dealer.',
     minBet: 50,
     maxBet: 50000,
     activePlayers: 1560,
     isLive: true,
-    badge: '👑 ROYAL VIP',
-    accentColor: 'border-amber-400/80 shadow-amber-500/25',
-    bgGradient: 'from-amber-950/50 via-yellow-950/30 to-slate-900',
+    badge: '👑 EXCLUSIVE',
+    accentColor: 'border-yellow-500/70 shadow-yellow-500/25',
+    bgGradient: 'from-[#1c1303] via-[#0f0a01] to-[#080500]',
     thumbnailIcon: '👑',
   }
 ];
@@ -205,6 +206,7 @@ export const GamesLobby: React.FC<GamesLobbyProps> = ({
   onLogout,
   onOpenAdmin,
   onOpenRecharge,
+  onOpenWithdraw,
   onOpenHistory,
   onOpenRules,
   onOpenRank,
@@ -321,6 +323,17 @@ export const GamesLobby: React.FC<GamesLobbyProps> = ({
                   <span>+</span>
                   <span className="hidden xs:inline">{t.topUp}</span>
                 </button>
+                {onOpenWithdraw && (
+                  <button
+                    id="btn-lobby-withdraw"
+                    onClick={onOpenWithdraw}
+                    className="ml-1 rtl:ml-0 rtl:mr-1 px-2 py-0.5 rounded-full bg-emerald-950 hover:bg-emerald-900 border border-emerald-500/50 text-emerald-300 font-black text-[10px] sm:text-xs transition-transform active:scale-90 cursor-pointer flex items-center gap-0.5 shadow-sm"
+                    title="سحب الأرباح"
+                  >
+                    <DollarSign className="w-2.5 h-2.5 text-emerald-400" />
+                    <span>{language === 'ar' ? 'سحب' : 'Withdraw'}</span>
+                  </button>
+                )}
               </div>
             ) : (
               <button
@@ -431,51 +444,51 @@ export const GamesLobby: React.FC<GamesLobbyProps> = ({
       )}
 
       {/* 3. HERO SHOWCASE & PROGRESSIVE JACKPOT (EYE-SAFE LUXURY DESIGN) */}
-      <div className="relative w-full bg-gradient-to-br from-indigo-950 via-[#0a0f1c] to-[#0d1222] py-8 sm:py-12 border-b border-indigo-500/10">
-        <div className="absolute inset-0 bg-radial-vignette opacity-30 pointer-events-none" />
+      <div className="relative w-full bg-[#050505] py-10 sm:py-16 border-b border-yellow-900/30 overflow-hidden">
+        {/* Luxury subtle background accents */}
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-yellow-900/20 via-[#050505] to-[#050505] pointer-events-none" />
+        <div className="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-yellow-600/50 to-transparent" />
         
         <div className="relative max-w-7xl mx-auto px-4 sm:px-6 flex flex-col items-center text-center">
           
-          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-indigo-950/80 border border-indigo-400/30 text-indigo-200 font-mono font-bold text-xs sm:text-sm mb-4 shadow-lg shadow-indigo-500/10">
-            <Sparkles className="w-4 h-4 text-indigo-400" />
-            <span className="text-indigo-300 tracking-wide">{t.megaJackpot}:</span>
-            <span className="text-amber-400 font-black tracking-wider text-sm sm:text-base">$1,458,920 🪙</span>
+          <div className="inline-flex items-center gap-2 px-5 py-1.5 rounded-full bg-[#0a0a0a] border border-yellow-700/50 text-yellow-200 font-mono font-bold text-xs sm:text-sm mb-6 shadow-[0_0_15px_rgba(202,138,4,0.15)]">
+            <Sparkles className="w-4 h-4 text-yellow-500" />
+            <span className="text-yellow-500/80 tracking-wide uppercase">{t.megaJackpot}:</span>
+            <span className="text-yellow-400 font-black tracking-wider text-sm sm:text-base">$1,458,920 🪙</span>
           </div>
 
-          <h2 className="text-2xl sm:text-4xl md:text-5xl font-black font-serif text-white tracking-tight leading-tight max-w-2xl">
+          <h2 className="text-3xl sm:text-5xl md:text-6xl font-black text-transparent bg-clip-text bg-gradient-to-b from-yellow-100 via-yellow-400 to-yellow-700 tracking-tight leading-tight max-w-3xl drop-shadow-2xl">
             {language === 'ar' ? (
-              <span>كازينو الملوك الفاخر</span>
+              <span>الكازينو الملكي الفاخر</span>
             ) : (
               <span>Grand Royal Casino</span>
             )}
           </h2>
 
-          <p className="mt-3 text-xs sm:text-sm text-slate-400 max-w-lg leading-relaxed">
+          <p className="mt-5 text-sm sm:text-base text-slate-400 max-w-xl leading-relaxed font-medium">
             {language === 'ar'
-              ? 'صالة ألعاب راقية، متوافقة مع جميع الأجهزة بتصميم عصري وألعاب حية ومباشرة.'
+              ? 'تجربة ألعاب راقية، متوافقة مع جميع الأجهزة بتصميم عصري وألعاب حية ومباشرة.'
               : 'Premium gaming lounge, seamlessly optimized for all devices with modern design and live games.'}
           </p>
         </div>
       </div>
 
       {/* 4. MAIN CONTAINER: CATEGORIES + GAME CARDS */}
-      <main className="max-w-7xl mx-auto px-3 sm:px-6 w-full py-6 space-y-6">
+      <main className="max-w-7xl mx-auto px-3 sm:px-6 w-full py-8 space-y-8">
         
         {/* Guest Warning / Call to Action */}
         {!user && (
-          <div className="p-4 rounded-2xl bg-gradient-to-r from-amber-950/40 via-slate-900/90 to-purple-950/40 border border-amber-500/40 shadow-xl flex flex-col sm:flex-row items-center justify-between gap-3 animate-fadeIn">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center justify-center shrink-0">
-                <Crown className="w-5 h-5" />
+          <div className="p-5 rounded-2xl bg-[#0a0a0a] border border-yellow-700/30 shadow-2xl flex flex-col sm:flex-row items-center justify-between gap-4 animate-fadeIn relative overflow-hidden">
+            <div className="absolute inset-0 bg-gradient-to-r from-yellow-900/10 to-transparent pointer-events-none" />
+            <div className="flex items-center gap-4 relative z-10">
+              <div className="w-12 h-12 rounded-xl bg-gradient-to-tr from-yellow-900 to-yellow-600 text-slate-950 flex items-center justify-center shrink-0 shadow-lg">
+                <Crown className="w-6 h-6 fill-slate-950" />
               </div>
               <div>
-                <h3 className="font-bold text-sm text-white flex items-center gap-2">
+                <h3 className="font-black text-base text-yellow-500 flex items-center gap-2">
                   <span>{language === 'ar' ? 'أنت تتصفح كزائر • الرصيد: 0 كوينز' : 'Guest Mode • Balance: 0 Coins'}</span>
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/40">
-                    {language === 'ar' ? 'بدون كوينز وهمية' : 'No Fake Coins'}
-                  </span>
                 </h3>
-                <p className="text-xs text-slate-300 mt-0.5">
+                <p className="text-xs text-slate-400 mt-1">
                   {language === 'ar' 
                     ? 'لبدء تجربة الألعاب وشحن رصيدك الفعلي في حسابك، يرجى تسجيل الدخول أو إنشاء حساب VIP.' 
                     : 'To start playing and recharge real coins to your profile, please register or login to VIP.'}
@@ -485,10 +498,10 @@ export const GamesLobby: React.FC<GamesLobbyProps> = ({
 
             <button
               onClick={onOpenAuth}
-              className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 hover:brightness-110 text-slate-950 font-black text-xs shadow-lg flex items-center gap-1.5 transition-transform active:scale-95 cursor-pointer shrink-0"
+              className="px-6 py-3 rounded-xl bg-gradient-to-r from-yellow-600 via-yellow-400 to-yellow-600 hover:brightness-110 text-slate-950 font-black text-sm shadow-[0_0_20px_rgba(202,138,4,0.3)] flex items-center gap-2 transition-transform active:scale-95 cursor-pointer shrink-0 relative z-10"
             >
               <LogIn className="w-4 h-4" />
-              <span>{language === 'ar' ? 'تسجيل الدخول / إنشاء حساب' : 'Login / Register'}</span>
+              <span>{language === 'ar' ? 'تسجيل الدخول / العضوية' : 'Login / Register VIP'}</span>
             </button>
           </div>
         )}
@@ -716,6 +729,17 @@ export const GamesLobby: React.FC<GamesLobbyProps> = ({
           <Coins className="w-5 h-5 text-amber-400" />
           <span className="text-[10px] font-bold">{t.bottomNavStore}</span>
         </button>
+
+        {/* Withdraw */}
+        {onOpenWithdraw && (
+          <button
+            onClick={onOpenWithdraw}
+            className="flex flex-col items-center gap-0.5 text-emerald-400 hover:text-emerald-300 py-1 px-2 active:scale-95 transition-transform cursor-pointer"
+          >
+            <DollarSign className="w-5 h-5 text-emerald-400" />
+            <span className="text-[10px] font-bold">{language === 'ar' ? 'سحب' : 'Cash Out'}</span>
+          </button>
+        )}
 
         {/* Center Floating "Play Teen Patti" Button */}
         <div className="relative -top-3">

@@ -710,7 +710,7 @@ export const AccountVersionsTab: React.FC<AccountVersionsTabProps> = ({
                         <span className="text-emerald-400 font-bold">{item.newVersion}</span>
                       </div>
                       <span className="text-[10px] text-slate-500">
-                        {(item.timestamp as any)?.toDate ? (item.timestamp as any).toDate().toLocaleString('ar-SA') : 'مؤخراً'}
+                        {item.timestamp && item.timestamp.toDate ? item.timestamp.toDate().toLocaleString('ar-SA') : 'مؤخراً'}
                       </span>
                     </div>
 

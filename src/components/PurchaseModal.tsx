@@ -108,17 +108,11 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({
         <div className="p-4 sm:p-6 overflow-y-auto space-y-5">
           {/* Item Preview Card */}
           <div className="flex items-center gap-3.5 p-3 rounded-xl bg-slate-900/90 border border-slate-800">
-            {gift.posterUrl ? (
-              <img
-                src={gift.posterUrl}
-                alt={gift.title}
-                className="w-16 h-16 rounded-lg object-cover border border-slate-700 shrink-0"
-              />
-            ) : (
-              <div className="w-16 h-16 rounded-lg bg-black border border-cyan-500/40 shrink-0 overflow-hidden relative flex items-center justify-center">
-                <video src={gift.videoUrl ? `${gift.videoUrl}#t=0.001` : undefined} muted playsInline className="w-full h-full object-cover" />
-              </div>
-            )}
+            <img
+              src={gift.posterUrl}
+              alt={gift.title}
+              className="w-16 h-16 rounded-lg object-cover border border-slate-700 shrink-0"
+            />
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
                 <span className="font-bold text-white text-sm truncate">{gift.title}</span>

@@ -30,6 +30,11 @@ export interface SvgaCompressionSettings {
   quality: number; // 0 - 100
   preset?: 'smart' | 'max_quality' | 'high_quality' | 'balanced' | 'high_compression' | 'max_compression' | 'custom';
   scale?: number; // 0.25 - 1.0 (default 1.0)
+  targetWidth?: number; // Custom target width in pixels
+  targetHeight?: number; // Custom target height in pixels
+  lockAspectRatio?: boolean; // Maintain aspect ratio when resizing
+  resizeMode?: 'scale' | 'custom' | 'contain' | 'fit';
+  imageFormat?: 'png' | 'webp' | 'jpeg' | 'auto'; // Choice of image compression format
   optimizeTransforms?: boolean; // round floating numbers to save payload
   stripUnusedImages?: boolean; // remove orphan images from images map
   preserveAudio?: boolean; // Preserve embedded audio tracks completely (default: true)
@@ -70,7 +75,8 @@ export interface SvgaCompressionResult {
 export async function compressImageBuffer(
   imageBytes: Uint8Array,
   quality: number,
-  scale: number = 1.0
+  scale: number = 1.0,
+  imageFormat: 'png' | 'webp' | 'jpeg' | 'auto' = 'png'
 ): Promise<Uint8Array> {
   if (!imageBytes || imageBytes.length === 0) return imageBytes;
 
@@ -80,7 +86,7 @@ export async function compressImageBuffer(
       const url = URL.createObjectURL(blob);
       const img = new Image();
 
-      img.onload = () => {
+      img.onload = async () => {
         URL.revokeObjectURL(url);
         const originalW = img.naturalWidth || img.width;
         const originalH = img.naturalHeight || img.height;
@@ -108,69 +114,75 @@ export async function compressImageBuffer(
         ctx.clearRect(0, 0, targetW, targetH);
         ctx.drawImage(img, 0, 0, targetW, targetH);
 
-        try {
-          const imgData = ctx.getImageData(0, 0, targetW, targetH);
-          
-          // Determine color quantization count
-          // quality >= 95 -> Lossless (0 colors means lossless in UPNG)
-          // quality 80-94 -> 256 colors with full alpha preserving
-          // quality 65-79 -> 128 colors
-          // quality 50-64 -> 64 colors
-          // quality 30-49 -> 32 colors
-          // quality < 30  -> 16 colors
-          let cnum = 0;
-          if (quality >= 95 && (scale === 1.0 || !scale)) {
-            cnum = 0; // Lossless UPNG
-          } else if (quality >= 80) {
-            cnum = 256;
-          } else if (quality >= 65) {
-            cnum = 128;
-          } else if (quality >= 50) {
-            cnum = 64;
-          } else if (quality >= 30) {
-            cnum = 32;
-          } else {
-            cnum = 16;
-          }
+        const candidateBytes: Uint8Array[] = [imageBytes];
 
-          // Encode using UPNG
-          const upngBuffer = UPNG.encode([imgData.data.buffer], targetW, targetH, cnum);
-          const upngUint8 = new Uint8Array(upngBuffer);
-
-          // Verify that UPNG result is smaller than original or resized
-          if (upngUint8.length > 0 && (upngUint8.length < imageBytes.length || scale < 1.0)) {
-            resolve(upngUint8);
-            return;
-          }
-
-          // Fallback to canvas toBlob if UPNG did not save bytes
-          canvas.toBlob((b) => {
-            if (b) {
-              b.arrayBuffer().then((buf) => {
-                const canvasBytes = new Uint8Array(buf);
-                if (canvasBytes.length < imageBytes.length) {
-                  resolve(canvasBytes);
-                } else {
-                  resolve(imageBytes);
-                }
-              }).catch(() => resolve(imageBytes));
-            } else {
-              resolve(imageBytes);
+        // 1. WebP Pass ONLY when explicitly requested as 'webp'
+        // Standard SVGA players and gift animations require standard PNG. WebP in SVGA causes empty layers!
+        if (imageFormat === 'webp') {
+          try {
+            const qFactor = Math.max(0.1, Math.min(1.0, quality / 100));
+            const webpBlob = await new Promise<Blob | null>((res) => canvas.toBlob(res, 'image/webp', qFactor));
+            if (webpBlob && webpBlob.size > 0) {
+              const buf = await webpBlob.arrayBuffer();
+              const webpUint8 = new Uint8Array(buf);
+              if (webpUint8.length > 0) candidateBytes.push(webpUint8);
             }
-          }, 'image/png');
-        } catch {
-          // If UPNG fails on exotic pixel buffers, fallback gracefully
-          canvas.toBlob((b) => {
-            if (b) {
-              b.arrayBuffer().then(buf => {
-                const resBytes = new Uint8Array(buf);
-                resolve(resBytes.length < imageBytes.length ? resBytes : imageBytes);
-              }).catch(() => resolve(imageBytes));
-            } else {
-              resolve(imageBytes);
-            }
-          }, 'image/png');
+          } catch {}
         }
+
+        // 2. JPEG Pass (only if format is 'jpeg' and doesn't require transparency)
+        if (imageFormat === 'jpeg') {
+          try {
+            const qFactor = Math.max(0.1, Math.min(1.0, quality / 100));
+            const jpegBlob = await new Promise<Blob | null>((res) => canvas.toBlob(res, 'image/jpeg', qFactor));
+            if (jpegBlob && jpegBlob.size > 0) {
+              const buf = await jpegBlob.arrayBuffer();
+              const jpegUint8 = new Uint8Array(buf);
+              if (jpegUint8.length > 0) candidateBytes.push(jpegUint8);
+            }
+          } catch {}
+        }
+
+        // 3. PNG / UPNG Pass (Default for 'png' and 'auto')
+        // Strict PNG guarantee with 100% alpha transparency preservation so gift effects always appear!
+        if (imageFormat === 'png' || imageFormat === 'auto' || imageFormat !== 'webp') {
+          try {
+            const imgData = ctx.getImageData(0, 0, targetW, targetH);
+            let cnum = 0;
+            if (quality >= 95 && (scale === 1.0 || !scale)) {
+              cnum = 0; // Lossless UPNG
+            } else if (quality >= 80) {
+              cnum = 256;
+            } else if (quality >= 65) {
+              cnum = 128;
+            } else if (quality >= 50) {
+              cnum = 64;
+            } else if (quality >= 30) {
+              cnum = 32;
+            } else {
+              cnum = 16;
+            }
+
+            const upngBuffer = UPNG.encode([imgData.data.buffer], targetW, targetH, cnum);
+            const upngUint8 = new Uint8Array(upngBuffer);
+            if (upngUint8.length > 0 && upngUint8[0] === 0x89 && upngUint8[1] === 0x50) {
+              candidateBytes.push(upngUint8);
+            }
+          } catch {
+            const pngBlob = await new Promise<Blob | null>((res) => canvas.toBlob(res, 'image/png'));
+            if (pngBlob) {
+              const buf = await pngBlob.arrayBuffer();
+              const pngUint8 = new Uint8Array(buf);
+              if (pngUint8.length > 0 && pngUint8[0] === 0x89 && pngUint8[1] === 0x50) {
+                candidateBytes.push(pngUint8);
+              }
+            }
+          }
+        }
+
+        // Sort candidates by size ascending and pick the smallest valid candidate
+        candidateBytes.sort((a, b) => a.length - b.length);
+        resolve(candidateBytes[0] || imageBytes);
       };
 
       img.onerror = () => {
@@ -442,7 +454,7 @@ export async function compressSvgaFile(
       try {
         const imgBlob = await entry.async('blob');
         const imgBuffer = new Uint8Array(await imgBlob.arrayBuffer());
-        const compressedBytes = await compressImageBuffer(imgBuffer, effectiveQuality, effectiveScale);
+        const compressedBytes = await compressImageBuffer(imgBuffer, effectiveQuality, effectiveScale, settings.imageFormat || 'png');
 
         if (compressedBytes.length < imgBuffer.length) {
           zip.file(path, compressedBytes);
@@ -556,6 +568,61 @@ export async function compressSvgaFile(
     frames: movie.params?.frames || 0
   };
 
+  const origW = originalParams.viewBoxWidth || 750;
+  const origH = originalParams.viewBoxHeight || 750;
+
+  // Calculate target dimensions
+  let targetW = origW;
+  let targetH = origH;
+
+  if (settings.targetWidth && settings.targetHeight) {
+    targetW = Math.max(10, Math.round(settings.targetWidth));
+    targetH = Math.max(10, Math.round(settings.targetHeight));
+  } else if (settings.targetWidth) {
+    targetW = Math.max(10, Math.round(settings.targetWidth));
+    targetH = Math.max(10, Math.round(origH * (targetW / origW)));
+  } else if (settings.targetHeight) {
+    targetH = Math.max(10, Math.round(settings.targetHeight));
+    targetW = Math.max(10, Math.round(origW * (targetH / origH)));
+  } else if (effectiveScale && effectiveScale !== 1.0) {
+    targetW = Math.max(10, Math.round(origW * effectiveScale));
+    targetH = Math.max(10, Math.round(origH * effectiveScale));
+  }
+
+  const scaleX = targetW / origW;
+  const scaleY = targetH / origH;
+  const imgScale = Math.min(scaleX, scaleY);
+
+  // Update movie params viewBox
+  if (movie.params) {
+    movie.params.viewBoxWidth = targetW;
+    movie.params.viewBoxHeight = targetH;
+  }
+
+  // Scale sprite layouts and frame transforms if target dimensions differ from original
+  if ((Math.abs(scaleX - 1.0) > 0.0001 || Math.abs(scaleY - 1.0) > 0.0001) && movie.sprites) {
+    for (const sprite of movie.sprites) {
+      if (sprite.frames && Array.isArray(sprite.frames)) {
+        for (const frame of sprite.frames) {
+          if (frame.layout) {
+            if (frame.layout.x !== undefined) frame.layout.x = Math.round(frame.layout.x * scaleX * 1000) / 1000;
+            if (frame.layout.y !== undefined) frame.layout.y = Math.round(frame.layout.y * scaleY * 1000) / 1000;
+            if (frame.layout.width !== undefined) frame.layout.width = Math.round(frame.layout.width * scaleX * 1000) / 1000;
+            if (frame.layout.height !== undefined) frame.layout.height = Math.round(frame.layout.height * scaleY * 1000) / 1000;
+          }
+          if (frame.transform) {
+            if (frame.transform.tx !== undefined) frame.transform.tx = Math.round(frame.transform.tx * scaleX * 100) / 100;
+            if (frame.transform.ty !== undefined) frame.transform.ty = Math.round(frame.transform.ty * scaleY * 100) / 100;
+            if (frame.transform.a !== undefined) frame.transform.a = Math.round((frame.transform.a !== undefined ? frame.transform.a : 1) * scaleX * 10000) / 10000;
+            if (frame.transform.b !== undefined) frame.transform.b = Math.round((frame.transform.b || 0) * scaleY * 10000) / 10000;
+            if (frame.transform.c !== undefined) frame.transform.c = Math.round((frame.transform.c || 0) * scaleX * 10000) / 10000;
+            if (frame.transform.d !== undefined) frame.transform.d = Math.round((frame.transform.d !== undefined ? frame.transform.d : 1) * scaleY * 10000) / 10000;
+          }
+        }
+      }
+    }
+  }
+
   const spriteCount = movie.sprites ? movie.sprites.length : 0;
   const audioCount = movie.audios ? movie.audios.length : 0;
 
@@ -601,9 +668,9 @@ export async function compressSvgaFile(
       }
 
       try {
-        const compressedBytes = await compressImageBuffer(rawData, effectiveQuality, effectiveScale);
-        // Only replace if smaller
-        if (compressedBytes.length < rawData.length) {
+        const compressedBytes = await compressImageBuffer(rawData, effectiveQuality, imgScale, settings.imageFormat || 'png');
+        // Replace if smaller or if scaled
+        if (compressedBytes.length < rawData.length || imgScale < 0.99) {
           movie.images[key] = compressedBytes;
         }
       } catch (err) {
@@ -647,8 +714,8 @@ export async function compressSvgaFile(
   const savingPercent = originalSizeBytes > 0 ? Math.round((savedBytes / originalSizeBytes) * 100) : 0;
 
   const stats: SvgaFileStats = {
-    viewBoxWidth: originalParams.viewBoxWidth,
-    viewBoxHeight: originalParams.viewBoxHeight,
+    viewBoxWidth: targetW,
+    viewBoxHeight: targetH,
     fps: originalParams.fps,
     frames: originalParams.frames,
     imageCount: totalImages,

@@ -1,119 +1,216 @@
-import React, { useState } from 'react';
-import { Play, Download, Sparkles } from 'lucide-react';
-import {
-  type GiftItem,
-  CATEGORY_LABELS,
-  formatBytes,
-} from '../utils/catalogLogic';
+import React, { useState, useRef } from 'react';
+import { Play, Eye, ShoppingCart, CheckCircle2, Sparkles, Flame, MessageCircle, Crown } from 'lucide-react';
+import { GiftItem, Language } from '../types';
+import { translations } from '../utils/translations';
 
 interface GiftCardProps {
   gift: GiftItem;
-  onPreview: (gift: GiftItem) => void;
+  lang: Language;
+  onSelectGift: (gift: GiftItem) => void;
+  onQuickBuy: (gift: GiftItem) => void;
+  onAddToCart: (gift: GiftItem) => void;
 }
 
-export const GiftCard: React.FC<GiftCardProps> = ({ gift, onPreview }) => {
-  const [imgFailed, setImgFailed] = useState(false);
-  const categoryInfo = CATEGORY_LABELS[gift.category];
+export const GiftCard: React.FC<GiftCardProps> = ({
+  gift,
+  lang,
+  onSelectGift,
+  onQuickBuy,
+  onAddToCart
+}) => {
+  const t = translations[lang];
+  const [isHovered, setIsHovered] = useState(false);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+
+  const handleMouseEnter = () => {
+    setIsHovered(true);
+    if (videoRef.current) {
+      videoRef.current.currentTime = 0;
+      videoRef.current.play().catch(() => {
+        // Autoplay may be restricted if user hasn't interacted
+      });
+    }
+  };
+
+  const handleMouseLeave = () => {
+    setIsHovered(false);
+    if (videoRef.current) {
+      videoRef.current.pause();
+    }
+  };
+
+  const displayTitle = lang === 'ar' && gift.titleAr ? gift.titleAr : lang === 'en' && gift.titleEn ? gift.titleEn : gift.title;
+  const isVipGift = !!(gift.isVip || (gift.vipPrice && gift.vipPrice > 0));
 
   return (
-    <article
-      className="group relative flex flex-col rounded-2xl bg-[#120E1E]/90 border border-white/10 hover:border-[#D4AF37]/50 transition-all duration-200 hover:-translate-y-0.5 overflow-hidden"
+    <div
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
+      onClick={() => onSelectGift(gift)}
+      className="group relative flex flex-col rounded-3xl bg-[#131722] border border-slate-800/90 hover:border-cyan-500/60 transition-all duration-300 hover:shadow-2xl hover:shadow-cyan-950/30 overflow-hidden cursor-pointer"
     >
-      {/* Thumbnail Stage (70% height focus) */}
-      <div
-        onClick={() => onPreview(gift)}
-        role="button"
-        tabIndex={0}
-        aria-label={`معاينة الهدية ${gift.name}`}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            onPreview(gift);
-          }
-        }}
-        className="relative aspect-square w-full bg-[radial-gradient(circle_at_center,#251642_0%,#0B0813_78%)] flex items-center justify-center p-6 cursor-pointer overflow-hidden"
-      >
-        {!imgFailed && gift.thumbnailUrl ? (
-          <img
-            src={gift.thumbnailUrl}
-            alt={gift.name}
-            loading="lazy"
-            referrerPolicy="no-referrer"
-            onError={() => setImgFailed(true)}
-            className="w-full h-full object-contain transition-transform duration-300 group-hover:scale-105"
-          />
-        ) : (
-          <div className="flex flex-col items-center justify-center text-center p-4">
-            <Sparkles className="w-12 h-12 text-[#D4AF37] mb-2" />
-            <span className="font-mono text-sm font-bold text-white">{gift.format}</span>
-            <span className="text-xs text-slate-400 mt-1">{gift.name}</span>
-          </div>
-        )}
+      {/* Visual Container - Square (1:1), Spacious & Comfortable on the eye matching exact gift dimensions */}
+      <div className="relative aspect-square w-full overflow-hidden bg-slate-950 flex items-center justify-center">
+        {/* Ambient background glow for high aesthetic comfort */}
+        <div className="absolute inset-0 bg-gradient-to-b from-indigo-950/20 via-transparent to-slate-950/40 pointer-events-none" />
 
-        {/* Measured subtle scrim & hover quick-play overlay */}
-        <div className="absolute inset-0 bg-gradient-to-t from-[#08060E]/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-end justify-center p-4">
-          <span className="text-xs font-semibold text-[#F8FAFC] flex items-center gap-1.5 bg-[#08060E]/85 border border-[#D4AF37]/40 px-3.5 py-1.5 rounded-lg">
-            <Play className="w-3.5 h-3.5 text-[#D4AF37] fill-current" />
-            <span>معاينة الحركة الأصلية</span>
-          </span>
+        {/* Background Poster Image - Centered and nicely proportioned */}
+        <img
+          src={gift.posterUrl || undefined}
+          alt={displayTitle}
+          className={`w-full h-full object-contain p-2 transition-all duration-300 ${
+            isHovered ? 'opacity-20 scale-95' : 'opacity-100 scale-100'
+          }`}
+          loading="lazy"
+        />
+
+        {/* Hovering Live Video Stream Preview */}
+        {gift.videoUrl ? (
+          <video
+            ref={videoRef}
+            src={gift.videoUrl}
+            loop
+            muted
+            playsInline
+            className={`absolute inset-0 w-full h-full object-contain p-2 transition-opacity duration-300 ${
+              isHovered ? 'opacity-100' : 'opacity-0 pointer-events-none'
+            }`}
+          />
+        ) : null}
+
+        {/* Top Badges Row: Status on start, VIP & Format on end - completely separated with ample spacing */}
+        <div className="absolute top-3 inset-x-3 flex items-center justify-between pointer-events-none z-10 gap-3">
+          {/* Status Badge (Flame / New / Original) */}
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="px-2.5 py-1 rounded-lg bg-gradient-to-r from-red-600 to-pink-600 text-white text-[10px] font-black shadow-md uppercase tracking-wider flex items-center gap-1.5 shrink-0 border border-red-400/40">
+              <Flame className="w-3 h-3 fill-current" />
+              <span>{gift.isNew ? (lang === 'ar' ? 'جديد' : '新秀') : (lang === 'ar' ? 'أصلي' : '原创')}</span>
+            </span>
+          </div>
+
+          {/* VIP Badge & Format Badge - Positioned far apart from the status badge */}
+          <div className="flex items-center gap-2 shrink-0">
+            {isVipGift && (
+              <span className="px-2.5 py-1 rounded-lg bg-gradient-to-r from-amber-400 via-yellow-400 to-amber-500 text-slate-950 text-[10px] font-black shadow-lg shadow-amber-500/20 border border-amber-300 flex items-center gap-1.5 shrink-0">
+                <Crown className="w-3 h-3 fill-current text-slate-950" />
+                <span>VIP</span>
+              </span>
+            )}
+
+            <span className="px-2.5 py-1 rounded-lg bg-slate-900/90 backdrop-blur-md text-cyan-300 text-[10px] font-mono font-bold border border-slate-700/80 shadow-md shrink-0">
+              {gift.formats?.[0]?.name?.split('带')?.[0] || 'SVGA'}
+            </span>
+          </div>
+        </div>
+
+        {/* Overlay Hover Actions */}
+        <div
+          className={`absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/40 to-transparent flex flex-col justify-end p-3 transition-opacity duration-200 ${
+            isHovered ? 'opacity-100' : 'opacity-0 pointer-events-none'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onSelectGift(gift);
+              }}
+              className="flex-1 py-1.5 rounded-lg bg-slate-800/90 hover:bg-slate-700 text-white text-xs font-semibold flex items-center justify-center gap-1 border border-slate-700 backdrop-blur"
+            >
+              <Eye className="w-3.5 h-3.5 text-cyan-400" />
+              <span>{lang === 'ar' ? 'معاينة' : '试看'}</span>
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onQuickBuy(gift);
+              }}
+              className="flex-1 py-1.5 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-xs font-bold flex items-center justify-center gap-1 shadow-md shadow-cyan-500/20"
+            >
+              <ShoppingCart className="w-3.5 h-3.5" />
+              <span>{t.buyNowBtn}</span>
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* Content & Unboxed Metadata */}
-      <div className="p-4 sm:p-5 flex-1 flex flex-col justify-between">
+      {/* Card Info Section - 100% clone of video */}
+      <div className="p-3.5 flex flex-col flex-1 justify-between gap-2.5">
         <div>
-          {/* Unboxed quiet metadata with typographic separators (Zero-Pill Discipline) */}
-          <div className="flex items-center gap-1.5 text-xs text-slate-400 mb-1.5">
-            <span className="text-[#D4AF37] font-medium">{categoryInfo.labelAr}</span>
-            <span aria-hidden="true">·</span>
-            <span className="font-mono font-semibold text-slate-200">{gift.format}</span>
-            <span aria-hidden="true">·</span>
-            <span className="font-mono tabular-nums">{formatBytes(gift.sizeBytes)}</span>
+          {/* Title & Price Line */}
+          <div className="flex items-center justify-between gap-2 mb-1.5">
+            <h3 className="text-sm font-bold text-slate-100 group-hover:text-cyan-300 transition-colors truncate">
+              {displayTitle}
+            </h3>
+            <span className="text-emerald-400 font-extrabold text-sm whitespace-nowrap">
+              $ {gift.price} <span className="text-[10px] text-emerald-300/80 font-semibold">USD</span>
+            </span>
           </div>
 
-          <h3 className="text-base font-bold text-white group-hover:text-[#FDE68A] transition-colors line-clamp-1 mb-1">
-            {gift.name}
-          </h3>
+          {/* Tags line: [AI 原创] [主题] [礼物] [2D/3D] */}
+          <div className="flex flex-wrap items-center gap-1 mb-2">
+            <span className="text-[10px] px-1.5 py-0.2 rounded bg-cyan-950/70 text-cyan-400 border border-cyan-800/50">
+              AI 原创
+            </span>
+            <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-800/90 text-slate-300 border border-slate-700/60">
+              {gift.theme}
+            </span>
+            <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-800/90 text-slate-300 border border-slate-700/60">
+              礼物
+            </span>
+            <span className="text-[10px] px-1.5 py-0.2 rounded bg-blue-950/70 text-blue-300 border border-blue-800/50 font-semibold">
+              {gift.effectType}
+            </span>
+          </div>
 
-          <p className="text-xs text-slate-400 line-clamp-2 leading-relaxed mb-4">
-            {gift.description}
-          </p>
+          {/* Details line: NO. ID + 全网排他 */}
+          <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono">
+            <span>{gift.id}</span>
+            <span className="text-slate-400">
+              {t.exclusiveLabel}: ${gift.exclusivePrice}
+            </span>
+          </div>
         </div>
 
-        {/* Technical Capabilities & Action Buttons */}
-        <div className="pt-3 border-t border-white/10 flex items-center justify-between gap-2">
-          <div className="text-[11px] text-slate-400 truncate">
-            {gift.hasAudio ? 'صوت مدمج' : 'بدون صوت'}
-            {' · '}
-            {gift.hasAlpha ? 'شفاف Alpha' : 'كامل'}
-          </div>
+        {/* Creator Info Footer with WhatsApp direct contact */}
+        <div className="pt-2 border-t border-slate-800/70 flex items-center justify-between text-[11px]">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <img
+              src={gift.author.avatar || undefined}
+              alt={gift.author.name}
+              className="w-4 h-4 rounded-full object-cover shrink-0"
+            />
+            <span className="text-slate-300 font-medium truncate max-w-[95px] hover:text-cyan-300" title={gift.author.name}>
+              {gift.author.name}
+            </span>
+            {gift.author.verified && (
+              <CheckCircle2 className="w-3 h-3 text-cyan-400 shrink-0" />
+            )}
 
-          <div className="flex items-center gap-2 shrink-0">
-            <button
-              type="button"
-              onClick={() => onPreview(gift)}
-              aria-label={`معاينة ${gift.name}`}
-              className="px-3 py-1.5 rounded-lg bg-[#D4AF37]/15 hover:bg-[#D4AF37] text-[#FDE68A] hover:text-[#08060E] border border-[#D4AF37]/30 text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0"
-            >
-              <Play className="w-3.5 h-3.5" />
-              <span>معاينة</span>
-            </button>
-
-            {gift.allowDownload && (
+            {/* Direct WhatsApp Chat Trigger */}
+            {gift.author.whatsapp && (
               <a
-                href={gift.originalUrl}
-                download={`${gift.name}.${gift.format.toLowerCase()}`}
+                href={`https://wa.me/${gift.author.whatsapp.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(
+                  lang === 'ar'
+                    ? `مرحباً، أنا مهتم بالحصول على مؤثر البث [${displayTitle} - ${gift.id}] المعروض في المنصة.`
+                    : `Hello! I am inquiring about the live stream gift effect [${displayTitle} - ${gift.id}].`
+                )}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                aria-label={`تنزيل ${gift.name}`}
-                className="p-1.5 rounded-lg bg-white/5 hover:bg-white/15 text-slate-300 hover:text-white border border-white/10 transition-colors shrink-0"
+                onClick={(e) => e.stopPropagation()}
+                title={lang === 'ar' ? `تواصل مع ${gift.author.name} عبر واتساب: ${gift.author.whatsapp}` : `Chat on WhatsApp: ${gift.author.whatsapp}`}
+                className="p-1 rounded bg-emerald-950/60 hover:bg-emerald-600/80 text-emerald-400 hover:text-white border border-emerald-800/60 transition-colors shrink-0 flex items-center justify-center shadow-sm"
               >
-                <Download className="w-3.5 h-3.5" />
+                <MessageCircle className="w-3 h-3" />
               </a>
             )}
           </div>
+
+          <div className="text-[10px] text-slate-400">
+            {lang === 'ar' ? `تحميل ${gift.downloadsCount}` : `已下载 ${gift.downloadsCount}`}
+          </div>
         </div>
       </div>
-    </article>
+    </div>
   );
 };

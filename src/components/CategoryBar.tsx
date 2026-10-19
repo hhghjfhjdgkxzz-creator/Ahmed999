@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { ChevronLeft, ChevronRight, Flame } from 'lucide-react';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { Language } from '../types';
 
 export interface CategoryItem {
@@ -26,7 +26,6 @@ export const CategoryBar: React.FC<CategoryBarProps> = ({
 
   const defaultCategories: CategoryItem[] = [
     { id: 'all', name: 'All Categories', nameAr: 'كافة التصنيفات', nameEn: 'All Categories' },
-    { id: 'new', name: 'NEW', nameAr: '🔥 جديد', nameEn: '🔥 NEW' },
     { id: 'frames', name: 'Avatar Frames', nameAr: 'إطارات الأفاتار', nameEn: 'Avatar Frames' },
     { id: 'medals', name: 'Medals & Badges', nameAr: 'الأوسمة والشارات', nameEn: 'Medals & Badges' },
     { id: 'chat_bubbles', name: 'Chat Bubbles', nameAr: 'فقاعات الشات', nameEn: 'Chat Bubbles' },
@@ -84,28 +83,6 @@ export const CategoryBar: React.FC<CategoryBarProps> = ({
       >
         {mergedCategories.map((cat) => {
           const isActive = selectedCategory === cat.id;
-          const isNewCat = cat.id === 'new';
-
-          if (isNewCat) {
-            return (
-              <button
-                key={cat.id}
-                onClick={() => onSelectCategory(cat.id)}
-                className={`shrink-0 group relative px-4 py-2 rounded-2xl text-xs sm:text-sm font-black transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 shadow-lg select-none transform-gpu ${
-                  isActive
-                    ? 'bg-gradient-to-r from-red-600 via-orange-500 to-amber-500 text-white border-t border-amber-200/90 border-b border-red-900 border-x border-orange-400 shadow-[0_4px_16px_rgba(239,68,68,0.55),0_1px_0_rgba(255,255,255,0.6)_inset] scale-105'
-                    : 'bg-gradient-to-r from-red-950/80 via-orange-950/70 to-slate-900/90 hover:from-red-900/90 hover:to-orange-900/90 text-orange-200 hover:text-white border border-orange-500/50 hover:border-orange-400/80 shadow-[0_3px_10px_rgba(220,38,38,0.25)] hover:scale-[1.02]'
-                }`}
-              >
-                <Flame className="w-4 h-4 text-amber-300 fill-orange-500 animate-pulse drop-shadow-[0_0_8px_rgba(249,115,22,0.9)]" />
-                <span className="tracking-wide drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] font-black">
-                  {lang === 'ar' ? 'جديد' : lang === 'zh' ? '新品' : 'NEW'}
-                </span>
-                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shadow-[0_0_6px_#fbbf24] animate-ping" />
-              </button>
-            );
-          }
-
           return (
             <button
               key={cat.id}

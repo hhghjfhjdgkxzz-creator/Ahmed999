@@ -1,6 +1,12 @@
 import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Layers, Play, Pause, RotateCcw, Trash2, Maximize2, Info, Upload, X, Download, Image as ImageIcon, ShieldCheck, Monitor, Smartphone, Loader2, Camera, Video, Film, FileVideo, Volume2, Music , SquareCheck, Gift, Sparkles, FileText, Lock, Key, Square, CheckSquare, Check, SlidersHorizontal, Sliders } from 'lucide-react';
+import { 
+  Layers, Play, Pause, RotateCcw, Trash2, Maximize2, Info, Upload, FolderUp, X, Download, 
+  Image as ImageIcon, ShieldCheck, Shield, ShieldAlert, Scroll, Monitor, Smartphone, Loader2, Camera, Video, Film, FileVideo, 
+  Volume2, Music, SquareCheck, Gift, Sparkles, FileText, Lock, Unlock, Key, Square, CheckSquare, 
+  Check, SlidersHorizontal, Sliders, Clock, Plus, Minus, Zap, Archive, FileCode, CheckCircle2, Globe,
+  Grid, LayoutGrid, Type, Palette, RotateCw, RefreshCw, Pin, Bookmark, Star, FastForward
+} from 'lucide-react';
 import { db } from '../lib/firebase';
 import { collection, getDocs } from 'firebase/firestore';
 import { PresetBackground, UserRecord } from '../types';
@@ -14,6 +20,7 @@ import { createStreamingZip } from '../utils/streamZip';
 import { calculateSafeDimensions } from '../utils/dimensions';
 import { getPAG, convertPagToSvga } from '../utils/pagEngine';
 import { normalizeSvgaFile } from "../utils/svgaNormalizer";
+import { isSvgaContent, detectIsSvga, ensureSvgaFile } from '../utils/svgaUniversalEngine';
 import { ensureMp3WithId3, extractAllAudiosFromSvga } from '../utils/svgaAudio';
 import {
   extractAllSvgaAudioTracks,
@@ -25,9 +32,24 @@ import {
 } from '../utils/svgaVideoAudioExporter';
 import Vap from 'video-animation-player';
 import { extractVapConfigFromBlob, convertVapToMp4, WebGLVapRenderer, seekVideoToFrame, VapConfig } from '../utils/vapEngine';
+import { 
+  exportAsVap, 
+  exportAsYyeva, 
+  exportAsGif, 
+  exportAsWebp, 
+  exportAsApng, 
+  exportAsPngFramesZip 
+} from './AnimationManager/utils/exportEngine';
+
+export type ViewerExportFormat = 'mp4' | 'webm' | 'vap' | 'yyeva' | 'gif' | 'webp' | 'apng' | 'png_seq' | 'svga';
 import { downloadDesignerInfoFile } from '../utils/designerInfo';
+import { drawUniversalWatermarkOnCanvas, getSavedWatermarkSettings } from '../utils/watermarkAndBackground';
 import { extractSvgaFromPdfFile, PdfUnlockRequest } from '../utils/pdfSvgaExtractor';
 import { generateSvgaAllInOnePdf, SvgaPdfItem } from '../utils/svgaAllInOnePdfGenerator';
+import { SvgaActionDock } from './SvgaActionDock';
+import { VideoDurationSpeedModal } from './VideoDurationSpeedModal';
+import { MultiSvgaWatermarkModal } from './MultiSvgaWatermarkModal';
+import { AeExportModal } from './AeExportModal';
 
 const decodeDataToBytes = (data: any): Uint8Array | null => {
   if (!data) return null;
@@ -61,91 +83,643 @@ const decodeDataToBytes = (data: any): Uint8Array | null => {
   return null;
 };
 
+export type ViewerWatermarkPattern = 
+  | 'smooth_right_glide' 
+  | 'wave_3d' 
+  | 'diagonal_repeat' 
+  | 'horizontal_bands' 
+  | 'floating' 
+  | 'circular_orbit' 
+  | 'cube_rotation' 
+  | 'pulse' 
+  | 'single_position' 
+  | 'custom_drag';
+
+export type ViewerWatermarkShape = 
+  | 'pill' 
+  | 'glass_card' 
+  | 'neon_glow' 
+  | 'futuristic_hud' 
+  | 'stamp_seal' 
+  | 'ribbon_badge' 
+  | 'golden_vip' 
+  | 'minimal_clean';
+
+export type ViewerWatermarkType = 'text' | 'image' | 'both';
+export type ViewerWatermarkPosition = 
+  | 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' | 'center' 
+  | 'top-center' | 'bottom-center' | 'center-left' | 'center-right';
+
+export interface ViewerWatermarkSettings {
+  enabled: boolean;
+  type: ViewerWatermarkType;
+  text: string;
+  logoUrl?: string | null;
+  pattern: ViewerWatermarkPattern;
+  shape?: ViewerWatermarkShape;
+  position: ViewerWatermarkPosition;
+  customX?: number; // 0 to 100 percentage
+  customY?: number; // 0 to 100 percentage
+  opacity: number;
+  fontSize: number;
+  color: string;
+  angle: number;
+  spacingX: number;
+  spacingY: number;
+  shadow: boolean;
+  isAnimated?: boolean;
+  animationSpeed?: number;
+  speed?: number;
+  animationType?: 'drift' | 'floating' | 'marquee' | 'pulse' | 'orbit' | 'wave_3d' | 'smooth_right_glide';
+  [key: string]: any;
+}
+
 const WatermarkOverlay: React.FC<{
-  watermark: string;
+  watermark?: string | null;
   settings: any;
-}> = ({ watermark, settings }) => {
+  onUpdateSettings?: (newSettings: Partial<ViewerWatermarkSettings>) => void;
+  onOpenModal?: () => void;
+}> = ({ watermark, settings, onUpdateSettings, onOpenModal }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const imgRef = useRef<HTMLImageElement>(null);
-  
+  const badgeRef = useRef<HTMLDivElement>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [showControls, setShowControls] = useState(false);
+
+  const isEnabled = settings?.enabled !== false && (settings?.enabled || watermark || (settings?.text && settings.text.trim().length > 0));
+  if (!isEnabled) return null;
+
+  const pattern: ViewerWatermarkPattern = settings?.pattern || 'smooth_right_glide';
+  const shape: ViewerWatermarkShape = settings?.shape || 'pill';
+  const type: ViewerWatermarkType = settings?.type || (watermark ? (settings?.text ? 'both' : 'image') : 'text');
+  const color = settings?.color || '#ffffff';
+  const text = settings?.text || 'Ahmed SVGA • Ahmed SVGA';
+  const opacity = settings?.opacity !== undefined ? settings.opacity : 0.45;
+  const angle = settings?.angle !== undefined ? settings.angle : -25;
+  const logoSrc = settings?.logoUrl || watermark || null;
+  const hasText = (type === 'text' || type === 'both') && !!text.trim();
+  const hasLogo = (type === 'image' || type === 'both') && !!logoSrc;
+  const isAnimated = settings?.isAnimated !== false;
+  const animSpeed = settings?.animationSpeed || settings?.speed || 4;
+  const driftDuration = Math.max(1.8, 16 - animSpeed * 1.3);
+
+  // Drag and Drop support
+  const handleDragStart = (clientX: number, clientY: number) => {
+    if (!containerRef.current) return;
+    setIsDragging(true);
+
+    const onMove = (moveEvent: MouseEvent | TouchEvent) => {
+      if (!containerRef.current) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      const curX = 'touches' in moveEvent ? moveEvent.touches[0].clientX : moveEvent.clientX;
+      const curY = 'touches' in moveEvent ? moveEvent.touches[0].clientY : moveEvent.clientY;
+
+      const pctX = Math.max(5, Math.min(95, ((curX - rect.left) / rect.width) * 100));
+      const pctY = Math.max(5, Math.min(95, ((curY - rect.top) / rect.height) * 100));
+
+      if (onUpdateSettings) {
+        onUpdateSettings({
+          pattern: 'custom_drag',
+          customX: Math.round(pctX),
+          customY: Math.round(pctY)
+        });
+      }
+    };
+
+    const onEnd = () => {
+      setIsDragging(false);
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onEnd);
+      window.removeEventListener('touchmove', onMove);
+      window.removeEventListener('touchend', onEnd);
+    };
+
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onEnd);
+    window.addEventListener('touchmove', onMove);
+    window.addEventListener('touchend', onEnd);
+  };
+
+  // Speed Adjustment
+  const adjustSpeed = (delta: number) => {
+    if (!onUpdateSettings) return;
+    const current = settings?.animationSpeed || 4;
+    const next = Math.max(1, Math.min(10, current + delta));
+    onUpdateSettings({ animationSpeed: next, speed: next });
+  };
+
+  const setSpeedPreset = (val: number) => {
+    if (!onUpdateSettings) return;
+    onUpdateSettings({ animationSpeed: val, speed: val });
+  };
+
+  // Floating bounce animation loop
   useEffect(() => {
-    if (!settings.isAnimated || !containerRef.current || !imgRef.current) return;
-    
+    if (pattern !== 'floating' || !containerRef.current || !badgeRef.current || !isAnimated) return;
+
     let animationFrameId: number;
     let startTime: number | null = null;
-    
+
     const animate = (time: number) => {
       if (!startTime) startTime = time;
       const elapsed = time - startTime;
-      // Approximate frame based on 30fps
       const frame = Math.floor((elapsed / 1000) * 30);
-      
+
       const container = containerRef.current;
-      if (!container) return;
-      
-      const wmSize = Math.min(container.clientWidth, container.clientHeight) * (settings.size / 100);
-      const speed = settings.animationSpeed || 5;
-      const pxPerFrame = speed * 0.8;
-      
-      const maxX = Math.max(1, container.clientWidth - wmSize);
-      const maxY = Math.max(1, container.clientHeight - wmSize);
-      
+      const badge = badgeRef.current;
+      if (!container || !badge) return;
+
+      const badgeW = badge.offsetWidth || 140;
+      const badgeH = badge.offsetHeight || 34;
+      const speed = settings?.animationSpeed || 4;
+      const pxPerFrame = speed * 1.1;
+
+      const maxX = Math.max(1, container.clientWidth - badgeW);
+      const maxY = Math.max(1, container.clientHeight - badgeH);
+
       if (maxX > 0 && maxY > 0) {
         const distX = frame * pxPerFrame;
-        const distY = frame * pxPerFrame * 0.75;
-        
+        const distY = frame * pxPerFrame * 0.7;
+
         const modX = distX % (maxX * 2);
         const modY = distY % (maxY * 2);
-        
+
         const x = modX > maxX ? (maxX * 2) - modX : modX;
         const y = modY > maxY ? (maxY * 2) - modY : modY;
-        
-        if (imgRef.current) {
-          imgRef.current.style.transform = `translate(${x}px, ${y}px)`;
-          imgRef.current.style.width = `${wmSize}px`;
-          imgRef.current.style.height = `${wmSize}px`;
-        }
+
+        badge.style.transform = `translate(${x}px, ${y}px)`;
       }
-      
+
       animationFrameId = requestAnimationFrame(animate);
     };
-    
+
     animationFrameId = requestAnimationFrame(animate);
     return () => cancelAnimationFrame(animationFrameId);
-  }, [settings]);
+  }, [isEnabled, pattern, isAnimated, settings?.animationSpeed]);
 
-  if (!watermark) return null;
-
-  const staticStyle: React.CSSProperties = {
-    opacity: settings.opacity,
-    position: 'absolute',
-    pointerEvents: 'none',
-    zIndex: 50,
+  const getShapeStyle = (): { className: string; style?: React.CSSProperties } => {
+    switch (shape) {
+      case 'glass_card':
+        return {
+          className: 'px-4 py-2 rounded-2xl backdrop-blur-xl border font-black text-xs shadow-2xl transition-all',
+          style: {
+            backgroundColor: 'rgba(6, 10, 24, 0.82)',
+            borderColor: 'rgba(255, 255, 255, 0.22)',
+            color,
+            boxShadow: '0 8px 32px rgba(0,0,0,0.6)'
+          }
+        };
+      case 'neon_glow':
+        return {
+          className: 'px-4 py-2 rounded-2xl border-2 font-black text-xs transition-all',
+          style: {
+            backgroundColor: 'rgba(3, 7, 18, 0.92)',
+            borderColor: color,
+            color,
+            boxShadow: `0 0 25px ${color}80, inset 0 0 10px ${color}30`
+          }
+        };
+      case 'futuristic_hud':
+        return {
+          className: 'px-4 py-2 rounded-lg border-x-4 border-y font-mono font-black text-xs tracking-widest transition-all',
+          style: {
+            backgroundColor: 'rgba(5, 8, 20, 0.92)',
+            borderColor: color,
+            color,
+            boxShadow: `0 0 20px ${color}40`
+          }
+        };
+      case 'stamp_seal':
+        return {
+          className: 'px-4 py-2 rounded-full border-2 border-dashed font-black text-xs -rotate-3 transition-all',
+          style: {
+            backgroundColor: 'rgba(20, 10, 5, 0.92)',
+            borderColor: color,
+            color,
+            boxShadow: `0 0 20px ${color}40`
+          }
+        };
+      case 'ribbon_badge':
+        return {
+          className: 'px-4 py-2 rounded-lg border-r-4 border-l border-y font-black text-xs transition-all',
+          style: {
+            backgroundColor: 'rgba(15, 10, 30, 0.92)',
+            borderColor: color,
+            color,
+            boxShadow: `0 0 20px ${color}40`
+          }
+        };
+      case 'golden_vip':
+        return {
+          className: 'px-4 py-2 rounded-2xl border font-black text-xs transition-all',
+          style: {
+            background: 'linear-gradient(135deg, rgba(30,20,5,0.95), rgba(10,5,0,0.95))',
+            borderColor: '#f59e0b',
+            color: '#fef08a',
+            boxShadow: '0 0 25px rgba(245,158,11,0.45)'
+          }
+        };
+      case 'minimal_clean':
+        return {
+          className: 'p-1 font-black text-xs transition-all',
+          style: {
+            color,
+            textShadow: '0 2px 8px rgba(0,0,0,0.9), 0 0 12px rgba(0,0,0,0.8)'
+          }
+        };
+      case 'pill':
+      default:
+        return {
+          className: 'flex items-center gap-2 px-3.5 py-1.5 rounded-full backdrop-blur-md border shadow-2xl font-black text-xs tracking-wide transition-all',
+          style: {
+            backgroundColor: 'rgba(5, 8, 18, 0.88)',
+            borderColor: `${color}50`,
+            color,
+            boxShadow: `0 0 20px ${color}35`
+          }
+        };
+    }
   };
 
-  if (!settings.isAnimated) {
-    staticStyle.width = `${settings.size}%`;
-    staticStyle.height = `${settings.size}%`;
-    staticStyle.objectFit = 'contain';
-    
-    if (settings.position === 'top-left') { staticStyle.top = '5%'; staticStyle.left = '5%'; }
-    else if (settings.position === 'top-right') { staticStyle.top = '5%'; staticStyle.right = '5%'; }
-    else if (settings.position === 'bottom-left') { staticStyle.bottom = '5%'; staticStyle.left = '5%'; }
-    else if (settings.position === 'bottom-right') { staticStyle.bottom = '5%'; staticStyle.right = '5%'; }
-    else if (settings.position === 'center') { 
-      staticStyle.top = '50%'; staticStyle.left = '50%'; 
-      staticStyle.transform = 'translate(-50%, -50%)';
-    }
-  } else {
-    staticStyle.top = 0;
-    staticStyle.left = 0;
-  }
+  const shapeConfig = getShapeStyle();
+
+  const renderBadgeContent = (extraClass = '') => (
+    <span className={`inline-flex items-center gap-1.5 select-none ${extraClass}`}>
+      {hasLogo && logoSrc && (
+        <img src={logoSrc} className="w-4 h-4 sm:w-5 sm:h-5 object-contain inline shrink-0 drop-shadow" alt="" />
+      )}
+      {hasText && (
+        <span 
+          style={{ 
+            color,
+            textShadow: settings?.shadow !== false ? '0 2px 4px rgba(0,0,0,0.85), 0 0 10px rgba(0,0,0,0.7)' : 'none'
+          }}
+        >
+          {text}
+        </span>
+      )}
+    </span>
+  );
 
   return (
-    <div ref={containerRef} className="absolute inset-0 pointer-events-none overflow-hidden">
-      <img ref={imgRef} src={watermark} style={staticStyle} alt="watermark" />
+    <div 
+      ref={containerRef} 
+      className="absolute inset-0 pointer-events-none overflow-hidden select-none z-40"
+      onMouseEnter={() => setShowControls(true)}
+      onMouseLeave={() => setShowControls(false)}
+    >
+      <style>{`
+        @keyframes wmPulseAnim {
+          0%, 100% { transform: scale(0.95); opacity: ${Math.max(0.2, opacity * 0.8)}; }
+          50% { transform: scale(1.06); opacity: ${opacity}; filter: drop-shadow(0 0 14px ${color}80); }
+        }
+        @keyframes wmGridDrift {
+          0% { transform: rotate(${angle}deg) translate(0px, 0px); }
+          50% { transform: rotate(${angle}deg) translate(-70px, -45px) scale(1.02); }
+          100% { transform: rotate(${angle}deg) translate(-140px, -90px); }
+        }
+        @keyframes wmMarqueeFlow {
+          0% { transform: translateX(0); }
+          100% { transform: translateX(-50%); }
+        }
+        @keyframes wmSmoothRightGlide {
+          0% { 
+            transform: translateX(110%) translateY(0px) rotateY(-15deg) rotateZ(-2deg); 
+            opacity: 0.2;
+          }
+          15% {
+            opacity: ${opacity};
+          }
+          50% {
+            transform: translateX(0%) translateY(-15px) rotateY(0deg) rotateZ(0deg);
+            opacity: ${opacity};
+          }
+          85% {
+            opacity: ${opacity};
+          }
+          100% { 
+            transform: translateX(-110%) translateY(10px) rotateY(15deg) rotateZ(2deg); 
+            opacity: 0.2;
+          }
+        }
+        @keyframes wmWave3DLoop {
+          0% { transform: translateX(120%) translateY(20px) scale(0.85) rotate(-4deg); }
+          50% { transform: translateX(0%) translateY(-25px) scale(1.1) rotate(2deg); }
+          100% { transform: translateX(-120%) translateY(20px) scale(0.85) rotate(-4deg); }
+        }
+        @keyframes wmOrbit3DLoop {
+          0% { transform: translate(-50%, -50%) rotate(0deg) translateX(120px) rotate(0deg) scale(0.85); }
+          50% { transform: translate(-50%, -50%) rotate(180deg) translateX(120px) rotate(-180deg) scale(1.15); }
+          100% { transform: translate(-50%, -50%) rotate(360deg) translateX(120px) rotate(-360deg) scale(0.85); }
+        }
+        @keyframes wmCubeRotateLoop {
+          0% { transform: translate(-50%, -50%) rotateY(0deg) rotateX(0deg); }
+          50% { transform: translate(-50%, -50%) rotateY(180deg) rotateX(20deg) scale(1.08); }
+          100% { transform: translate(-50%, -50%) rotateY(360deg) rotateX(0deg); }
+        }
+      `}</style>
+
+      {/* Floating Speed & Mode Control Pill on Hover */}
+      {onUpdateSettings && (
+        <div 
+          className={`absolute top-2 right-2 pointer-events-auto z-50 flex items-center gap-1.5 p-1.5 rounded-2xl bg-black/85 backdrop-blur-xl border border-cyan-500/40 shadow-2xl transition-all duration-200 ${
+            showControls ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-2 pointer-events-none'
+          }`}
+          dir="rtl"
+        >
+          <span className="text-[10px] font-bold text-slate-300 pr-1 flex items-center gap-1">
+            ⚡ السرعة:
+          </span>
+          <button
+            type="button"
+            onClick={() => adjustSpeed(-1)}
+            className="w-5 h-5 flex items-center justify-center rounded-lg bg-white/10 hover:bg-white/20 text-cyan-300 font-bold text-xs transition-all cursor-pointer"
+            title="تبطيء السرعة 🐢"
+          >
+            -
+          </button>
+          <span className="text-[10px] font-mono font-black text-cyan-400 px-1">
+            {animSpeed}x
+          </span>
+          <button
+            type="button"
+            onClick={() => adjustSpeed(1)}
+            className="w-5 h-5 flex items-center justify-center rounded-lg bg-white/10 hover:bg-white/20 text-cyan-300 font-bold text-xs transition-all cursor-pointer"
+            title="تسريع السرعة 🚀"
+          >
+            +
+          </button>
+
+          <div className="w-[1px] h-4 bg-white/20 mx-0.5" />
+
+          {/* Quick Speed Presets */}
+          <button
+            type="button"
+            onClick={() => setSpeedPreset(2)}
+            className={`px-1.5 py-0.5 rounded-lg text-[9px] font-bold transition-all ${animSpeed <= 2 ? 'bg-cyan-500 text-slate-950 font-black' : 'text-slate-400 hover:text-white'}`}
+          >
+            بطيء 🐢
+          </button>
+          <button
+            type="button"
+            onClick={() => setSpeedPreset(4)}
+            className={`px-1.5 py-0.5 rounded-lg text-[9px] font-bold transition-all ${animSpeed > 2 && animSpeed <= 5 ? 'bg-cyan-500 text-slate-950 font-black' : 'text-slate-400 hover:text-white'}`}
+          >
+            عادي ⚡
+          </button>
+          <button
+            type="button"
+            onClick={() => setSpeedPreset(8)}
+            className={`px-1.5 py-0.5 rounded-lg text-[9px] font-bold transition-all ${animSpeed > 5 ? 'bg-cyan-500 text-slate-950 font-black' : 'text-slate-400 hover:text-white'}`}
+          >
+            سريع 🚀
+          </button>
+
+          {onOpenModal && (
+            <button
+              type="button"
+              onClick={onOpenModal}
+              className="p-1 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 text-[9px] font-bold ml-0.5"
+              title="تخصيص كامل للأشكال والأنماط"
+            >
+              ⚙️
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* 1. Smooth Right 3D Glide Pattern (حركة انسيابية ثلاثية الأبعاد من اليمين) */}
+      {pattern === 'smooth_right_glide' && (
+        <div 
+          className="absolute inset-0 flex items-center justify-center pointer-events-none"
+          style={{ opacity }}
+        >
+          <div 
+            className="will-change-transform pointer-events-auto cursor-grab active:cursor-grabbing"
+            style={{
+              animation: isAnimated ? `wmSmoothRightGlide ${driftDuration}s ease-in-out infinite` : 'none',
+              perspective: '800px'
+            }}
+            onMouseDown={(e) => handleDragStart(e.clientX, e.clientY)}
+            onTouchStart={(e) => handleDragStart(e.touches[0].clientX, e.touches[0].clientY)}
+            title="انزلاق سلس ثلاثي الأبعاد من اليمين • يمكنك السحب والإفلات لتحديد موضع مخصص"
+          >
+            <div className={shapeConfig.className} style={shapeConfig.style}>
+              {renderBadgeContent()}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 2. Wave 3D Sweep Pattern */}
+      {pattern === 'wave_3d' && (
+        <div 
+          className="absolute inset-0 flex items-center justify-center pointer-events-none"
+          style={{ opacity }}
+        >
+          <div 
+            className="will-change-transform pointer-events-auto cursor-grab active:cursor-grabbing"
+            style={{
+              animation: isAnimated ? `wmWave3DLoop ${driftDuration * 1.2}s ease-in-out infinite` : 'none',
+              perspective: '1000px'
+            }}
+            onMouseDown={(e) => handleDragStart(e.clientX, e.clientY)}
+            onTouchStart={(e) => handleDragStart(e.touches[0].clientX, e.touches[0].clientY)}
+          >
+            <div className={shapeConfig.className} style={shapeConfig.style}>
+              {renderBadgeContent()}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 3. Circular Orbit 3D Pattern */}
+      {pattern === 'circular_orbit' && (
+        <div 
+          className="absolute inset-0 flex items-center justify-center pointer-events-none"
+          style={{ opacity }}
+        >
+          <div 
+            className="absolute top-1/2 left-1/2 will-change-transform pointer-events-auto cursor-grab active:cursor-grabbing"
+            style={{
+              animation: isAnimated ? `wmOrbit3DLoop ${driftDuration * 1.4}s linear infinite` : 'none',
+            }}
+            onMouseDown={(e) => handleDragStart(e.clientX, e.clientY)}
+            onTouchStart={(e) => handleDragStart(e.touches[0].clientX, e.touches[0].clientY)}
+          >
+            <div className={shapeConfig.className} style={shapeConfig.style}>
+              {renderBadgeContent()}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 4. Cube Rotation 3D Pattern */}
+      {pattern === 'cube_rotation' && (
+        <div 
+          className="absolute inset-0 flex items-center justify-center pointer-events-none"
+          style={{ opacity }}
+        >
+          <div 
+            className="absolute top-1/2 left-1/2 will-change-transform pointer-events-auto cursor-grab active:cursor-grabbing"
+            style={{
+              animation: isAnimated ? `wmCubeRotateLoop ${driftDuration * 1.5}s ease-in-out infinite` : 'none',
+              transformStyle: 'preserve-3d',
+              perspective: '800px'
+            }}
+            onMouseDown={(e) => handleDragStart(e.clientX, e.clientY)}
+            onTouchStart={(e) => handleDragStart(e.touches[0].clientX, e.touches[0].clientY)}
+          >
+            <div className={shapeConfig.className} style={shapeConfig.style}>
+              {renderBadgeContent()}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 5. Custom Draggable Position (السحب والإفلات الحر) */}
+      {pattern === 'custom_drag' && (
+        <div 
+          className="absolute pointer-events-auto cursor-grab active:cursor-grabbing will-change-transform z-40 transition-transform hover:scale-105"
+          style={{
+            left: `${settings?.customX !== undefined ? settings.customX : 75}%`,
+            top: `${settings?.customY !== undefined ? settings.customY : 80}%`,
+            transform: 'translate(-50%, -50%)',
+            opacity
+          }}
+          onMouseDown={(e) => handleDragStart(e.clientX, e.clientY)}
+          onTouchStart={(e) => handleDragStart(e.touches[0].clientX, e.touches[0].clientY)}
+          title="موضع حر (اسحب للإفلات في أي مكان على الشاشة 🎯)"
+        >
+          <div className={shapeConfig.className} style={shapeConfig.style}>
+            {renderBadgeContent()}
+          </div>
+        </div>
+      )}
+
+      {/* 6. Diagonal Repeat Pattern */}
+      {pattern === 'diagonal_repeat' && (
+        <div 
+          className="absolute inset-0 flex items-center justify-center pointer-events-none overflow-hidden"
+          style={{ opacity }}
+        >
+          <div 
+            className="w-[320%] h-[320%] -translate-x-[40%] -translate-y-[40%] flex flex-col justify-around select-none pointer-events-none will-change-transform"
+            style={{ 
+              transform: `rotate(${angle}deg)`,
+              animation: isAnimated ? `wmGridDrift ${driftDuration}s linear infinite alternate` : 'none'
+            }}
+          >
+            {Array.from({ length: 11 }).map((_, rowIdx) => (
+              <div 
+                key={rowIdx} 
+                className="flex justify-around whitespace-nowrap text-xs sm:text-sm font-black tracking-wider"
+                style={{ 
+                  transform: rowIdx % 2 === 1 ? 'translateX(55px)' : 'none'
+                }}
+              >
+                {Array.from({ length: 8 }).map((_, colIdx) => (
+                  <span key={colIdx} className="px-5 py-2.5 inline-flex items-center gap-2 opacity-95">
+                    {renderBadgeContent()}
+                  </span>
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 7. Horizontal Bands Pattern */}
+      {pattern === 'horizontal_bands' && (
+        <div 
+          className="absolute inset-0 flex flex-col justify-around pointer-events-none overflow-hidden py-3"
+          style={{ opacity }}
+        >
+          {Array.from({ length: 6 }).map((_, rowIdx) => (
+            <div 
+              key={rowIdx} 
+              className="flex justify-around whitespace-nowrap text-xs font-black tracking-wider py-1 border-y border-white/5 bg-black/10 backdrop-blur-[1px] will-change-transform"
+              style={{
+                animation: isAnimated ? `wmMarqueeFlow ${driftDuration * 0.7}s linear infinite` : 'none'
+              }}
+            >
+              {Array.from({ length: 8 }).map((_, colIdx) => (
+                <span key={colIdx} className="px-4 inline-flex items-center gap-1.5">
+                  {renderBadgeContent()}
+                </span>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* 8. Floating Bouncing Badge */}
+      {pattern === 'floating' && (
+        <div
+          ref={badgeRef}
+          className="absolute top-2 left-2 pointer-events-auto cursor-grab active:cursor-grabbing will-change-transform"
+          style={{ opacity }}
+          onMouseDown={(e) => handleDragStart(e.clientX, e.clientY)}
+          onTouchStart={(e) => handleDragStart(e.touches[0].clientX, e.touches[0].clientY)}
+          title="عائم متحرك (اسحب لتغيير الموضع)"
+        >
+          <div className={shapeConfig.className} style={shapeConfig.style}>
+            {renderBadgeContent()}
+          </div>
+        </div>
+      )}
+
+      {/* 9. Pulsing Corner Badge */}
+      {pattern === 'pulse' && (
+        <div 
+          className="absolute bottom-3 right-3 pointer-events-auto cursor-grab active:cursor-grabbing"
+          style={{ animation: isAnimated ? 'wmPulseAnim 2.2s ease-in-out infinite' : 'none', opacity }}
+          onMouseDown={(e) => handleDragStart(e.clientX, e.clientY)}
+          onTouchStart={(e) => handleDragStart(e.touches[0].clientX, e.touches[0].clientY)}
+        >
+          <div className={shapeConfig.className} style={shapeConfig.style}>
+            {renderBadgeContent()}
+          </div>
+        </div>
+      )}
+
+      {/* 10. Single Fixed Position */}
+      {pattern === 'single_position' && (
+        <div 
+          className={`absolute pointer-events-auto cursor-grab active:cursor-grabbing p-3 flex ${
+            settings?.position === 'top-left' ? 'top-2 left-2' :
+            settings?.position === 'top-center' ? 'top-2 left-1/2 -translate-x-1/2' :
+            settings?.position === 'top-right' ? 'top-2 right-2' :
+            settings?.position === 'center-left' ? 'top-1/2 left-2 -translate-y-1/2' :
+            settings?.position === 'center' ? 'top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2' :
+            settings?.position === 'center-right' ? 'top-1/2 right-2 -translate-y-1/2' :
+            settings?.position === 'bottom-left' ? 'bottom-2 left-2' :
+            settings?.position === 'bottom-center' ? 'bottom-2 left-1/2 -translate-x-1/2' :
+            'bottom-2 right-2'
+          }`}
+          style={{ opacity }}
+          onMouseDown={(e) => handleDragStart(e.clientX, e.clientY)}
+          onTouchStart={(e) => handleDragStart(e.touches[0].clientX, e.touches[0].clientY)}
+          title="موضع ثابت (يمكنك سحب العلامة وإفلاتها لتغيير مكانها بحرية)"
+        >
+          <div className={shapeConfig.className} style={shapeConfig.style}>
+            {renderBadgeContent()}
+          </div>
+        </div>
+      )}
     </div>
   );
+};
+
+const drawWatermarkOnCanvasHelper = (
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  frame: number,
+  settings: any,
+  wmImg?: HTMLImageElement | null
+) => {
+  const activeSettings = settings || getSavedWatermarkSettings();
+  drawUniversalWatermarkOnCanvas(ctx, width, height, frame, activeSettings, wmImg);
 };
 
 const extractAudioData = (item: any): Uint8Array | null => {
@@ -212,6 +786,10 @@ export interface MultiSvgaItem {
   scale?: number;
   posX?: number;
   posY?: number;
+  avatarWidth?: number;
+  avatarHeight?: number;
+  lockAvatarAspect?: boolean;
+  avatarImgUrl?: string;
 }
 
 interface MultiSvgaViewerProps {
@@ -349,7 +927,7 @@ export const MultiSvgaViewer: React.FC<MultiSvgaViewerProps> = ({ onCancel, curr
   const [isDragging, setIsDragging] = useState(false);
   const [previewBg, setPreviewBg] = useState<string | null>(null);
   const [watermark, setWatermark] = useState<string | null>(null);
-  const [exportFormat, setExportFormat] = useState<'mp4' | 'webm'>('mp4');
+  const [exportFormat, setExportFormat] = useState<ViewerExportFormat>('mp4');
   const [presetBgs, setPresetBgs] = useState<PresetBackground[]>([]);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
@@ -359,7 +937,8 @@ export const MultiSvgaViewer: React.FC<MultiSvgaViewerProps> = ({ onCancel, curr
   const isCanceled = useRef(false);
   const [useNativeDuration, setUseNativeDuration] = useState(true);
   const [exportDuration, setExportDuration] = useState(10);
-  const [gridCols, setGridCols] = useState(3);
+  const [showDurationSpeedModal, setShowDurationSpeedModal] = useState(false);
+  const [gridCols, setGridCols] = useState(4);
   const [forceMobileSize, setForceMobileSize] = useState(false);
   const initialFilesLoadedRef = useRef(false);
   const [exportResolution, setExportResolution] = useState<'natural' | '720p' | '1080p'>('natural');
@@ -369,16 +948,53 @@ export const MultiSvgaViewer: React.FC<MultiSvgaViewerProps> = ({ onCancel, curr
   const [customWidth, setCustomWidth] = useState<number | null>(null);
   const [customHeight, setCustomHeight] = useState<number | null>(null);
   const [isCustomDimensionsActive, setIsCustomDimensionsActive] = useState<boolean>(false);
+  const [lockAspectRatio, setLockAspectRatio] = useState<boolean>(false);
+  const [fitMode, setFitMode] = useState<'contain' | 'cover' | 'fill' | 'native'>('contain');
   const [includePdfCatalog, setIncludePdfCatalog] = useState(false);
+  const [pdfOptionSingle, setPdfOptionSingle] = useState(true);
+  const [pdfOptionCatalog, setPdfOptionCatalog] = useState(false);
+  const [isExportingCustomPdf, setIsExportingCustomPdf] = useState(false);
   const [isPdfAllInOneExporting, setIsPdfAllInOneExporting] = useState(false);
   const [pdfAllInOneProgress, setPdfAllInOneProgress] = useState(0);
   const [preventDuplicates, setPreventDuplicates] = useState(true);
   const preventDuplicatesRef = useRef(true);
+  const [pageSize, setPageSize] = useState<number>(36);
+  const [currentPage, setCurrentPage] = useState<number>(1);
   useEffect(() => {
     preventDuplicatesRef.current = preventDuplicates;
   }, [preventDuplicates]);
   const [dedupNotice, setDedupNotice] = useState<{ count: number; names: string[] } | null>(null);
+  const [isDockCollapsed, setIsDockCollapsed] = useState(true);
+  const [showSideDock, setShowSideDock] = useState(false);
+  const [globalPaused, setGlobalPaused] = useState(false);
+  const [isAeExportModalOpen, setIsAeExportModalOpen] = useState(false);
+  const [aeExportItem, setAeExportItem] = useState<MultiSvgaItem | null>(null);
+
+  const handleOpenAeExportModal = useCallback((item?: MultiSvgaItem) => {
+    const target = item || (selectedItemId ? items.find(i => i.id === selectedItemId) : items[0]);
+    if (!target) {
+      alert('يرجى اختيار أو رفع ملف SVGA أولاً لتصديره ونقله إلى After Effects.');
+      return;
+    }
+    setAeExportItem(target);
+    setIsAeExportModalOpen(true);
+  }, [selectedItemId, items]);
+
+  useEffect(() => {
+    (window as any).handleOpenAeExportModal = handleOpenAeExportModal;
+    return () => {
+      try {
+        delete (window as any).handleOpenAeExportModal;
+      } catch(e){}
+    };
+  }, [handleOpenAeExportModal]);
   
+  // Use a ref to pass to child components to avoid unnecessary re-renders
+  const globalPausedRef = useRef(false);
+  useEffect(() => {
+    globalPausedRef.current = globalPaused;
+  }, [globalPaused]);
+
   const selectedPreset = useMemo(() => DEVICE_PRESETS.find(p => p.id === selectedPresetId), [selectedPresetId]);
 
   const [vapBatchProgress, setVapBatchProgress] = useState<{
@@ -393,13 +1009,135 @@ export const MultiSvgaViewer: React.FC<MultiSvgaViewerProps> = ({ onCancel, curr
     fileStatuses: { id: string; name: string; status: 'pending' | 'processing' | 'done' | 'error'; errorMsg?: string }[];
   } | null>(null);
 
-  const [wmSettings, setWmSettings] = useState({
-    position: 'bottom-right' as 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' | 'center',
-    size: 15,
-    opacity: 0.5,
-    isAnimated: false,
-    animationSpeed: 5
+  const [pinnedName, setPinnedName] = useState<string>(() => {
+    try {
+      return localStorage.getItem('svga_permanent_watermark_text') || 'Ahmed SVGA • Ahmed SVGA';
+    } catch (e) {
+      return 'Ahmed SVGA • Ahmed SVGA';
+    }
   });
+
+  const [savedPresets, setSavedPresets] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem('svga_saved_watermark_presets');
+      if (raw) return JSON.parse(raw);
+    } catch (e) {}
+    return ['Ahmed SVGA • Ahmed SVGA', '🔒 محتوى محمي - يمنع السرقة', 'SVGA AHMED STUDIO'];
+  });
+
+  const [pinnedNotice, setPinnedNotice] = useState<string | null>(null);
+
+  const [wmSettings, setWmSettings] = useState<ViewerWatermarkSettings>(() => {
+    try {
+      const savedText = localStorage.getItem('svga_permanent_watermark_text');
+      const savedRaw = localStorage.getItem('svga_watermark_settings');
+      if (savedRaw) {
+        const parsed = JSON.parse(savedRaw);
+        return {
+          ...parsed,
+          text: savedText || parsed.text || 'Ahmed SVGA • Ahmed SVGA',
+          isAnimated: parsed.isAnimated !== undefined ? parsed.isAnimated : true,
+          animationSpeed: parsed.animationSpeed || 5
+        };
+      }
+      if (savedText) {
+        return {
+          enabled: true,
+          type: 'text',
+          text: savedText,
+          logoUrl: null,
+          pattern: 'diagonal_repeat',
+          position: 'bottom-right',
+          opacity: 0.35,
+          fontSize: 22,
+          color: '#ffffff',
+          angle: -25,
+          spacingX: 200,
+          spacingY: 120,
+          shadow: true,
+          isAnimated: true,
+          animationSpeed: 5
+        };
+      }
+    } catch (e) {}
+    return {
+      enabled: true,
+      type: 'text',
+      text: 'Ahmed SVGA • Ahmed SVGA',
+      logoUrl: null,
+      pattern: 'diagonal_repeat',
+      position: 'bottom-right',
+      opacity: 0.35,
+      fontSize: 22,
+      color: '#ffffff',
+      angle: -25,
+      spacingX: 200,
+      spacingY: 120,
+      shadow: true,
+      isAnimated: true,
+      animationSpeed: 5
+    };
+  });
+
+  // Guarantee permanent localStorage synchronization on every wmSettings change
+  useEffect(() => {
+    try {
+      localStorage.setItem('svga_watermark_settings', JSON.stringify(wmSettings));
+      if (wmSettings.text && wmSettings.text.trim()) {
+        localStorage.setItem('svga_permanent_watermark_text', wmSettings.text.trim());
+      }
+    } catch (e) {}
+  }, [wmSettings]);
+
+  const updateAndSaveWmSettings = (updater: ViewerWatermarkSettings | ((prev: ViewerWatermarkSettings) => ViewerWatermarkSettings)) => {
+    setWmSettings(prev => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      try {
+        localStorage.setItem('svga_watermark_settings', JSON.stringify(next));
+        if (next.text && next.text.trim()) {
+          localStorage.setItem('svga_permanent_watermark_text', next.text.trim());
+        }
+      } catch (e) {}
+      return next;
+    });
+  };
+
+  const pinAsPermanentDefault = (textToPin?: string) => {
+    const text = (textToPin !== undefined ? textToPin : wmSettings.text).trim();
+    if (!text) return;
+    try {
+      localStorage.setItem('svga_permanent_watermark_text', text);
+      setPinnedName(text);
+      updateAndSaveWmSettings(prev => ({ ...prev, text }));
+      setPinnedNotice(`✓ تم تثبيت "${text}" كاسم دائم لك بنجاح! سيتم اعتماده تلقائياً كل مرة.`);
+      setTimeout(() => setPinnedNotice(null), 4500);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const addCustomPreset = (nameToAdd: string) => {
+    const text = nameToAdd.trim();
+    if (!text || savedPresets.includes(text)) return;
+    const updated = [text, ...savedPresets].slice(0, 10);
+    setSavedPresets(updated);
+    try {
+      localStorage.setItem('svga_saved_watermark_presets', JSON.stringify(updated));
+      setPinnedNotice(`✓ تمت إضافة "${text}" إلى قائمة أسمائك السريعة`);
+      setTimeout(() => setPinnedNotice(null), 3000);
+    } catch (e) {}
+  };
+
+  const removeCustomPreset = (nameToRemove: string) => {
+    const updated = savedPresets.filter(p => p !== nameToRemove);
+    setSavedPresets(updated);
+    try {
+      localStorage.setItem('svga_saved_watermark_presets', JSON.stringify(updated));
+    } catch (e) {}
+  };
+
+  const [isWatermarkModalOpen, setIsWatermarkModalOpen] = useState(false);
+  const [groupFolders, setGroupFolders] = useState<boolean>(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const bgInputRef = useRef<HTMLInputElement>(null);
@@ -499,6 +1237,17 @@ export const MultiSvgaViewer: React.FC<MultiSvgaViewerProps> = ({ onCancel, curr
     for (const item of fileObjects) {
       if (!item?.file) continue;
       const lowerName = (item.file.name || '').toLowerCase();
+
+      // Check if file is SVGA directly (from internal binary content regardless of name)
+      const isDirectSvga = Boolean((item.file as any).__isSvga) || (await isSvgaContent(item.file));
+      if (isDirectSvga) {
+        const { file: norm } = await ensureSvgaFile(item.file);
+        (norm as any).__isSvga = true;
+        (norm as any).__originalName = item.file.name;
+        expandedList.push({ file: norm, folderName: item.folderName, folderPath: item.folderPath });
+        continue;
+      }
+
       if (lowerName.endsWith('.zip')) {
         try {
           const zip = await JSZip.loadAsync(item.file);
@@ -556,6 +1305,25 @@ export const MultiSvgaViewer: React.FC<MultiSvgaViewerProps> = ({ onCancel, curr
                   console.warn("Could not extract nested PDF in zip:", filename, innerPdfErr);
                   setPdfStatusMessage(null);
                 }
+              } else {
+                // Content-based check for files without .svga extension inside ZIP
+                try {
+                  const blob = await entry.async('blob');
+                  const isEntrySvga = await isSvgaContent(blob);
+                  if (isEntrySvga) {
+                    const cleanName = filename.split('/').pop() || filename;
+                    if (!cleanName.startsWith('._') && !cleanName.startsWith('.')) {
+                      const pathParts = filename.split('/').filter(Boolean);
+                      const folderPath = pathParts.length > 1 ? pathParts.slice(0, -1).join('/') : item.folderPath;
+                      const folderName = pathParts.length > 1 ? pathParts[pathParts.length - 2] : (item.folderName || '');
+                      const normName = cleanName.toLowerCase().endsWith('.svga') ? cleanName : `${cleanName}.svga`;
+                      const extractedFile = new File([blob], normName, { type: 'application/octet-stream' });
+                      (extractedFile as any).__isSvga = true;
+                      (extractedFile as any).__originalName = cleanName;
+                      expandedList.push({ file: extractedFile, folderName, folderPath });
+                    }
+                  }
+                } catch {}
               }
             }
           }
@@ -594,18 +1362,46 @@ export const MultiSvgaViewer: React.FC<MultiSvgaViewerProps> = ({ onCancel, curr
       }
     }
 
-    const fileArray = expandedList.filter(f => {
-      if (!f?.file?.name) return false;
+    const fileArray: {file: File, folderName?: string, folderPath?: string}[] = [];
+    for (const f of expandedList) {
+      if (!f?.file) continue;
       const name = (f.file.name || '').toLowerCase();
-      if (name.startsWith('._') || name.startsWith('.')) return false;
-      return name.endsWith('.svga') || name.endsWith('.pag') || name.endsWith('.vap') || name.endsWith('.mp4');
-    });
+      if (name.startsWith('._') || name.startsWith('.')) continue;
+
+      if ((f.file as any).__isSvga) {
+        fileArray.push(f);
+        continue;
+      }
+
+      if (name.endsWith('.svga') || name.endsWith('.pag') || name.endsWith('.vap') || name.endsWith('.mp4')) {
+        fileArray.push(f);
+        continue;
+      }
+
+      // Check content for files with other or no extensions
+      try {
+        const isSvga = await isSvgaContent(f.file);
+        if (isSvga) {
+          const { file: normalized } = await ensureSvgaFile(f.file);
+          (normalized as any).__isSvga = true;
+          (normalized as any).__originalName = f.file.name;
+          fileArray.push({
+            file: normalized,
+            folderName: f.folderName,
+            folderPath: f.folderPath
+          });
+        }
+      } catch (err) {
+        console.warn("SVGA content detection error for file:", f.file.name, err);
+      }
+    }
     if (fileArray.length === 0) return;
     
+    let loadedCount = 0;
     setLoadProgress({ current: 0, total: fileArray.length });
     isCanceled.current = false;
     
-    const BATCH_SIZE = 25;
+    const BATCH_SIZE = 16;
     for (let i = 0; i < fileArray.length; i += BATCH_SIZE) {
       if (isCanceled.current) break;
       const batch = fileArray.slice(i, i + BATCH_SIZE);
@@ -614,6 +1410,7 @@ export const MultiSvgaViewer: React.FC<MultiSvgaViewerProps> = ({ onCancel, curr
           const lowerName = item.file.name.toLowerCase();
           const isPag = lowerName.endsWith('.pag');
           const isVap = lowerName.endsWith('.vap') || lowerName.endsWith('.mp4');
+          const isSvga = Boolean((item.file as any).__isSvga) || lowerName.endsWith('.svga') || (!isPag && !isVap);
           const itemType: 'svga' | 'pag' | 'vap' = isPag ? 'pag' : (isVap ? 'vap' : 'svga');
           let normalizedFile = item.file;
           if (itemType === 'svga') {
@@ -622,12 +1419,33 @@ export const MultiSvgaViewer: React.FC<MultiSvgaViewerProps> = ({ onCancel, curr
           const url = URL.createObjectURL(normalizedFile);
           
           let vapConfig: any = null;
-          let dimensions: { width: number; height: number } | undefined = undefined;
-          let fps: number | undefined = undefined;
-          let frames: number | undefined = undefined;
-          let duration: number | undefined = undefined;
+          let dimensions: { width: number; height: number } | undefined = { width: 500, height: 500 };
+          let fps: number | undefined = 30;
+          let frames: number | undefined = 1;
+          let duration: number | undefined = 1;
 
-          if (itemType === 'vap') {
+          if (itemType === 'svga') {
+            // High-speed ingestion: Default dimensions assigned instantly, full frame parsing done on-demand in viewport to prevent memory crash
+            fps = 30;
+            frames = 1;
+            duration = 1;
+            dimensions = { width: 500, height: 500 };
+          } else if (itemType === 'pag') {
+            try {
+              const PAG = await getPAG();
+              const pagFile = await PAG.PAGFile.load(await item.file.arrayBuffer());
+              if (pagFile) {
+                const dur = (pagFile.duration() / 1000000) || 1;
+                const pfps = pagFile.frameRate() || 30;
+                fps = pfps;
+                duration = dur;
+                frames = Math.max(1, Math.round(dur * pfps));
+                dimensions = { width: pagFile.width() || 500, height: pagFile.height() || 500 };
+              }
+            } catch (e) {
+              console.warn("PAG metadata extraction error in handleFiles", e);
+            }
+          } else if (itemType === 'vap') {
             try {
               vapConfig = await extractVapConfigFromBlob(item.file);
               if (vapConfig?.info) {
@@ -663,12 +1481,12 @@ export const MultiSvgaViewer: React.FC<MultiSvgaViewerProps> = ({ onCancel, curr
             }
           }
 
-          return {
+          const resultItem = {
             id: Math.random().toString(36).substr(2, 9),
-            file: item.file,
+            file: normalizedFile,
             url,
-            name: item.file.name,
-            size: item.file.size,
+            name: (item.file as any).__originalName || item.file.name,
+            size: normalizedFile.size || item.file.size,
             type: itemType,
             presetId: 'auto',
             folderName: item.folderName,
@@ -679,8 +1497,14 @@ export const MultiSvgaViewer: React.FC<MultiSvgaViewerProps> = ({ onCancel, curr
             frames,
             duration
           } as MultiSvgaItem;
+
+          loadedCount++;
+          setLoadProgress({ current: loadedCount, total: fileArray.length });
+          return resultItem;
         } catch (err) {
           console.error("Error processing item in batch:", item.file?.name, err);
+          loadedCount++;
+          setLoadProgress({ current: loadedCount, total: fileArray.length });
           return null;
         }
       }))).filter(Boolean) as MultiSvgaItem[];
@@ -713,7 +1537,6 @@ export const MultiSvgaViewer: React.FC<MultiSvgaViewerProps> = ({ onCancel, curr
 
         return [...prev, ...filteredNew];
       });
-      setLoadProgress({ current: Math.min(i + BATCH_SIZE, fileArray.length), total: fileArray.length });
       await new Promise(r => setTimeout(r, 10));
     }
     setLoadProgress(null);
@@ -822,6 +1645,38 @@ export const MultiSvgaViewer: React.FC<MultiSvgaViewerProps> = ({ onCancel, curr
     setItems([]);
     setSelectedItemIds(new Set());
   };
+
+  const handleUploadFolders = useCallback(() => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.multiple = true;
+    input.webkitdirectory = true;
+    input.onchange = (e: any) => {
+      if (e.target.files) {
+        const fileObjects = Array.from(e.target.files as FileList).map(file => ({
+          file,
+          folderPath: file.webkitRelativePath.split('/').slice(0, -1).join('/'),
+          folderName: file.webkitRelativePath.split('/').slice(-2, -1)[0]
+        }));
+        handleFiles(fileObjects);
+      }
+    };
+    input.click();
+  }, [handleFiles]);
+
+  const handleExtractFromPdf = useCallback(() => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.multiple = true;
+    input.accept = '.pdf,.PDF,application/pdf,*/*';
+    input.onchange = (e: any) => {
+      if (e.target.files) {
+        const fileObjects = Array.from(e.target.files as FileList).map(file => ({ file }));
+        handleFiles(fileObjects);
+      }
+    };
+    input.click();
+  }, [handleFiles]);
 
   const getActiveItems = () => {
     const rawList = selectedItemIds.size > 0 ? items.filter(i => selectedItemIds.has(i.id)) : items;
@@ -975,7 +1830,9 @@ export const MultiSvgaViewer: React.FC<MultiSvgaViewerProps> = ({ onCancel, curr
         a.download = `${cleanName}.mp4`;
         a.click();
         URL.revokeObjectURL(url);
-        document.body.removeChild(renderContainer);
+        if (renderContainer && renderContainer.parentNode) {
+          renderContainer.parentNode.removeChild(renderContainer);
+        }
         setIsExporting(false);
         setExportProgress(0);
         return;
@@ -986,16 +1843,43 @@ export const MultiSvgaViewer: React.FC<MultiSvgaViewerProps> = ({ onCancel, curr
       canvas.height = finalHeight;
       const ctx = canvas.getContext("2d", { alpha: false, willReadFrequently: true })!;
 
+      // Pre-parse all active items so their true durations, fps, and frame counts are guaranteed
+      for (const item of activeItems) {
+        try {
+          if (item.type === "vap") {
+            if (!item.vapConfig) {
+              try { item.vapConfig = await extractVapConfigFromBlob(item.file); } catch (e) {}
+            }
+          } else if (item.type === "pag") {
+            const PAG = await getPAG();
+            if (!item.pagFile) {
+              item.pagFile = await PAG.PAGFile.load(await item.file.arrayBuffer());
+            }
+            if (item.pagFile) {
+              const pagDur = (item.pagFile.duration() / 1000000) || 1;
+              const pagFps = item.pagFile.frameRate() || 30;
+              item.fps = pagFps;
+              item.duration = pagDur;
+              item.frames = Math.max(1, Math.round(pagDur * pagFps));
+              item.dimensions = { width: item.pagFile.width() || 500, height: item.pagFile.height() || 500 };
+            }
+          } else {
+            await parseSvgaIfNeeded(item);
+          }
+        } catch (err) {
+          console.warn("Pre-parse error for item in grid export:", item.name, err);
+        }
+      }
+
       let maxFrames = 0;
       activeItems.forEach(item => {
         const frames = item.frames || 1;
         const fps = item.fps || 30;
-        let duration = frames / fps;
-        if (item.duration) duration = item.duration;
+        let duration = item.duration || (frames / fps);
         maxFrames = Math.max(maxFrames, duration * targetFps);
       });
-      const totalFrames = (!useNativeDuration && exportDuration)
-        ? Math.round(exportDuration * targetFps)
+      const totalFrames = (!useNativeDuration && exportDuration && exportDuration > 0)
+        ? Math.max(1, Math.round(exportDuration * targetFps))
         : Math.max(1, Math.round(maxFrames));
 
       let bgImg: HTMLImageElement | null = null;
@@ -1009,12 +1893,14 @@ export const MultiSvgaViewer: React.FC<MultiSvgaViewerProps> = ({ onCancel, curr
       }
 
       let wmImg: HTMLImageElement | null = null;
-      if (watermark) {
+      const wmUrl = watermark || wmSettings?.logoUrl;
+      if (wmUrl) {
         wmImg = await new Promise((resolve) => {
           const img = new Image();
           img.crossOrigin = "anonymous";
           img.onload = () => resolve(img);
-          img.src = watermark;
+          img.onerror = () => resolve(null);
+          img.src = wmUrl;
         });
       }
 
@@ -1212,7 +2098,9 @@ export const MultiSvgaViewer: React.FC<MultiSvgaViewerProps> = ({ onCancel, curr
       } catch (e) {
         console.error("Encoder Configuration Error:", e);
         alert("خطأ في إعدادات ترميز الفيديو: " + (e instanceof Error ? e.message : String(e)));
-        document.body.removeChild(renderContainer);
+        if (renderContainer && renderContainer.parentNode) {
+          renderContainer.parentNode.removeChild(renderContainer);
+        }
         setIsExporting(false);
         setExportProgress(0);
         return;
@@ -1299,33 +2187,8 @@ export const MultiSvgaViewer: React.FC<MultiSvgaViewerProps> = ({ onCancel, curr
           }
         }
 
-        if (wmImg) {
-          const wmSize = Math.min(canvas.width, canvas.height) * (wmSettings.size / 100);
-          let wx = 0, wy = 0;
-          if (wmSettings.isAnimated) {
-            const speed = wmSettings.animationSpeed || 5;
-            const pxPerFrame = speed * 1.5;
-            const maxX = Math.max(1, canvas.width - wmSize);
-            const maxY = Math.max(1, canvas.height - wmSize);
-            const distX = frame * pxPerFrame;
-            const distY = frame * pxPerFrame * 0.75;
-            const modX = distX % (maxX * 2);
-            const modY = distY % (maxY * 2);
-            wx = modX > maxX ? (maxX * 2) - modX : modX;
-            wy = modY > maxY ? (maxY * 2) - modY : modY;
-          } else {
-            switch(wmSettings.position) {
-              case "top-left": wx = 40; wy = 40; break;
-              case "top-right": wx = canvas.width - wmSize - 40; wy = 40; break;
-              case "bottom-left": wx = 40; wy = canvas.height - wmSize - 40; break;
-              case "bottom-right": wx = canvas.width - wmSize - 40; wy = canvas.height - wmSize - 40; break;
-              case "center": wx = (canvas.width - wmSize) / 2; wy = (canvas.height - wmSize) / 2; break;
-            }
-          }
-          ctx.globalAlpha = wmSettings.opacity;
-          ctx.drawImage(wmImg, wx, wy, wmSize, wmSize);
-          ctx.globalAlpha = 1.0;
-        }
+        // Clean MP4 Export without watermark (user requirement)
+        // Watermark is excluded from exported MP4 files
 
         const timestamp = (frame / targetFps) * 1_000_000;
         const videoFrame = new VideoFrame(canvas, { timestamp });
@@ -1385,15 +2248,29 @@ export const MultiSvgaViewer: React.FC<MultiSvgaViewerProps> = ({ onCancel, curr
       console.error("Export error:", error);
       alert("حدث خطأ أثناء التصدير.");
     } finally {
-      document.body.removeChild(renderContainer);
+      if (renderContainer && renderContainer.parentNode) {
+        renderContainer.parentNode.removeChild(renderContainer);
+      }
       setIsExporting(false);
       setExportProgress(0);
     }
   };
 
-  const handleExportIndividualVideos = async (itemsToExport?: MultiSvgaItem[]) => {
+  const handleExportIndividualVideos = async (itemsToExport?: MultiSvgaItem[], formatOverride?: ViewerExportFormat) => {
     const list = itemsToExport || getActiveItems();
     if (list.length === 0) return;
+
+    const activeFormat: ViewerExportFormat = formatOverride || exportFormat;
+
+    // Direct SVGA export
+    if (activeFormat === 'svga') {
+      if (itemsToExport && itemsToExport.length === 1) {
+        handleDownloadSvga(itemsToExport[0]);
+      } else {
+        handleDownloadAllSvga();
+      }
+      return;
+    }
 
     const nameCounts: Record<string, number> = {};
     const uniqueNames: Record<string, string> = {};
@@ -1487,6 +2364,36 @@ export const MultiSvgaViewer: React.FC<MultiSvgaViewerProps> = ({ onCancel, curr
         
         setExportProgress(Math.round((completedCount / list.length) * 100));
 
+        // Pre-parse the item so dimensions, FPS, frames, and native duration are 100% accurate
+        if (item.type === "vap") {
+          if (!item.vapConfig) {
+            try { item.vapConfig = await extractVapConfigFromBlob(item.file); } catch (e) {}
+          }
+        } else if (item.type === "pag") {
+          try {
+            const PAG = await getPAG();
+            if (!item.pagFile) {
+              item.pagFile = await PAG.PAGFile.load(await item.file.arrayBuffer());
+            }
+            if (item.pagFile) {
+              const pagDur = (item.pagFile.duration() / 1000000) || 1;
+              const pagFps = item.pagFile.frameRate() || 30;
+              item.fps = pagFps;
+              item.duration = pagDur;
+              item.frames = Math.max(1, Math.round(pagDur * pagFps));
+              item.dimensions = { width: item.pagFile.width() || 500, height: item.pagFile.height() || 500 };
+            }
+          } catch (e) {
+            console.warn("Failed to pre-parse PAG in export:", e);
+          }
+        } else {
+          try {
+            await parseSvgaIfNeeded(item);
+          } catch (e) {
+            console.warn("Failed to pre-parse SVGA in export:", item.name, e);
+          }
+        }
+
         const effectivePresetId = item.presetId && item.presetId !== 'auto' ? item.presetId : selectedPresetId;
         const preset = DEVICE_PRESETS.find(p => p.id === effectivePresetId);
         let itemW = (isCustomDimensionsActive && customWidth) ? customWidth : (preset?.width || item.dimensions?.width || 500);
@@ -1550,15 +2457,16 @@ export const MultiSvgaViewer: React.FC<MultiSvgaViewerProps> = ({ onCancel, curr
 
         const itemFrames = item.frames || 1;
         const itemFps = item.fps || 30;
-        let durationSec = itemFrames / itemFps;
-        if (item.duration) {
-          durationSec = item.duration;
+        let durationSec = item.duration || (itemFrames / itemFps);
+        if (durationSec <= 0.05 && item.videoItem?.frames) {
+          durationSec = item.videoItem.frames / (item.videoItem.FPS || item.videoItem.fps || 30);
         }
-        const totalFrames = (!useNativeDuration && exportDuration)
-          ? Math.round(exportDuration * targetFps)
+
+        const totalFrames = (!useNativeDuration && exportDuration && exportDuration > 0)
+          ? Math.max(1, Math.round(exportDuration * targetFps))
           : Math.max(1, Math.round(durationSec * targetFps));
 
-        const isWebM = exportFormat === 'webm';
+        const isWebM = activeFormat === 'webm';
         const div = document.createElement("div");
         div.style.width = finalWidth + "px";
         div.style.height = finalHeight + "px";
@@ -1570,269 +2478,442 @@ export const MultiSvgaViewer: React.FC<MultiSvgaViewerProps> = ({ onCancel, curr
         let player: any = null;
         let internalCanvas: HTMLCanvasElement | null = null;
         let audiosToMux: ExtractedAudioTrack[] = [];
+        let videoEncoder: VideoEncoder | null = null;
 
-        if (item.type === "pag") {
-          const PAG = await getPAG();
-          let pagFile = item.pagFile;
-          if (!pagFile) {
-            pagFile = await PAG.PAGFile.load(await item.file.arrayBuffer());
-            item.pagFile = pagFile;
-          }
-          internalCanvas = document.createElement("canvas");
-          const canvasId = "pag_indiv_" + Math.random().toString(36).substring(2, 9);
-          internalCanvas.id = canvasId;
-          internalCanvas.width = item.dimensions?.width || 500;
-          internalCanvas.height = item.dimensions?.height || 500;
-          internalCanvas.style.width = "100%";
-          internalCanvas.style.height = "100%";
-          internalCanvas.style.objectFit = "contain";
-          div.appendChild(internalCanvas);
-
-          player = await PAG.PAGPlayer.create();
-          player.setComposition(pagFile);
-          const pagSurface = PAG.PAGSurface.fromCanvas('#' + canvasId);
-          if (pagSurface) {
-            pagSurface.updateSize();
-            player.setSurface(pagSurface);
-          }
-          player.setVideoEnabled(true);
-          player.setProgress(0);
-          await player.flush();
-        } else {
-          const videoItem = await parseSvgaIfNeeded(item);
-          try {
-            const audioData = await extractAllSvgaAudioTracks(videoItem);
-            if (audioData.length > 0) {
-              audiosToMux = audioData;
-            }
-          } catch (e) {
-            console.warn("Could not extract audio for export", e);
-          }
-          player = new SVGA.Player(div);
-          player.setVideoItem(videoItem);
-          player.setContentMode('AspectFit');
-          player.stepToFrame(0, false);
-          internalCanvas = div.querySelector("canvas");
-        }
-
-        // Mix audio for this item if present
-        let mixedAudioBuffer: AudioBuffer | null = null;
-        let hasNativeAudioTrack = false;
-        if (audiosToMux.length > 0) {
-          try {
-            mixedAudioBuffer = await mixAudioTracksToBuffer(audiosToMux, {
-              durationSec,
-              fps: targetFps,
-              loopShorterAudio: true,
-            });
-            // @ts-ignore
-            if (mixedAudioBuffer && typeof AudioEncoder !== 'undefined') {
-              const codec = isWebM ? 'opus' : 'mp4a.40.2';
-              // @ts-ignore
-              const check = await AudioEncoder.isConfigSupported({
-                codec,
-                numberOfChannels: 2,
-                sampleRate: mixedAudioBuffer.sampleRate,
-                bitrate: 128000
-              });
-              if (check.supported) {
-                hasNativeAudioTrack = true;
-              }
-            }
-          } catch (audioErr) {
-            console.warn("[SVGA Individual Export] Audio mixing notice:", audioErr);
-          }
-        }
-
-        const muxer = isWebM 
-          ? new WebMMuxer({
-              target: new WebmArrayBufferTarget(),
-              video: { codec: 'V_VP9', width: finalWidth, height: finalHeight },
-              audio: hasNativeAudioTrack && mixedAudioBuffer ? { codec: 'A_OPUS', numberOfChannels: 2, sampleRate: mixedAudioBuffer.sampleRate } : undefined
-            })
-          : new Mp4Muxer({
-              target: new Mp4ArrayBufferTarget(),
-              video: { codec: "avc", width: finalWidth, height: finalHeight },
-              audio: hasNativeAudioTrack && mixedAudioBuffer ? { codec: 'aac', numberOfChannels: 2, sampleRate: mixedAudioBuffer.sampleRate } : undefined,
-              fastStart: "in-memory"
-            });
-
-        let hasEncoderError = false;
-        const videoEncoder = new VideoEncoder({
-          output: (chunk, metadata) => {
-            let safeMetadata: any = undefined;
-            if (metadata) {
-              safeMetadata = { ...metadata };
-              if (safeMetadata.decoderConfig) {
-                safeMetadata.decoderConfig = { ...safeMetadata.decoderConfig };
-                if (safeMetadata.decoderConfig.colorSpace === null) {
-                  delete safeMetadata.decoderConfig.colorSpace;
-                }
-              } else if (safeMetadata.decoderConfig === null) {
-                delete safeMetadata.decoderConfig;
-              }
-            }
-            muxer.addVideoChunk(chunk, safeMetadata);
-          },
-          error: (e) => {
-            console.error("Encoder Error:", e);
-            hasEncoderError = true;
-          }
-        });
-
-        if (hasNativeAudioTrack && mixedAudioBuffer) {
-          await encodeAudioBufferToMuxer(mixedAudioBuffer, muxer, isWebM);
-        }
-
-        const totalPixels = finalWidth * finalHeight;
-        const targetBitrate = exportQuality === 'high'
-          ? Math.max(12_000_000, Math.round(totalPixels * 4))
-          : exportQuality === 'medium'
-          ? Math.max(5_000_000, Math.round(totalPixels * 1.8))
-          : Math.max(2_000_000, Math.round(totalPixels * 0.9));
-
-        videoEncoder.configure({
-          codec: exportFormat === 'webm' ? "vp09.00.10.08" : "avc1.4D002A",
-          width: finalWidth,
-          height: finalHeight,
-          bitrate: targetBitrate,
-          framerate: targetFps
-        });
-
-        await new Promise(r => setTimeout(r, 200));
-
-        for (let frame = 0; frame < totalFrames; frame++) {
-          if (bgImg) {
-            ctx.drawImage(bgImg, 0, 0, finalWidth, finalHeight);
-          } else {
-            ctx.fillStyle = "#0f172a";
-            ctx.fillRect(0, 0, finalWidth, finalHeight);
-          }
-
-          const elapsedSeconds = frame / targetFps;
+        try {
           if (item.type === "pag") {
-            const pagDur = (item.pagFile?.duration() / 1000000) || 1;
-            try {
-              player.setProgress((elapsedSeconds % pagDur) / pagDur);
-              await player.flush();
-            } catch (e) { console.warn("PAG export frame error", e); }
+            const PAG = await getPAG();
+            let pagFile = item.pagFile;
+            if (!pagFile) {
+              pagFile = await PAG.PAGFile.load(await item.file.arrayBuffer());
+              item.pagFile = pagFile;
+            }
+            internalCanvas = document.createElement("canvas");
+            const canvasId = "pag_indiv_" + Math.random().toString(36).substring(2, 9);
+            internalCanvas.id = canvasId;
+            internalCanvas.width = item.dimensions?.width || 500;
+            internalCanvas.height = item.dimensions?.height || 500;
+            internalCanvas.style.width = "100%";
+            internalCanvas.style.height = "100%";
+            internalCanvas.style.objectFit = "contain";
+            div.appendChild(internalCanvas);
+
+            player = await PAG.PAGPlayer.create();
+            player.setComposition(pagFile);
+            const pagSurface = PAG.PAGSurface.fromCanvas('#' + canvasId);
+            if (pagSurface) {
+              pagSurface.updateSize();
+              player.setSurface(pagSurface);
+            }
+            player.setVideoEnabled(true);
+            player.setProgress(0);
+            await player.flush();
           } else {
-            const itemFrame = Math.floor(elapsedSeconds * (item.fps || 30)) % (item.frames || 1);
+            const videoItem = await parseSvgaIfNeeded(item);
             try {
-              player.stepToFrame(itemFrame, false);
-            } catch (e) { console.warn("SVGA export frame error", e); }
+              const audioData = await extractAllSvgaAudioTracks(videoItem);
+              if (audioData.length > 0) {
+                audiosToMux = audioData;
+              }
+            } catch (e) {
+              console.warn("Could not extract audio for export", e);
+            }
+            player = new SVGA.Player(div);
+            player.clearsAfterStop = false;
+            player.setVideoItem(videoItem);
+            player.setContentMode('AspectFit');
+            player.stepToFrame(0, false);
+            internalCanvas = div.querySelector("canvas");
           }
 
-          if (internalCanvas) {
-            const sw = internalCanvas.width || item.dimensions?.width || 500;
-            const sh = internalCanvas.height || item.dimensions?.height || 500;
-            const scale = Math.min(finalWidth / sw, finalHeight / sh);
-            const drawW = sw * scale;
-            const drawH = sh * scale;
-            const dx = (finalWidth - drawW) / 2;
-            const dy = (finalHeight - drawH) / 2;
-
-            ctx.drawImage(internalCanvas, dx, dy, drawW, drawH);
+          // Mix audio for this item if present
+          let mixedAudioBuffer: AudioBuffer | null = null;
+          let hasNativeAudioTrack = false;
+          if (audiosToMux.length > 0) {
+            try {
+              mixedAudioBuffer = await mixAudioTracksToBuffer(audiosToMux, {
+                durationSec,
+                fps: targetFps,
+                loopShorterAudio: true,
+              });
+              // @ts-ignore
+              if (mixedAudioBuffer && typeof AudioEncoder !== 'undefined') {
+                const codec = isWebM ? 'opus' : 'mp4a.40.2';
+                // @ts-ignore
+                const check = await AudioEncoder.isConfigSupported({
+                  codec,
+                  numberOfChannels: 2,
+                  sampleRate: mixedAudioBuffer.sampleRate,
+                  bitrate: 128000
+                });
+                if (check.supported) {
+                  hasNativeAudioTrack = true;
+                }
+              }
+            } catch (audioErr) {
+              console.warn("[SVGA Individual Export] Audio mixing notice:", audioErr);
+            }
           }
 
-          if (wmImg) {
-            const wmSize = Math.min(finalWidth, finalHeight) * (wmSettings.size / 100);
-            let wx = 0, wy = 0;
-            if (wmSettings.isAnimated) {
-              const speed = wmSettings.animationSpeed || 5;
-              const pxPerFrame = speed * 1.5;
-              const maxX = Math.max(1, finalWidth - wmSize);
-              const maxY = Math.max(1, finalHeight - wmSize);
-              const distX = frame * pxPerFrame;
-              const distY = frame * pxPerFrame * 0.75;
-              const modX = distX % (maxX * 2);
-              const modY = distY % (maxY * 2);
-              wx = modX > maxX ? (maxX * 2) - modX : modX;
-              wy = modY > maxY ? (maxY * 2) - modY : modY;
-            } else {
-              switch (wmSettings.position) {
-                case "top-left": wx = 20; wy = 20; break;
-                case "top-right": wx = finalWidth - wmSize - 20; wy = 20; break;
-                case "bottom-left": wx = 20; wy = finalHeight - wmSize - 20; break;
-                case "bottom-right": wx = finalWidth - wmSize - 20; wy = finalHeight - wmSize - 20; break;
-                case "center": wx = (finalWidth - wmSize) / 2; wy = (finalHeight - wmSize) / 2; break;
+          // Check if we are exporting as VAP, YYEVA, GIF, WebP, APNG, or PNG frames ZIP
+          if (activeFormat === 'vap' || activeFormat === 'yyeva' || activeFormat === 'gif' || activeFormat === 'webp' || activeFormat === 'apng' || activeFormat === 'png_seq') {
+            const collectedCanvases: HTMLCanvasElement[] = [];
+            for (let frame = 0; frame < totalFrames; frame++) {
+              const frameCanvas = document.createElement("canvas");
+              frameCanvas.width = finalWidth;
+              frameCanvas.height = finalHeight;
+              const fCtx = frameCanvas.getContext("2d", { alpha: true })!;
+              
+              const elapsedSeconds = frame / targetFps;
+              if (item.type === "pag") {
+                const pagDur = (item.pagFile?.duration() / 1000000) || 1;
+                try {
+                  player.setProgress((elapsedSeconds % pagDur) / pagDur);
+                  await player.flush();
+                } catch (e) { console.warn("PAG export frame error", e); }
+              } else {
+                const itemFrame = Math.floor(elapsedSeconds * (item.fps || 30)) % (item.frames || 1);
+                try {
+                  player.stepToFrame(itemFrame, false);
+                } catch (e) { console.warn("SVGA export frame error", e); }
+              }
+
+              if (internalCanvas) {
+                const sw = internalCanvas.width || item.dimensions?.width || 500;
+                const sh = internalCanvas.height || item.dimensions?.height || 500;
+                const scale = Math.min(finalWidth / sw, finalHeight / sh);
+                const drawW = sw * scale;
+                const drawH = sh * scale;
+                const dx = (finalWidth - drawW) / 2;
+                const dy = (finalHeight - drawH) / 2;
+
+                fCtx.drawImage(internalCanvas, dx, dy, drawW, drawH);
+              }
+
+              // Always render watermark on frames
+              drawWatermarkOnCanvasHelper(fCtx, finalWidth, finalHeight, frame, wmSettings, wmImg);
+
+              collectedCanvases.push(frameCanvas);
+
+              if (frame % 5 === 0 || frame === totalFrames - 1) {
+                await new Promise(r => setTimeout(r, 0));
+                const baseProg = (i / list.length) * 88;
+                const frameProg = (((frame / totalFrames) * 0.4) / list.length) * 88;
+                setExportProgress(Math.max(1, Math.min(88, Math.round(baseProg + frameProg))));
               }
             }
-            ctx.globalAlpha = wmSettings.opacity;
-            ctx.drawImage(wmImg, wx, wy, wmSize, wmSize);
-            ctx.globalAlpha = 1.0;
+
+            const delays = Array(totalFrames).fill(1000 / targetFps);
+            const exportQualityNum = exportQuality === 'high' ? 100 : (exportQuality === 'medium' ? 80 : 50);
+
+            let finalBlob: Blob;
+            let fileExt = '.mp4';
+            if (activeFormat === 'vap') {
+              finalBlob = await exportAsVap(
+                collectedCanvases,
+                delays,
+                finalWidth,
+                finalHeight,
+                targetFps,
+                '1.0.5',
+                mixedAudioBuffer,
+                (p) => {
+                  const baseProg = (i / list.length) * 88;
+                  const encodeProg = (((0.4 + p * 0.6) / list.length) * 88);
+                  setExportProgress(Math.max(1, Math.min(88, Math.round(baseProg + encodeProg))));
+                },
+                exportQualityNum
+              );
+              fileExt = '.mp4';
+            } else if (activeFormat === 'yyeva') {
+              finalBlob = await exportAsYyeva(
+                collectedCanvases,
+                delays,
+                finalWidth,
+                finalHeight,
+                targetFps,
+                mixedAudioBuffer,
+                (p) => {
+                  const baseProg = (i / list.length) * 88;
+                  const encodeProg = (((0.4 + p * 0.6) / list.length) * 88);
+                  setExportProgress(Math.max(1, Math.min(88, Math.round(baseProg + encodeProg))));
+                },
+                exportQualityNum
+              );
+              fileExt = '.mp4';
+            } else if (activeFormat === 'gif') {
+              finalBlob = await exportAsGif(
+                collectedCanvases,
+                delays,
+                finalWidth,
+                finalHeight
+              );
+              fileExt = '.gif';
+            } else if (activeFormat === 'webp') {
+              finalBlob = await exportAsWebp(
+                collectedCanvases,
+                delays,
+                finalWidth,
+                finalHeight,
+                exportQualityNum
+              );
+              fileExt = '.webp';
+            } else if (activeFormat === 'apng') {
+              finalBlob = await exportAsApng(
+                collectedCanvases,
+                delays,
+                finalWidth,
+                finalHeight
+              );
+              fileExt = '.png';
+            } else if (activeFormat === 'png_seq') {
+              finalBlob = await exportAsPngFramesZip(
+                collectedCanvases,
+                uniqueNames[item.id] || 'frames',
+                delays
+              );
+              fileExt = '.zip';
+            } else {
+              finalBlob = await exportAsGif(collectedCanvases, delays, finalWidth, finalHeight);
+              fileExt = '.gif';
+            }
+
+            const cleanName = uniqueNames[item.id];
+            const folderPrefix = item.folderPath ? `${item.folderPath}/` : '';
+            const videoFilename = `${folderPrefix}${cleanName}${fileExt}`;
+
+            if (streamZip) {
+              const arrayBuffer = await finalBlob.arrayBuffer();
+              streamZip.addFile(videoFilename, new Uint8Array(arrayBuffer));
+            } else {
+              const url = URL.createObjectURL(finalBlob);
+              const a = document.createElement("a");
+              a.href = url;
+              a.download = `${cleanName}${fileExt}`;
+              a.click();
+              URL.revokeObjectURL(url);
+            }
+
+            collectedCanvases.forEach(c => {
+              c.width = 0;
+              c.height = 0;
+            });
+            return;
           }
 
-          const timestamp = (frame / targetFps) * 1_000_000;
-          const videoFrame = new VideoFrame(canvas, { timestamp });
+          const muxer = isWebM 
+            ? new WebMMuxer({
+                target: new WebmArrayBufferTarget(),
+                video: { codec: 'V_VP9', width: finalWidth, height: finalHeight },
+                audio: hasNativeAudioTrack && mixedAudioBuffer ? { codec: 'A_OPUS', numberOfChannels: 2, sampleRate: mixedAudioBuffer.sampleRate } : undefined
+              })
+            : new Mp4Muxer({
+                target: new Mp4ArrayBufferTarget(),
+                video: { codec: "avc", width: finalWidth, height: finalHeight },
+                audio: hasNativeAudioTrack && mixedAudioBuffer ? { codec: 'aac', numberOfChannels: 2, sampleRate: mixedAudioBuffer.sampleRate } : undefined,
+                fastStart: "in-memory"
+              });
 
-          while (videoEncoder.encodeQueueSize > 30) { await new Promise(r => setTimeout(r, 1)); }
+          let hasEncoderError = false;
+          videoEncoder = new VideoEncoder({
+            output: (chunk, metadata) => {
+              let safeMetadata: any = undefined;
+              if (metadata) {
+                safeMetadata = { ...metadata };
+                if (safeMetadata.decoderConfig) {
+                  safeMetadata.decoderConfig = { ...safeMetadata.decoderConfig };
+                  if (safeMetadata.decoderConfig.colorSpace === null) {
+                    delete safeMetadata.decoderConfig.colorSpace;
+                  }
+                } else if (safeMetadata.decoderConfig === null) {
+                  delete safeMetadata.decoderConfig;
+                }
+              }
+              muxer.addVideoChunk(chunk, safeMetadata);
+            },
+            error: (e) => {
+              console.error("Encoder Error:", e);
+              hasEncoderError = true;
+            }
+          });
 
-          if (hasEncoderError) break;
-          videoEncoder.encode(videoFrame, { keyFrame: frame % 30 === 0 });
-          videoFrame.close();
-
-          if (frame % 5 === 0 || frame === totalFrames - 1) {
-            await new Promise(r => setTimeout(r, 0));
-            const baseProg = (i / list.length) * 88;
-            const frameProg = ((frame / totalFrames) / list.length) * 88;
-            setExportProgress(Math.max(1, Math.min(88, Math.round(baseProg + frameProg))));
+          if (hasNativeAudioTrack && mixedAudioBuffer) {
+            await encodeAudioBufferToMuxer(mixedAudioBuffer, muxer, isWebM);
           }
-        }
 
-        if (hasEncoderError) {
-          if (videoEncoder.state !== "closed") {
-            try { videoEncoder.close(); } catch(e) {}
+          const totalPixels = finalWidth * finalHeight;
+          const targetBitrate = exportQuality === 'high'
+            ? Math.min(16_000_000, Math.max(8_000_000, Math.round(totalPixels * 3.5)))
+            : exportQuality === 'medium'
+            ? Math.min(8_000_000, Math.max(3_500_000, Math.round(totalPixels * 1.6)))
+            : Math.min(4_000_000, Math.max(1_500_000, Math.round(totalPixels * 0.8)));
+
+          let selectedCodec = isWebM ? "vp09.00.10.08" : (totalPixels > 2200000 ? "avc1.4d0033" : "avc1.4D002A");
+          if (!isWebM && typeof (VideoEncoder as any).isConfigSupported === 'function') {
+            const testCodecs = totalPixels > 2200000
+              ? ["avc1.4d0033", "avc1.640033", "avc1.4D002A", "avc1.42001f"]
+              : ["avc1.4D002A", "avc1.42001f", "avc1.4d0033"];
+            for (const c of testCodecs) {
+              try {
+                const res = await (VideoEncoder as any).isConfigSupported({
+                  codec: c,
+                  width: finalWidth,
+                  height: finalHeight,
+                  bitrate: targetBitrate,
+                  framerate: targetFps
+                });
+                if (res.supported) {
+                  selectedCodec = c;
+                  break;
+                }
+              } catch (e) {}
+            }
           }
-          throw new Error("حدث خطأ أثناء تشفير الفيديو. يرجى تقليل الجودة أو استخدام متصفح أحدث.");
-        } else {
-          if (videoEncoder.state !== "closed") {
-            await videoEncoder.flush();
-            videoEncoder.close();
+
+          videoEncoder.configure({
+            codec: selectedCodec,
+            width: finalWidth,
+            height: finalHeight,
+            bitrate: targetBitrate,
+            framerate: targetFps,
+            bitrateMode: 'constant',
+            latencyMode: 'realtime'
+          });
+
+          await new Promise(r => setTimeout(r, 40));
+
+          for (let frame = 0; frame < totalFrames; frame++) {
+            if (bgImg) {
+              ctx.drawImage(bgImg, 0, 0, finalWidth, finalHeight);
+            } else {
+              ctx.fillStyle = "#0f172a";
+              ctx.fillRect(0, 0, finalWidth, finalHeight);
+            }
+
+            const elapsedSeconds = frame / targetFps;
+            if (item.type === "pag") {
+              const pagDur = (item.pagFile?.duration() / 1000000) || 1;
+              try {
+                player.setProgress((elapsedSeconds % pagDur) / pagDur);
+                await player.flush();
+              } catch (e) { console.warn("PAG export frame error", e); }
+            } else {
+              const itemFrame = Math.floor(elapsedSeconds * (item.fps || 30)) % (item.frames || 1);
+              try {
+                player.stepToFrame(itemFrame, false);
+              } catch (e) { console.warn("SVGA export frame error", e); }
+            }
+
+            if (internalCanvas) {
+              const sw = internalCanvas.width || item.dimensions?.width || 500;
+              const sh = internalCanvas.height || item.dimensions?.height || 500;
+              const scale = Math.min(finalWidth / sw, finalHeight / sh);
+              const drawW = sw * scale;
+              const drawH = sh * scale;
+              const dx = (finalWidth - drawW) / 2;
+              const dy = (finalHeight - drawH) / 2;
+
+              ctx.drawImage(internalCanvas, dx, dy, drawW, drawH);
+            }
+
+            // Clean MP4 Export without watermark (user requirement)
+            // Watermark is excluded from exported MP4 files
+
+            const timestamp = (frame / targetFps) * 1_000_000;
+            const videoFrame = new VideoFrame(canvas, { timestamp });
+
+            try {
+              while (videoEncoder.encodeQueueSize > 12 && !hasEncoderError) {
+                await new Promise(r => setTimeout(r, 2));
+              }
+
+              if (!hasEncoderError && videoEncoder.state === "configured") {
+                videoEncoder.encode(videoFrame, { keyFrame: frame % 30 === 0 });
+              }
+            } finally {
+              videoFrame.close();
+            }
+
+            if (hasEncoderError) break;
+
+            if (frame % 5 === 0 || frame === totalFrames - 1) {
+              await new Promise(r => setTimeout(r, 0));
+              const baseProg = (i / list.length) * 88;
+              const frameProg = ((frame / totalFrames) / list.length) * 88;
+              setExportProgress(Math.max(1, Math.min(88, Math.round(baseProg + frameProg))));
+            }
           }
-          muxer.finalize();
+
+          if (hasEncoderError) {
+            if (videoEncoder && videoEncoder.state !== "closed") {
+              try { videoEncoder.close(); } catch(e) {}
+            }
+            throw new Error("حدث خطأ أثناء تشفير الفيديو. يرجى تقليل الجودة أو استخدام متصفح أحدث.");
+          } else {
+            if (videoEncoder && videoEncoder.state !== "closed") {
+              await videoEncoder.flush();
+              videoEncoder.close();
+            }
+            muxer.finalize();
+          }
+
+          let { buffer } = muxer.target as any;
+          let finalMp4Buffer = buffer;
+
+          // If audio was present but not encoded via native AudioEncoder, run safe FFmpeg fallback
+          if (mixedAudioBuffer && !hasNativeAudioTrack) {
+            finalMp4Buffer = await muxAudioWithFFmpegFallback(buffer, mixedAudioBuffer, isWebM, ensureFFmpeg);
+          }
+
+          // Post-export verification
+          const verification = await verifyExportedVideo(finalMp4Buffer, isWebM ? 'webm' : 'mp4');
+          console.log("[SVGA Individual Export] Video verified:", item.name, verification);
+
+          const ext = isWebM ? 'webm' : 'mp4';
+          const mime = isWebM ? 'video/webm' : 'video/mp4';
+          const cleanName = uniqueNames[item.id];
+          const folderPrefix = item.folderPath ? `${item.folderPath}/` : '';
+          const videoFilename = `${folderPrefix}${cleanName}.${ext}`;
+
+          if (streamZip) {
+            // Add video file to ZIP archive
+            streamZip.addFile(videoFilename, new Uint8Array(finalMp4Buffer));
+          } else {
+            // Single video direct download
+            const blob = new Blob([finalMp4Buffer], { type: mime });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `${cleanName}.${ext}`;
+            a.click();
+            URL.revokeObjectURL(url);
+          }
+        } finally {
+          // Guaranteed resource cleanup after each item
+          if (videoEncoder && (videoEncoder as any).state !== "closed") {
+            try { (videoEncoder as any).close(); } catch (e) {}
+          }
+          if (player) {
+            try {
+              if (item.type === "pag") {
+                player.destroy?.();
+              } else {
+                player.stopAnimation?.();
+              }
+            } catch (e) {}
+          }
+          try {
+            div.innerHTML = '';
+            if (renderContainer.contains(div)) {
+              renderContainer.removeChild(div);
+            }
+          } catch (e) {}
+          canvas.width = 0;
+          canvas.height = 0;
         }
 
-        let { buffer } = muxer.target as any;
-        let finalMp4Buffer = buffer;
-
-        // If audio was present but not encoded via native AudioEncoder, run safe FFmpeg fallback
-        if (mixedAudioBuffer && !hasNativeAudioTrack) {
-          finalMp4Buffer = await muxAudioWithFFmpegFallback(buffer, mixedAudioBuffer, isWebM, ensureFFmpeg);
-        }
-
-        // Post-export verification
-        const verification = await verifyExportedVideo(finalMp4Buffer, isWebM ? 'webm' : 'mp4');
-        console.log("[SVGA Individual Export] Video verified:", item.name, verification);
-
-        renderContainer.removeChild(div);
-        if (item.type === "pag" && player) {
-          try { player.destroy?.(); } catch (e) {}
-        }
-
-        const ext = isWebM ? 'webm' : 'mp4';
-        const mime = isWebM ? 'video/webm' : 'video/mp4';
-        const cleanName = uniqueNames[item.id];
-        const folderPrefix = item.folderPath ? `${item.folderPath}/` : '';
-        const videoFilename = `${folderPrefix}${cleanName}.${ext}`;
-
-        if (streamZip) {
-          // Add video file to ZIP archive
-          streamZip.addFile(videoFilename, new Uint8Array(finalMp4Buffer));
-        } else {
-          // Single video direct download
-          const blob = new Blob([finalMp4Buffer], { type: mime });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement("a");
-          a.href = url;
-          a.download = `${cleanName}.${ext}`;
-          a.click();
-          URL.revokeObjectURL(url);
-        }
-
-        if (list.length > 5) {
-          item.videoItem = null;
-        }
+        // Allow garbage collector and event loop to breathe between items
+        await new Promise(r => setTimeout(r, 40));
           } catch (e) { console.warn("Failed individual export", e); } completedCount++;
           setExportProgress(Math.round(88 + (completedCount / list.length) * 12));
         }));
@@ -1950,8 +3031,8 @@ export const MultiSvgaViewer: React.FC<MultiSvgaViewerProps> = ({ onCancel, curr
     const successfulBlobs: { name: string; blob: Blob; buffer: ArrayBuffer }[] = [];
     let completedCount = 0;
 
-    // Parallel Concurrency Pool (3 simultaneous exports for maximum speed without overloading)
-    const CONCURRENCY = Math.min(3, targetList.length);
+    // Sequential Concurrency (1 export at a time to give 100% GPU/WebCodecs resources without frame dropping or stutter)
+    const CONCURRENCY = 1;
     let currentIndex = 0;
 
     const processItem = async (item: MultiSvgaItem, index: number) => {
@@ -2189,14 +3270,36 @@ export const MultiSvgaViewer: React.FC<MultiSvgaViewerProps> = ({ onCancel, curr
   };
 
   const parseSvgaIfNeeded = async (item: MultiSvgaItem): Promise<any> => {
-    // ensure videoItem is valid and has images before returning early
-    if (item.videoItem && item.videoItem.images) return item.videoItem;
+    // If videoItem is valid and has images, ensure metadata fields are populated before returning
+    if (item.videoItem && item.videoItem.images) {
+      if (item.videoItem.frames && !item.frames) item.frames = item.videoItem.frames;
+      if (!item.fps) item.fps = item.videoItem.FPS || item.videoItem.fps || 30;
+      if (!item.duration && item.frames && item.fps) item.duration = item.frames / item.fps;
+      if (!item.dimensions && item.videoItem.videoSize) {
+        item.dimensions = {
+          width: item.videoItem.videoSize.width || 500,
+          height: item.videoItem.videoSize.height || 500
+        };
+      }
+      return item.videoItem;
+    }
     
     return new Promise((resolve, reject) => {
       const parser = new SVGA.Parser();
+      let isDone = false;
+      const tid = setTimeout(() => {
+        if (!isDone) {
+          isDone = true;
+          reject(new Error(`SVGA parser timed out for ${item.name}`));
+        }
+      }, 25000);
+
       // Bypass cache just in case player.clear() destructed the cached images previously
       const bypassUrl = item.url + '#' + Math.random().toString(36).substr(2, 9);
       parser.load(bypassUrl, (videoItem: any) => {
+        if (isDone) return;
+        isDone = true;
+        clearTimeout(tid);
         if (!videoItem || !videoItem.images) {
           return reject(new Error("Invalid SVGA format - missing images"));
         }
@@ -2207,8 +3310,14 @@ export const MultiSvgaViewer: React.FC<MultiSvgaViewerProps> = ({ onCancel, curr
         };
         item.fps = videoItem.FPS || videoItem.fps || 30;
         item.frames = videoItem.frames || 1;
+        item.duration = item.frames / item.fps;
         resolve(videoItem);
-      }, reject);
+      }, (err: any) => {
+        if (isDone) return;
+        isDone = true;
+        clearTimeout(tid);
+        reject(err);
+      });
     });
   };
 
@@ -2284,7 +3393,9 @@ export const MultiSvgaViewer: React.FC<MultiSvgaViewerProps> = ({ onCancel, curr
         try { pagPlayer.destroy?.(); } catch (e) {}
         try { pagSurface?.destroy?.(); } catch (e) {}
       } finally {
-        document.body.removeChild(tmpCanvas);
+        if (tmpCanvas && tmpCanvas.parentNode) {
+          tmpCanvas.parentNode.removeChild(tmpCanvas);
+        }
       }
     } else if (item.type === 'vap') {
       const config = item.vapConfig || (await extractVapConfigFromBlob(item.file));
@@ -2383,14 +3494,9 @@ export const MultiSvgaViewer: React.FC<MultiSvgaViewerProps> = ({ onCancel, curr
           const y = (dh - finalH) / 2;
           ctx.drawImage(svgaCanvas, x, y, finalW, finalH);
         }
-        
-        // Drop videoItem reference specifically for large exports to save memory!
-        if ((items as any[]).length > 50) { 
-           item.videoItem = undefined;
-        }
       } finally {
         if (player) {
-          try { player.clear(); } catch(e) {}
+          try { player.stopAnimation?.(); } catch(e) {}
         }
         if (div.parentNode) {
           document.body.removeChild(div);
@@ -2399,36 +3505,19 @@ export const MultiSvgaViewer: React.FC<MultiSvgaViewerProps> = ({ onCancel, curr
     }
 
     // Draw Watermark
-    if (watermark) {
+    if (wmSettings.enabled || watermark) {
       try {
-        const wmImg = await new Promise<HTMLImageElement>((resolve, reject) => {
-          const img = new Image();
-          img.crossOrigin = 'anonymous';
-          img.onload = () => resolve(img);
-          img.onerror = reject;
-          img.src = watermark;
-        });
-        ctx.globalAlpha = wmSettings.opacity;
-        const wmSize = Math.min(canvas.width, canvas.height) * (wmSettings.size / 100);
-        let wx = 0, wy = 0;
-        
-        // For static image capture, if animated we just place it in center or a calculated position
-        // Since it's a single frame, we just use a default or frame 0 position
-        if (wmSettings.isAnimated) {
-           wx = (canvas.width - wmSize) / 2;
-           wy = (canvas.height - wmSize) / 2;
-        } else {
-          switch(wmSettings.position) {
-            case 'top-left': wx = 20; wy = 20; break;
-            case 'top-right': wx = canvas.width - wmSize - 20; wy = 20; break;
-            case 'bottom-left': wx = 20; wy = canvas.height - wmSize - 20; break;
-            case 'bottom-right': wx = canvas.width - wmSize - 20; wy = canvas.height - wmSize - 20; break;
-            case 'center': wx = (canvas.width - wmSize) / 2; wy = (canvas.height - wmSize) / 2; break;
-          }
+        let wmImg: HTMLImageElement | null = null;
+        if (watermark) {
+          wmImg = await new Promise<HTMLImageElement>((resolve, reject) => {
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            img.onload = () => resolve(img);
+            img.onerror = reject;
+            img.src = watermark;
+          });
         }
-        
-        ctx.drawImage(wmImg, wx, wy, wmSize, wmSize);
-        ctx.globalAlpha = 1.0;
+        drawWatermarkOnCanvasHelper(ctx, canvas.width, canvas.height, 0, wmSettings, wmImg);
       } catch (e) {
         console.error("Failed to load watermark for capture", e);
       }
@@ -2605,6 +3694,42 @@ export const MultiSvgaViewer: React.FC<MultiSvgaViewerProps> = ({ onCancel, curr
         setIsZipping(false);
     }
   };
+
+  // Global Keyboard Shortcuts: Space (Play/Pause all), Enter or Tab (Export SVGA)
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      const activeEl = document.activeElement as HTMLElement | null;
+      const isInput = activeEl && (
+        activeEl.tagName === 'INPUT' ||
+        activeEl.tagName === 'TEXTAREA' ||
+        activeEl.tagName === 'SELECT' ||
+        activeEl.isContentEditable ||
+        Boolean(activeEl.closest('input, textarea, select, [contenteditable="true"]'))
+      );
+      if (isInput) return;
+
+      // 1. Spacebar: Play / Pause all effects
+      if (e.code === 'Space' || e.key === ' ') {
+        e.preventDefault();
+        e.stopPropagation();
+        setGlobalPaused(prev => !prev);
+        return;
+      }
+
+      // 2. Enter or Tab: Export SVGA files
+      if (e.code === 'Enter' || e.key === 'Enter' || e.code === 'Tab' || e.key === 'Tab') {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!isExporting && !isZipping && items.length > 0) {
+          handleDownloadAllSvga();
+        }
+        return;
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, [items, isExporting, isZipping]);
 
   const handleDownloadAllCombined = async () => {
     const activeItems = getActiveItems();
@@ -2906,7 +4031,7 @@ export const MultiSvgaViewer: React.FC<MultiSvgaViewerProps> = ({ onCancel, curr
         return await new Promise<Blob>((resolve) => finalCanvas.toBlob((b) => resolve(b || new Blob()), 'image/png', 1.0));
       } finally {
         if (player) {
-          try { player.clear(); } catch(e) {}
+          try { player.stopAnimation?.(); } catch(e) {}
         }
         if (div.parentNode) document.body.removeChild(div);
       }
@@ -3389,39 +4514,588 @@ export const MultiSvgaViewer: React.FC<MultiSvgaViewerProps> = ({ onCancel, curr
     }
   };
 
+  // 1) تنزيل كل ملف هدية في ملف PDF مستقل (مع الصورة والمواصفات الفنية)
+  const handleDownloadSinglePdfsDirect = async () => {
+    const activeItems = getActiveItems();
+    if (activeItems.length === 0) {
+      alert('يرجى رفع أو اختيار ملفات SVGA أولاً لتنزيل ملفات الـ PDF الفردية.');
+      return;
+    }
+
+    setIsExportingCustomPdf(true);
+    try {
+      const pdfZip = new JSZip();
+      const queue = activeItems.slice(0, 30); // Process up to 30 items
+      for (let idx = 0; idx < queue.length; idx++) {
+        const item = queue[idx];
+        const cleanName = item.name.replace(/\.[^/.]+$/, '');
+        
+        const canvas = document.createElement('canvas');
+        const W = 1240, H = 1754; // A4 standard 150 DPI
+        canvas.width = W; canvas.height = H;
+        const ctx = canvas.getContext('2d');
+
+        if (ctx) {
+          // Background gradient
+          const bgGrad = ctx.createLinearGradient(0, 0, W, H);
+          bgGrad.addColorStop(0, '#090d1a');
+          bgGrad.addColorStop(0.5, '#0f172a');
+          bgGrad.addColorStop(1, '#131e3b');
+          ctx.fillStyle = bgGrad;
+          ctx.fillRect(0, 0, W, H);
+
+          // Tech Gold Outer Border
+          ctx.strokeStyle = 'rgba(234, 179, 8, 0.75)';
+          ctx.lineWidth = 4;
+          ctx.strokeRect(35, 35, W - 70, H - 70);
+
+          ctx.strokeStyle = 'rgba(59, 130, 246, 0.5)';
+          ctx.lineWidth = 1.5;
+          ctx.strokeRect(45, 45, W - 90, H - 90);
+
+          // Header Banner
+          const hGrad = ctx.createLinearGradient(70, 70, W - 140, 130);
+          hGrad.addColorStop(0, '#1e293b');
+          hGrad.addColorStop(1, '#0f172a');
+          ctx.fillStyle = hGrad;
+          if (ctx.roundRect) ctx.roundRect(70, 70, W - 140, 130, 16);
+          else ctx.fillRect(70, 70, W - 140, 130);
+          ctx.fill();
+          ctx.strokeStyle = 'rgba(234, 179, 8, 0.6)';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+
+          ctx.fillStyle = '#fef08a';
+          ctx.font = 'bold 36px "Segoe UI", Tahoma, Arial, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText('🎁 وثيقة ومواصفات أصل الهدية الرقمية', W / 2, 125);
+
+          ctx.fillStyle = '#94a3b8';
+          ctx.font = '20px "Segoe UI", Tahoma, Arial, sans-serif';
+          ctx.fillText(`Digital Gift Asset Sheet (${idx + 1} / ${queue.length}): ${cleanName}`, W / 2, 165);
+
+          // Preview Box
+          const boxX = 90, boxY = 230, boxW = W - 180, boxH = 680;
+          ctx.fillStyle = '#030712';
+          if (ctx.roundRect) ctx.roundRect(boxX, boxY, boxW, boxH, 20);
+          else ctx.fillRect(boxX, boxY, boxW, boxH);
+          ctx.fill();
+          ctx.strokeStyle = 'rgba(234, 179, 8, 0.45)';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+
+          // Checkered background
+          const chkSize = 24;
+          for (let bx = boxX + 10; bx < boxX + boxW - 10; bx += chkSize) {
+            for (let by = boxY + 10; by < boxY + boxH - 10; by += chkSize) {
+              const isDark = Math.floor((bx - boxX) / chkSize) % 2 === Math.floor((by - boxY) / chkSize) % 2;
+              ctx.fillStyle = isDark ? '#111827' : '#1f2937';
+              ctx.fillRect(bx, by, Math.min(chkSize, boxX + boxW - 10 - bx), Math.min(chkSize, boxY + boxH - 10 - by));
+            }
+          }
+
+          // Capture Best Image Frame
+          try {
+            const bestImgBlob = await captureBestGiftFrame(item);
+            const imgBitmap = await createImageBitmap(bestImgBlob);
+            const iw = imgBitmap.width, ih = imgBitmap.height;
+            const maxW = boxW - 80, maxH = boxH - 80;
+            const scale = Math.min(maxW / iw, maxH / ih, 1.8);
+            const dw = iw * scale, dh = ih * scale;
+            const dx = boxX + (boxW - dw) / 2, dy = boxY + (boxH - dh) / 2;
+            ctx.drawImage(imgBitmap, dx, dy, dw, dh);
+          } catch (e) {
+            ctx.fillStyle = '#eab308';
+            ctx.font = 'bold 72px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('🎁', W / 2, boxY + boxH / 2);
+          }
+
+          // Information Details Card
+          const cardY = 940, cardH = 620;
+          ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+          if (ctx.roundRect) ctx.roundRect(boxX, cardY, boxW, cardH, 16);
+          else ctx.fillRect(boxX, cardY, boxW, cardH);
+          ctx.fill();
+          ctx.strokeStyle = 'rgba(59, 130, 246, 0.4)';
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+
+          ctx.fillStyle = '#fde047';
+          ctx.font = 'bold 26px "Segoe UI", Tahoma, Arial, sans-serif';
+          ctx.textAlign = 'right';
+          ctx.fillText('📊 البيانات الفنية ومواصفات الملف المستخرج:', boxX + boxW - 30, cardY + 50);
+
+          const dw = item.dimensions?.width || 500;
+          const dh = item.dimensions?.height || 500;
+          const durSec = item.videoItem ? (item.videoItem.frames / (item.videoItem.fps || 30)).toFixed(2) : (item.frames ? (item.frames / (item.fps || 30)).toFixed(2) : '0');
+
+          const rows = [
+            { label: 'اسم الهدية / الأصل:', val: cleanName },
+            { label: 'نوع وصيغة الملف:', val: `${item.type.toUpperCase()} Animation` },
+            { label: 'الأبعاد المعيارية:', val: `${dw} × ${dh} بكسل` },
+            { label: 'معدل الإطارات (FPS):', val: `${item.fps || item.videoItem?.fps || 30} FPS` },
+            { label: 'إجمالي الإطارات والمدة:', val: `${item.frames || item.videoItem?.frames || 1} إطار (${durSec} ثانية)` },
+            { label: 'حالة المؤثرات الصوتية:', val: item.hasAudio ? 'مدمج صوت MP3' : 'بدون صوت' },
+            { label: 'تاريخ وساعة التصدير:', val: new Date().toLocaleString('ar-EG') }
+          ];
+
+          const startY = cardY + 110;
+          rows.forEach((r, rIdx) => {
+            const ry = startY + rIdx * 65;
+            if (rIdx % 2 === 0) {
+              ctx.fillStyle = 'rgba(255,255,255,0.03)';
+              ctx.fillRect(boxX + 15, ry - 35, boxW - 30, 52);
+            }
+            ctx.fillStyle = '#93c5fd';
+            ctx.font = 'bold 20px "Segoe UI", Tahoma, Arial, sans-serif';
+            ctx.textAlign = 'right';
+            ctx.fillText(r.label, boxX + boxW - 35, ry);
+
+            ctx.fillStyle = '#ffffff';
+            ctx.font = '19px "Segoe UI", Tahoma, Arial, sans-serif';
+            ctx.textAlign = 'left';
+            ctx.fillText(r.val, boxX + 40, ry);
+          });
+
+          ctx.fillStyle = '#64748b';
+          ctx.font = '16px "Segoe UI", Tahoma, Arial, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText('مستخرج أصول التطبيقات وهدايا SVGA — تم التحقق والتصدير بجودة أصلية 100%', W / 2, H - 65);
+
+          const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
+          const imgData = canvas.toDataURL('image/jpeg', 0.92);
+          doc.addImage(imgData, 'JPEG', 0, 0, doc.internal.pageSize.getWidth(), doc.internal.pageSize.getHeight());
+          const pdfBlob = doc.output('blob');
+          const pdfBuffer = await pdfBlob.arrayBuffer();
+
+          pdfZip.file(`توثيق_هدية_${cleanName}.pdf`, pdfBuffer);
+        }
+      }
+
+      const zipBlob = await pdfZip.generateAsync({ type: 'blob', compression: 'STORE' });
+      const url = URL.createObjectURL(zipBlob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `تقارير_PDF_لكل_هدية.zip`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+
+      alert(`✅ تم تنزيل حزمة تقارير PDF لجميع الهدايا بملف ZIP واحد بنجاح!`);
+    } catch (err: any) {
+      console.error('Single PDF export error:', err);
+      alert('حدث خطأ أثناء تصدير ملفات PDF: ' + err.message);
+    } finally {
+      setIsExportingCustomPdf(false);
+    }
+  };
+
+  // 2) تنزيل كل ملفات SVG مفتوحة ومباشرة (وليس مضغوطة / Direct Unzipped SVGs)
+  const handleDownloadAllSvgsDirect = async () => {
+    const activeItems = getActiveItems();
+    if (activeItems.length === 0) {
+      alert('يرجى رفع ملفات SVGA أولاً لتنزيل مسارات ومتجهات الـ SVG.');
+      return;
+    }
+
+    try {
+      const svgZip = new JSZip();
+
+      for (const item of activeItems) {
+        const cleanName = item.name.replace(/\.[^/.]+$/, '');
+        const videoItem = item.videoItem;
+        const w = item.dimensions?.width || 500;
+        const h = item.dimensions?.height || 500;
+
+        let svgContent = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}">\n`;
+        svgContent += `  <!-- Exported from SVGA Gift: ${cleanName} -->\n`;
+        svgContent += `  <rect width="100%" height="100%" fill="none"/>\n`;
+
+        if (videoItem?.images && Object.keys(videoItem.images).length > 0) {
+          Object.keys(videoItem.images).forEach((imgKey, i) => {
+            const rawBytes = videoItem.images[imgKey];
+            if (rawBytes) {
+              const b64 = btoa(Array.from(new Uint8Array(rawBytes)).map(b => String.fromCharCode(b)).join(''));
+              svgContent += `  <image id="layer_${i}_${imgKey.replace(/[^a-zA-Z0-9_]/g, '_')}" href="data:image/png;base64,${b64}" width="${w}" height="${h}" opacity="1"/>\n`;
+            }
+          });
+        } else {
+          svgContent += `  <circle cx="${w/2}" cy="${h/2}" r="${Math.min(w,h)*0.4}" fill="#1e1b4b" stroke="#6366f1" stroke-width="4"/>\n`;
+          svgContent += `  <text x="50%" y="50%" font-size="28" font-family="sans-serif" font-weight="bold" fill="#fef08a" text-anchor="middle" dominant-baseline="middle">🎁 ${cleanName}</text>\n`;
+        }
+
+        svgContent += `</svg>`;
+        svgZip.file(`${cleanName}.svg`, svgContent);
+      }
+
+      const zipBlob = await svgZip.generateAsync({ type: 'blob', compression: 'STORE' });
+      const url = URL.createObjectURL(zipBlob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `ملفات_SVG_المفتوحة.zip`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+
+      alert(`✅ تم تنزيل جميع ملفات الـ SVG المفتوحة بملف ZIP واحد بنجاح!`);
+    } catch (err: any) {
+      console.error('Failed to export direct SVGs:', err);
+      alert('حدث خطأ أثناء تنزيل ملفات SVG المباشرة: ' + err.message);
+    }
+  };
+
+  // 3) تنزيل الهدايا وصورها في مجلد مفتوح مباشر بدون أي ضغط ZIP (Unzipped Directory Picker)
+  const handleDownloadToOpenFolder = async (isCustomSubfolders: boolean) => {
+    const activeItems = getActiveItems();
+    if (activeItems.length === 0) {
+      alert('يرجى اختيار أو رفع ملفات الهدايا أولاً لتنزيلها في مجلد مفتوح.');
+      return;
+    }
+
+    let dirHandle: any = null;
+    if ('showDirectoryPicker' in window) {
+      try {
+        dirHandle = await (window as any).showDirectoryPicker({
+          mode: 'readwrite',
+          startIn: 'downloads'
+        });
+      } catch (err: any) {
+        if (err.name === 'AbortError') return; // User cancelled
+        console.warn('showDirectoryPicker cancelled or unsupported:', err);
+      }
+    }
+
+    setIsExporting(true);
+    try {
+      for (let idx = 0; idx < activeItems.length; idx++) {
+        const item = activeItems[idx];
+        const cleanName = item.name.replace(/\.[^/.]+$/, '').replace(/\s+/g, '_');
+        const ext = item.type === 'vap' ? (item.name.endsWith('.mp4') ? 'mp4' : 'vap') : (item.type === 'pag' ? 'pag' : 'svga');
+
+        // Get file array buffer
+        const fileBuffer = await item.file.arrayBuffer();
+
+        // Capture clearest frame image
+        let coverBlob: Blob | null = null;
+        try {
+          coverBlob = await captureBestGiftFrame(item);
+        } catch (e) {
+          console.warn('Frame capture error:', e);
+        }
+
+        if (dirHandle) {
+          let giftFolder = dirHandle;
+          if (isCustomSubfolders) {
+            // Create subfolder for each gift inside main open folder: 📁 Gift_Name/
+            giftFolder = await dirHandle.getDirectoryHandle(`هدية_${cleanName}`, { create: true });
+          }
+
+          // 1. Save original gift file directly into folder
+          const giftFileHandle = await giftFolder.getFileHandle(`${cleanName}.${ext}`, { create: true });
+          const giftWritable = await giftFileHandle.createWritable();
+          await giftWritable.write(fileBuffer);
+          await giftWritable.close();
+
+          // 2. Save cover image directly into folder
+          if (coverBlob) {
+            const imgFileHandle = await giftFolder.getFileHandle(`${cleanName}_صورة.png`, { create: true });
+            const imgWritable = await imgFileHandle.createWritable();
+            await imgWritable.write(await coverBlob.arrayBuffer());
+            await imgWritable.close();
+          }
+        } else {
+          // Fallback direct downloads for non-Chromium browsers
+          const giftBlob = new Blob([fileBuffer]);
+          const url1 = URL.createObjectURL(giftBlob);
+          const a1 = document.createElement('a');
+          a1.href = url1;
+          a1.download = `${cleanName}.${ext}`;
+          a1.style.display = 'none';
+          document.body.appendChild(a1);
+          a1.click();
+          setTimeout(() => { a1.remove(); URL.revokeObjectURL(url1); }, 15000);
+
+          if (coverBlob) {
+            const url2 = URL.createObjectURL(coverBlob);
+            const a2 = document.createElement('a');
+            a2.href = url2;
+            a2.download = `${cleanName}_صورة.png`;
+            a2.style.display = 'none';
+            document.body.appendChild(a2);
+            a2.click();
+            setTimeout(() => { a2.remove(); URL.revokeObjectURL(url2); }, 15000);
+          }
+        }
+      }
+
+      alert(
+        dirHandle
+          ? `✅ تم حفظ ${activeItems.length} هدية وصورها داخل المجلد المفتوح المحدد على جهازك مباشرة بدون ضغط!`
+          : `✅ تم تنزيل ${activeItems.length} هدية وصورها مباشرة على جهازك بنجاح!`
+      );
+    } catch (err: any) {
+      console.error('Folder download error:', err);
+      alert('حدث خطأ أثناء تنزيل الهدايا في المجلد المفتوح: ' + (err.message || 'خطأ غير متوقع'));
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  // 4) تنزيل جميع الهدايا والصور في فولدر واحد داخل حزمة ZIP
+  const handleDownloadAllInOneFolderZip = async () => {
+    const activeItems = getActiveItems();
+    if (activeItems.length === 0) {
+      alert('يرجى اختيار أو رفع ملفات الهدايا أولاً لتنزيل الفولدر.');
+      return;
+    }
+
+    setIsZipping(true);
+    try {
+      const zip = new JSZip();
+      for (let idx = 0; idx < activeItems.length; idx++) {
+        const item = activeItems[idx];
+        const cleanName = item.name.replace(/\.[^/.]+$/, '').replace(/\s+/g, '_');
+        const ext = item.type === 'vap' ? (item.name.endsWith('.mp4') ? 'mp4' : 'vap') : (item.type === 'pag' ? 'pag' : 'svga');
+
+        const fileBuffer = await item.file.arrayBuffer();
+        zip.file(`${cleanName}.${ext}`, fileBuffer);
+
+        try {
+          const coverBlob = await captureBestGiftFrame(item);
+          const coverBuffer = await coverBlob.arrayBuffer();
+          zip.file(`${cleanName}_صورة.png`, coverBuffer);
+        } catch (e) {
+          console.warn('Cover image capture failed for item', item.name, e);
+        }
+      }
+
+      const zipBlob = await zip.generateAsync({ type: 'blob', compression: 'STORE' });
+      const url = URL.createObjectURL(zipBlob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `جميع_الهدايا_والصور_فولدر_واحد.zip`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      alert('✅ تم تنزيل جميع الملفات والصور في فولدر واحد (ZIP) بنجاح!');
+    } catch (err: any) {
+      console.error('All-in-one ZIP download failed:', err);
+      alert('حدث خطأ أثناء تنزيل الفولدر: ' + (err.message || 'خطأ غير متوقع'));
+    } finally {
+      setIsZipping(false);
+    }
+  };
+
+  // 5) تخصيص: تنزيل كل هدية بملفها وصورتها داخل فولدر مستقل داخل ZIP
+  const handleDownloadCustomFolderPerGiftZip = async () => {
+    const activeItems = getActiveItems();
+    if (activeItems.length === 0) {
+      alert('يرجى اختيار أو رفع ملفات الهدايا أولاً لتنزيل الفولدرات المستقلة.');
+      return;
+    }
+
+    setIsZipping(true);
+    try {
+      const zip = new JSZip();
+      for (let idx = 0; idx < activeItems.length; idx++) {
+        const item = activeItems[idx];
+        const cleanName = item.name.replace(/\.[^/.]+$/, '').replace(/\s+/g, '_');
+        const ext = item.type === 'vap' ? (item.name.endsWith('.mp4') ? 'mp4' : 'vap') : (item.type === 'pag' ? 'pag' : 'svga');
+
+        const giftFolder = zip.folder(`فولدر_هدية_${cleanName}`);
+        if (giftFolder) {
+          const fileBuffer = await item.file.arrayBuffer();
+          giftFolder.file(`${cleanName}.${ext}`, fileBuffer);
+
+          try {
+            const coverBlob = await captureBestGiftFrame(item);
+            const coverBuffer = await coverBlob.arrayBuffer();
+            giftFolder.file(`${cleanName}_صورة.png`, coverBuffer);
+          } catch (e) {
+            console.warn('Cover image capture failed for item', item.name, e);
+          }
+        }
+      }
+
+      const zipBlob = await zip.generateAsync({ type: 'blob', compression: 'STORE' });
+      const url = URL.createObjectURL(zipBlob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `تخصيص_فولدر_مستقل_لكل_هدية.zip`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      alert('✅ تم تنزيل كل هدية بملفها وصورتها داخل فولدر مستقل (ZIP) بنجاح!');
+    } catch (err: any) {
+      console.error('Custom subfolders ZIP download failed:', err);
+      alert('حدث خطأ أثناء تنزيل الفولدرات المستقلة: ' + (err.message || 'خطأ غير متوقع'));
+    } finally {
+      setIsZipping(false);
+    }
+  };
+
 
   const selectedItem = useMemo(() => items.find(i => i.id === selectedItemId), [items, selectedItemId]);
 
+  const totalPages = pageSize > 0 ? Math.ceil((items as any[]).length / pageSize) : 1;
+  const safeCurrentPage = Math.min(Math.max(1, currentPage), Math.max(1, totalPages));
+
+  const paginatedItems = useMemo(() => {
+    if (pageSize <= 0) return items;
+    const start = (safeCurrentPage - 1) * pageSize;
+    return items.slice(start, start + pageSize);
+  }, [items, safeCurrentPage, pageSize]);
+
   return (
-    <div className="flex flex-col h-full animate-in fade-in duration-500">
-      {/* Header */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between mb-8 gap-6">
-        <div>
-          <h2 className="text-3xl font-black text-white flex items-center gap-3">
-            <Layers className="w-8 h-8 text-indigo-500" />
-            نظام العرض الذكي لملفات SVGA
+    <div className="flex flex-col h-full animate-in fade-in duration-500 transition-all duration-300 w-full">
+      {/* Hidden File Input for SVGA/VAP/PAG/PDF/ZIP Uploads */}
+      <input 
+        ref={fileInputRef}
+        type="file" 
+        multiple 
+        accept=".svga,.SVGA,.pag,.PAG,.vap,.VAP,.mp4,.MP4,.zip,.ZIP,.pdf,.PDF,application/pdf,*/*" 
+        className="hidden" 
+        onChange={(e) => {
+          if (e.target.files) {
+            const fileObjects = Array.from(e.target.files).map(file => ({ file }));
+            handleFiles(fileObjects);
+            e.target.value = '';
+          }
+        }}
+      />
+
+      {/* TOP HEADER SECTION */}
+      <div className="flex flex-col gap-4 mb-6">
+        {/* Row 1: Header Title + Primary Quick Actions */}
+        <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 bg-[#0c1324]/90 border border-white/10 p-4 sm:p-5 rounded-2xl backdrop-blur-xl shadow-xl">
+          {/* Right side: Title & Stats */}
+          <div className="flex items-center gap-4">
+            <div className="w-11 h-11 rounded-xl bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400 shadow-md shrink-0">
+              <Layers className="w-6 h-6" />
+            </div>
+            <div>
+              <div className="flex items-center gap-3">
+                <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight">نظام العرض الذكي لملفات SVGA</h2>
+                {(items as any[]).length > 0 && (
+                  <div className="flex items-center gap-2 px-2.5 py-0.5 bg-indigo-500/10 border border-indigo-500/25 rounded-md text-xs font-semibold text-indigo-300">
+                    <span className="w-1.5 h-1.5 bg-indigo-400 rounded-full" />
+                    <span>{(items as any[]).length} {(items as any[]).length === 1 ? 'ملف مرفوع' : 'ملفات'}</span>
+                  </div>
+                )}
+              </div>
+              <p className="text-slate-400 font-normal text-xs mt-0.5">
+                دعم كامل لجميع المقاسات (500×500, 750×1334, 2000×2000) مع تثبيت الدقة والأبعاد
+              </p>
+            </div>
+          </div>
+
+          {/* Center/Left: Master Primary Action Buttons */}
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Upload Files */}
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold text-xs shadow-md shadow-indigo-600/20 flex items-center gap-2 transition-all hover:scale-105 active:scale-95 cursor-pointer"
+            >
+              <Upload className="w-4 h-4" />
+              <span>رفع ملفات</span>
+            </button>
+
+            {/* Upload Folders */}
+            <button
+              onClick={handleUploadFolders}
+              className="px-3.5 py-2 bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white rounded-xl font-bold text-xs border border-white/10 flex items-center gap-2 transition-all hover:scale-105 active:scale-95 cursor-pointer"
+              title="رفع مجلد كامل بالملفات الفرعية"
+            >
+              <FolderUp className="w-4 h-4 text-sky-400" />
+              <span>رفع مجلدات</span>
+            </button>
+
+            {/* Extract from PDF */}
+            <button
+              onClick={handleExtractFromPdf}
+              className="px-3.5 py-2 bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 rounded-xl font-bold text-xs flex items-center gap-2 transition-all hover:scale-105 active:scale-95 cursor-pointer"
+              title="فك واستخراج هدايا SVGA من ملفات PDF المحمية والعادية بنقرة واحدة"
+            >
+              <Lock className="w-4 h-4 text-amber-400" />
+              <span>فك من PDF</span>
+            </button>
+
+            {/* Deduplication Toggle */}
+            <button
+              onClick={handleToggleDeduplication}
+              className={`px-3 py-2 rounded-xl font-bold text-xs border flex items-center gap-2 transition-all cursor-pointer ${
+                preventDuplicates 
+                  ? 'bg-amber-500/15 border-amber-500/35 text-amber-300' 
+                  : 'bg-white/5 border-white/10 text-slate-400 hover:text-white'
+              }`}
+              title={preventDuplicates ? 'منع التكرار مفعل: يتم حذف وتصفية الملفات المكررة تلقائياً' : 'منع التكرار معطل: يسمح بتكرار الملفات'}
+            >
+              <ShieldCheck className={`w-4 h-4 ${preventDuplicates ? 'text-amber-400' : 'text-slate-400'}`} />
+              <span>منع التكرار: {preventDuplicates ? 'مفعل ✓' : 'معطل'}</span>
+            </button>
+
+            {/* Select All / Clear All */}
             {(items as any[]).length > 0 && (
-              <motion.div 
-                initial={{ opacity: 0, x: -10 }}
-                animate={{ opacity: 1, x: 0 }}
-                className="flex items-center gap-2 px-3 py-1 bg-indigo-500/10 border border-indigo-500/20 rounded-full"
-              >
-                <div className="w-2 h-2 bg-indigo-500 rounded-full animate-pulse" />
-                <span className="text-xs font-black text-indigo-400 uppercase tracking-widest">
-                  {(items as any[]).length} {(items as any[]).length === 1 ? 'ملف مرفوع' : 'ملفات مرفوعة'}
-                </span>
-              </motion.div>
+              <div className="flex items-center gap-1 bg-white/5 border border-white/10 p-1 rounded-xl">
+                <button
+                  onClick={handleSelectAll}
+                  className="px-2.5 py-1 rounded-lg text-xs font-semibold text-slate-300 hover:text-white hover:bg-white/10 transition-all flex items-center gap-1.5"
+                  title="تحديد كل الملفات"
+                >
+                  <SquareCheck className="w-3.5 h-3.5 text-indigo-400" />
+                  <span>تحديد الكل</span>
+                </button>
+                <div className="w-px h-4 bg-white/10" />
+                <button
+                  onClick={clearAll}
+                  className="px-2.5 py-1 rounded-lg text-xs font-semibold text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 transition-all flex items-center gap-1.5"
+                  title="مسح وحذف جميع الملفات المعروضة"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>مسح الكل</span>
+                </button>
+              </div>
             )}
-          </h2>
-          <p className="text-slate-500 font-bold mt-1 uppercase tracking-widest text-xs">
-            دعم كامل لجميع المقاسات (500×500, 750×1334, 2000×2000) مع الحفاظ على الجودة
-          </p>
+
+            {/* Optional Side Dock Toggle */}
+            <button
+              onClick={() => {
+                setShowSideDock(prev => !prev);
+                if (!showSideDock) setIsDockCollapsed(false);
+              }}
+              className={`px-3 py-2 rounded-xl text-xs font-semibold border transition-all flex items-center gap-1.5 cursor-pointer ${
+                showSideDock 
+                  ? 'bg-indigo-600/30 border-indigo-500 text-indigo-200' 
+                  : 'bg-white/5 border-white/10 text-slate-400 hover:text-white'
+              }`}
+              title="إظهار أو إخفاء لوحة العمليات الجانبية"
+            >
+              <Sliders className="w-3.5 h-3.5" />
+              <span>لوحة جانبية</span>
+            </button>
+            
+            {/* Toggle All Effects Button */}
+            <button
+              onClick={() => {
+                setGlobalPaused(prev => !prev);
+                const isMuted = (window as any).Howler?.mute();
+                (window as any).Howler?.mute(!isMuted);
+              }}
+              className={`px-3 py-2 border rounded-xl font-bold text-xs flex items-center gap-2 transition-all hover:scale-105 active:scale-95 cursor-pointer ${
+                globalPaused 
+                ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' 
+                : 'bg-rose-500/15 text-rose-300 border-rose-500/30'
+              }`}
+              title="إيقاف أو تشغيل جميع تأثيرات الصوت والحركة لتقليل الحمل على المتصفح والمعالج"
+            >
+              <Pause className="w-3.5 h-3.5" />
+              <span>{globalPaused ? 'تشغيل التأثيرات' : 'إيقاف التأثيرات'}</span>
+            </button>
+          </div>
         </div>
 
+        {/* Deduplication Notification Banner if any */}
         {dedupNotice && (
-          <div className="w-full lg:w-auto flex-1 max-w-2xl rounded-2xl p-3 px-4 bg-yellow-400/20 border-2 border-yellow-400 flex items-center justify-between gap-4 font-arabic shadow-xl shadow-yellow-500/10 backdrop-blur-md animate-in fade-in">
+          <div className="rounded-2xl p-3 px-4 bg-yellow-400/20 border-2 border-yellow-400 flex items-center justify-between gap-4 font-arabic shadow-xl shadow-yellow-500/10 backdrop-blur-md animate-in fade-in">
             <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-yellow-400 text-slate-950 flex items-center justify-center font-black shadow-md flex-shrink-0">
+              <div className="w-9 h-9 rounded-xl bg-yellow-400 text-slate-950 flex items-center justify-center font-black shadow-md shrink-0">
                 <ShieldCheck className="w-5 h-5" />
               </div>
               <div className="flex flex-col gap-0.5 text-right">
@@ -3450,36 +5124,241 @@ export const MultiSvgaViewer: React.FC<MultiSvgaViewerProps> = ({ onCancel, curr
             </button>
           </div>
         )}
-        
-        <div className="flex flex-wrap items-center gap-3">
-          {(items as any[]).length > 0 && (
-            <>
-              {/* Custom Dimensions Box */}
-              <div className="flex items-center gap-2 bg-indigo-950/40 border border-indigo-500/30 p-1.5 px-3 rounded-2xl shadow-inner" title="تحديد مقاس مخصص للمشروع (العرض × الارتفاع)">
-                <span className="text-[10px] font-black text-indigo-300 whitespace-nowrap">مقاس مخصص:</span>
-                <input 
-                  type="number" 
-                  placeholder="العرض"
-                  value={customWidth || ''}
-                  onChange={(e) => {
-                    const val = parseInt(e.target.value) || 0;
-                    setCustomWidth(val > 0 ? val : null);
-                    setIsCustomDimensionsActive(val > 0 && (customHeight || 0) > 0);
-                  }}
-                  className="w-16 px-2 py-1 bg-black/60 border border-indigo-400/40 rounded-xl text-white font-mono font-bold text-xs text-center focus:outline-none focus:border-indigo-400"
-                />
-                <span className="text-indigo-400 text-xs font-bold font-mono">×</span>
-                <input 
-                  type="number" 
-                  placeholder="الارتفاع"
-                  value={customHeight || ''}
-                  onChange={(e) => {
-                    const val = parseInt(e.target.value) || 0;
-                    setCustomHeight(val > 0 ? val : null);
-                    setIsCustomDimensionsActive((customWidth || 0) > 0 && val > 0);
-                  }}
-                  className="w-16 px-2 py-1 bg-black/60 border border-indigo-400/40 rounded-xl text-white font-mono font-bold text-xs text-center focus:outline-none focus:border-indigo-400"
-                />
+
+        {/* Row 2: All Action & Export Buttons in Top Bar */}
+        {(items as any[]).length > 0 && (
+          <div className="flex flex-col gap-3">
+            {/* Primary Highlighted Strip 1: Open Folder & ZIP Exports (Direct Single Folder vs Custom Subfolder per Gift) */}
+            <div className="bg-gradient-to-r from-slate-950 via-slate-900 to-slate-950 border-2 border-amber-500/60 p-4 sm:p-5 rounded-3xl shadow-2xl backdrop-blur-xl flex flex-col xl:flex-row items-stretch xl:items-center justify-between gap-4 ring-2 ring-amber-400/30">
+              <div className="flex items-center gap-3">
+                <span className="w-10 h-10 rounded-2xl bg-gradient-to-br from-amber-500 to-yellow-500 text-slate-950 flex items-center justify-center font-black shadow-lg shadow-amber-500/30 text-xl">
+                  📁
+                </span>
+                <div className="flex flex-col text-right">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-black text-amber-300">
+                      تنزيل الفولدرات المفتوحة وحزم ZIP للهدايا والصور:
+                    </span>
+                    <span className="px-2.5 py-0.5 rounded-full bg-amber-400/20 text-amber-200 border border-amber-400/30 text-[10px] font-black">
+                      فولدرات جاهزة
+                    </span>
+                  </div>
+                  <span className="text-xs text-slate-300 font-medium">
+                    اختر تنزيل جميع الملفات والصور في فولدر واحد أو تخصيص فولدر مستقل لكل هدية
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3">
+                {/* Button 1: Download All Files & Images in One Folder ZIP */}
+                <button
+                  onClick={handleDownloadAllInOneFolderZip}
+                  disabled={isZipping || (items as any[]).length === 0}
+                  className="px-4 py-3 bg-gradient-to-r from-amber-500 via-yellow-500 to-amber-500 hover:from-amber-400 hover:to-yellow-400 disabled:opacity-50 text-slate-950 rounded-2xl font-black text-xs shadow-xl shadow-amber-500/30 flex items-center gap-2.5 transition-all hover:scale-105 active:scale-95 cursor-pointer border border-yellow-200"
+                  title="تنزيل جميع ملفات الهدايا مع صورها المعاينة مباشرة في فولدر واحد (ZIP)"
+                >
+                  <FolderUp className="w-4.5 h-4.5 text-slate-950 stroke-[2.5]" />
+                  <span>📁 ⬇️ تنزيل جميع الملفات والصور في فولدر واحد (ZIP)</span>
+                </button>
+
+                {/* Button 2: Customization option - Subfolder for each gift with its file and image */}
+                <button
+                  onClick={handleDownloadCustomFolderPerGiftZip}
+                  disabled={isZipping || (items as any[]).length === 0}
+                  className="px-4 py-3 bg-gradient-to-r from-indigo-600 via-violet-600 to-indigo-600 hover:from-indigo-500 hover:to-violet-500 disabled:opacity-50 text-white rounded-2xl font-black text-xs shadow-xl shadow-indigo-600/30 flex items-center gap-2.5 transition-all hover:scale-105 active:scale-95 cursor-pointer border border-indigo-400/60"
+                  title="تخصيص: تنزيل مجلد فرعي باسم كل هدية يحتوي على ملف الهدية وصورتها داخل فولدر مضغوط ZIP"
+                >
+                  <FolderUp className="w-4.5 h-4.5 text-indigo-200 stroke-[2.5]" />
+                  <span>📂 ⬇️ تخصيص: فولدر مستقل لكل هدية يضم ملفها وصورتها (ZIP)</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Secondary Strip: Packages, ZIPs & Video Studio */}
+            <div className="bg-[#0b1120]/80 border border-white/10 p-3 sm:p-4 rounded-2xl shadow-lg backdrop-blur-md flex flex-col xl:flex-row items-stretch xl:items-center justify-between gap-3">
+              {/* Section 1: Packages & Bundles */}
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-semibold text-slate-400 pl-2 border-l border-white/10 hidden sm:inline">
+                  حزم وملفات ZIP:
+                </span>
+
+                {/* Download Gift Bundles */}
+                <button
+                  onClick={handleDownloadAllGiftBundles}
+                  disabled={isZipping || (items as any[]).length === 0}
+                  className="px-3.5 py-2 bg-pink-600/20 hover:bg-pink-600/30 text-pink-300 border border-pink-500/30 disabled:opacity-50 rounded-xl font-bold text-xs flex items-center gap-2 transition-all hover:scale-105 active:scale-95 cursor-pointer"
+                  title="تنزيل حزم الهدايا كاملة (ملف الهدية + أحلى صورة كادر داخل ZIP)"
+                >
+                  {isZipping ? <Loader2 className="w-4 h-4 animate-spin" /> : <Gift className="w-4 h-4" />}
+                  <span>تنزيل حزم الهدايا ZIP</span>
+                </button>
+
+                {/* Download All SVGA ZIP */}
+                <button
+                  onClick={handleDownloadAllSvga}
+                  disabled={isZipping || (items as any[]).length === 0}
+                  className="px-3.5 py-2 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 disabled:opacity-50 rounded-xl font-bold text-xs flex items-center gap-2 transition-all hover:scale-105 active:scale-95 cursor-pointer"
+                  title="تنزيل جميع ملفات SVGA / VAP الأصلية فقط في ملف ZIP"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>تنزيل كل الملفات (ZIP)</span>
+                </button>
+
+                {/* Download All Combined */}
+                <button
+                  onClick={handleDownloadAllCombined}
+                  disabled={isZipping || (items as any[]).length === 0}
+                  className="px-3.5 py-2 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 disabled:opacity-50 rounded-xl font-bold text-xs flex items-center gap-2 transition-all hover:scale-105 active:scale-95 cursor-pointer"
+                  title="تنزيل شامل لجميع الملفات والصور والكتالوج"
+                >
+                  <Sparkles className="w-4 h-4 text-emerald-300" />
+                  <span>تنزيل الكل الشامل</span>
+                </button>
+              </div>
+
+              {/* Section 2: Video Studio */}
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-semibold text-slate-400 pl-2 border-l border-white/10 hidden sm:inline">
+                  استوديو الفيديو:
+                </span>
+
+                {/* Video Duration & Speed Button */}
+                <button
+                  onClick={() => setShowDurationSpeedModal(true)}
+                  className="px-3.5 py-2 bg-gradient-to-r from-amber-500/20 to-orange-500/20 hover:from-amber-500/30 hover:to-orange-500/30 text-amber-200 border border-amber-500/40 rounded-xl font-bold text-xs flex items-center gap-2 transition-all hover:scale-105 active:scale-95 cursor-pointer shadow-md shadow-amber-500/10"
+                  title="تحديد مدة وقت الفيديو (بالثواني) والتحكم في سرعة التسجيل لجميع الملفات"
+                >
+                  <Clock className="w-4 h-4 text-amber-400" />
+                  <span>مدة وقت الفيديو ({useNativeDuration ? 'الأصلية' : `${exportDuration} ثواني`})</span>
+                </button>
+
+                {/* Convert VAP to MP4 */}
+                <button
+                  onClick={handleExportAllVapToMp4}
+                  disabled={vapBatchProgress?.isOpen}
+                  className="px-3.5 py-2 bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 border border-purple-500/30 disabled:opacity-50 rounded-xl font-bold text-xs flex items-center gap-2 transition-all hover:scale-105 active:scale-95 cursor-pointer"
+                  title="تحويل جميع ملفات VAP إلى MP4 بالصوت المدمج والشفافية"
+                >
+                  {vapBatchProgress?.isOpen ? <Loader2 className="w-4 h-4 animate-spin" /> : <Video className="w-4 h-4 text-purple-300" />}
+                  <span>{vapBatchProgress?.isOpen ? `تحويل (${vapBatchProgress.overallPercent}%)` : 'تحويل VAP ➔ MP4'}</span>
+                </button>
+
+                {/* Export Individual Videos ZIP */}
+                <button
+                  onClick={() => handleExportIndividualVideos()}
+                  disabled={isExporting}
+                  className="px-3.5 py-2 bg-[#0e172a] hover:bg-[#1e293b] disabled:opacity-50 text-slate-200 border border-white/10 rounded-xl font-bold text-xs flex items-center gap-2 transition-all hover:scale-105 active:scale-95 cursor-pointer"
+                  title="تصدير فيديو منفصل لكل ملف على حدة وتنزيلها مضغوطة في ملف ZIP"
+                >
+                  <Film className="w-4 h-4 text-indigo-400" />
+                  <span>فيديو منفصل لكل ملف (ZIP)</span>
+                </button>
+
+                {/* Record Grid Video */}
+                <button
+                  onClick={handleExportGrid}
+                  disabled={isExporting}
+                  className="px-3.5 py-2 bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white rounded-xl font-bold text-xs shadow-md shadow-rose-600/20 flex items-center gap-2 transition-all hover:scale-105 active:scale-95 cursor-pointer"
+                  title="تسجيل وتصدير فيديو مجمع للشاشة بالكامل"
+                >
+                  <span className="w-2 h-2 rounded-full bg-white animate-ping" />
+                  <span>{isExporting ? `تسجيل (${exportProgress}%)` : 'تسجيل فيديو مجمع'}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Row 3: Display & Dimensions Control Studio (استوديو خانات العرض والمقاسات والتصدير - منظم بدون أي تداخل) */}
+        {(items as any[]).length > 0 && (
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 bg-slate-900/70 border border-white/10 p-3 sm:p-4 rounded-3xl backdrop-blur-md">
+            {/* Box 1: Columns / Grid Slots Selector (خانات وأعمدة العرض) */}
+            <div className="lg:col-span-3 bg-black/40 border border-white/10 rounded-2xl p-3 flex flex-col justify-between gap-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-black text-indigo-300 flex items-center gap-1.5">
+                  <Sliders className="w-3.5 h-3.5 text-indigo-400" />
+                  خانات العرض في الشاشة:
+                </span>
+                <span className="px-2 py-0.5 bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 rounded-lg text-[10px] font-black">
+                  {gridCols} {gridCols === 1 ? 'خانة' : gridCols === 2 ? 'خانتين' : `${gridCols} خانات`}
+                </span>
+              </div>
+
+              {/* Quick Column Pills 1 to 8 */}
+              <div className="flex items-center justify-between gap-1 bg-white/5 p-1 rounded-xl border border-white/5">
+                {[1, 2, 3, 4, 5, 6, 7, 8].map(num => (
+                  <button
+                    key={num}
+                    type="button"
+                    onClick={() => setGridCols(num)}
+                    className={`flex-1 py-1 rounded-lg text-[11px] font-black transition-all ${
+                      gridCols === num 
+                        ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30 scale-105' 
+                        : 'text-slate-400 hover:text-white hover:bg-white/5'
+                    }`}
+                    title={`عرض ${num} خانات متوازية بالكامل`}
+                  >
+                    {num}
+                  </button>
+                ))}
+              </div>
+
+              {/* Stepper controls */}
+              <div className="flex items-center justify-between gap-2 text-xs font-bold text-slate-400">
+                <span>تحديد يدوي:</span>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => setGridCols(prev => Math.max(1, prev - 1))}
+                    className="w-7 h-7 bg-white/10 hover:bg-white/20 text-white rounded-lg flex items-center justify-center font-black"
+                    title="تقليل خانة"
+                  >
+                    -
+                  </button>
+                  <input
+                    type="number"
+                    min="1"
+                    max="8"
+                    value={gridCols}
+                    onChange={(e) => setGridCols(Math.max(1, Math.min(8, parseInt(e.target.value) || 1)))}
+                    className="w-10 bg-black/60 border border-white/20 text-white text-center rounded-lg py-1 font-mono font-bold text-xs"
+                  />
+                  <button
+                    onClick={() => setGridCols(prev => Math.min(8, prev + 1))}
+                    className="w-7 h-7 bg-white/10 hover:bg-white/20 text-white rounded-lg flex items-center justify-center font-black"
+                    title="زيادة خانة"
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
+
+              {/* Group Folders Toggle Switch */}
+              <div className="flex items-center justify-between gap-2 text-xs font-bold text-slate-400 mt-1 pt-1.5 border-t border-white/5">
+                <span className="flex items-center gap-1.5 text-indigo-300">
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                  </svg>
+                  عرض مجلدات منفصلة:
+                </span>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={groupFolders}
+                    onChange={(e) => setGroupFolders(e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:right-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-500 shadow-inner"></div>
+                </label>
+              </div>
+            </div>
+
+            {/* Box 2: Custom Dimensions, Presets & Aspect Ratio Lock (أبعاد العرض والمقاسات) */}
+            <div className="lg:col-span-6 bg-black/40 border border-white/10 rounded-2xl p-3 flex flex-col justify-between gap-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-black text-purple-300 flex items-center gap-1.5">
+                  <Monitor className="w-3.5 h-3.5 text-purple-400" />
+                  أبعاد ومقاسات العرض (W × H):
+                </span>
                 {isCustomDimensionsActive && (
                   <button
                     onClick={() => {
@@ -3489,16 +5368,99 @@ export const MultiSvgaViewer: React.FC<MultiSvgaViewerProps> = ({ onCancel, curr
                       setSelectedPresetId('auto');
                       setItems(prev => prev.map(i => ({ ...i, presetId: 'auto' })));
                     }}
-                    className="p-1 hover:bg-rose-500/20 text-rose-400 rounded-lg text-[10px] transition-colors"
+                    className="px-2 py-0.5 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/30 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-colors"
                     title="إلغاء المقاس المخصص والعودة للوضع التلقائي"
                   >
-                    <X className="w-3.5 h-3.5" />
+                    <X className="w-3 h-3" />
+                    <span>إلغاء المخصص</span>
                   </button>
                 )}
               </div>
 
-              {/* Standard Sizes */}
-              <div className="flex items-center gap-1.5 bg-white/5 p-1.5 rounded-2xl border border-white/10">
+              {/* Inputs row: Width + Aspect Ratio Lock + Height + Fit Mode */}
+              <div className="flex flex-wrap items-center gap-2">
+                {/* Width */}
+                <div className="flex items-center gap-1.5 bg-slate-900 border border-purple-500/40 rounded-xl px-2.5 py-1 flex-1 min-w-[100px]">
+                  <span className="text-[10px] text-slate-400 font-bold shrink-0">عرض (W):</span>
+                  <input 
+                    type="number" 
+                    placeholder="العرض"
+                    value={customWidth || ''}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value) || 0;
+                      if (val > 0) {
+                        setCustomWidth(val);
+                        if (lockAspectRatio && customWidth && customHeight) {
+                          const ratio = customHeight / customWidth;
+                          setCustomHeight(Math.round(val * ratio));
+                        }
+                        setIsCustomDimensionsActive(true);
+                      } else {
+                        setCustomWidth(null);
+                        setIsCustomDimensionsActive((customHeight || 0) > 0);
+                      }
+                    }}
+                    className="w-full bg-transparent text-white font-mono font-black text-xs text-center focus:outline-none"
+                  />
+                  <span className="text-[9px] text-slate-500 font-mono">px</span>
+                </div>
+
+                {/* Aspect Ratio Lock Toggle */}
+                <button
+                  type="button"
+                  onClick={() => setLockAspectRatio(prev => !prev)}
+                  className={`px-2.5 py-1.5 rounded-xl text-xs font-black transition-all flex items-center gap-1 border ${
+                    lockAspectRatio 
+                      ? 'bg-purple-600/30 border-purple-500 text-purple-200 shadow-md shadow-purple-500/20' 
+                      : 'bg-white/5 border-white/10 text-slate-400 hover:text-white'
+                  }`}
+                  title={lockAspectRatio ? 'نسبة الأبعاد مقفلة (تغيير العرض يغير الارتفاع تلقائياً)' : 'نسبة الأبعاد حرة'}
+                >
+                  {lockAspectRatio ? <Lock className="w-3.5 h-3.5 text-purple-300" /> : <Unlock className="w-3.5 h-3.5 text-slate-400" />}
+                  <span className="text-[10px] hidden sm:inline">{lockAspectRatio ? 'نسبة مقفلة' : 'نسبة حرة'}</span>
+                </button>
+
+                {/* Height */}
+                <div className="flex items-center gap-1.5 bg-slate-900 border border-purple-500/40 rounded-xl px-2.5 py-1 flex-1 min-w-[100px]">
+                  <span className="text-[10px] text-slate-400 font-bold shrink-0">طول (H):</span>
+                  <input 
+                    type="number" 
+                    placeholder="الارتفاع"
+                    value={customHeight || ''}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value) || 0;
+                      if (val > 0) {
+                        setCustomHeight(val);
+                        if (lockAspectRatio && customWidth && customHeight) {
+                          const ratio = customWidth / customHeight;
+                          setCustomWidth(Math.round(val * ratio));
+                        }
+                        setIsCustomDimensionsActive(true);
+                      } else {
+                        setCustomHeight(null);
+                        setIsCustomDimensionsActive((customWidth || 0) > 0);
+                      }
+                    }}
+                    className="w-full bg-transparent text-white font-mono font-black text-xs text-center focus:outline-none"
+                  />
+                  <span className="text-[9px] text-slate-500 font-mono">px</span>
+                </div>
+
+                {/* Fit Mode */}
+                <select
+                  value={fitMode}
+                  onChange={(e) => setFitMode(e.target.value as any)}
+                  className="bg-slate-900 border border-purple-500/40 rounded-xl text-[10px] font-black text-purple-200 px-2 py-1.5 focus:outline-none"
+                  title="طريقة ملاءمة واحتواء العمل داخل الإطار"
+                >
+                  <option value="contain" className="bg-slate-900 text-white">احتواء كامل (AspectFit)</option>
+                  <option value="cover" className="bg-slate-900 text-white">تعبئة وتغطية (Cover)</option>
+                  <option value="fill" className="bg-slate-900 text-white">تمدد كامل (Fill)</option>
+                </select>
+              </div>
+
+              {/* Quick Presets Pills */}
+              <div className="flex flex-wrap items-center gap-1.5">
                 <button 
                   onClick={() => {
                     setSelectedPresetId('ip8');
@@ -3507,7 +5469,9 @@ export const MultiSvgaViewer: React.FC<MultiSvgaViewerProps> = ({ onCancel, curr
                     setIsCustomDimensionsActive(true);
                     setItems(prev => prev.map(i => ({ ...i, presetId: 'ip8' })));
                   }}
-                  className={`px-3 py-1.5 rounded-xl text-[10px] font-black transition-all ${selectedPresetId === 'ip8' || (customWidth === 750 && customHeight === 1334) ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-500/20' : 'text-slate-400 hover:text-white'}`}
+                  className={`px-2 py-1 rounded-lg text-[10px] font-black transition-all ${
+                    (customWidth === 750 && customHeight === 1334) ? 'bg-indigo-600 text-white shadow-sm' : 'bg-white/5 text-slate-400 hover:text-white'
+                  }`}
                 >
                   750 × 1334
                 </button>
@@ -3519,7 +5483,9 @@ export const MultiSvgaViewer: React.FC<MultiSvgaViewerProps> = ({ onCancel, curr
                     setIsCustomDimensionsActive(true);
                     setItems(prev => prev.map(i => ({ ...i, presetId: 'sq500' })));
                   }}
-                  className={`px-3 py-1.5 rounded-xl text-[10px] font-black transition-all ${selectedPresetId === 'sq500' || (customWidth === 500 && customHeight === 500) ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-500/20' : 'text-slate-400 hover:text-white'}`}
+                  className={`px-2 py-1 rounded-lg text-[10px] font-black transition-all ${
+                    (customWidth === 500 && customHeight === 500) ? 'bg-indigo-600 text-white shadow-sm' : 'bg-white/5 text-slate-400 hover:text-white'
+                  }`}
                 >
                   500 × 500
                 </button>
@@ -3531,9 +5497,23 @@ export const MultiSvgaViewer: React.FC<MultiSvgaViewerProps> = ({ onCancel, curr
                     setIsCustomDimensionsActive(true);
                     setItems(prev => prev.map(i => ({ ...i, presetId: 'custom750x240' })));
                   }}
-                  className={`px-3 py-1.5 rounded-xl text-[10px] font-black transition-all ${selectedPresetId === 'custom750x240' || (customWidth === 750 && customHeight === 240) ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-500/20' : 'text-slate-400 hover:text-white'}`}
+                  className={`px-2 py-1 rounded-lg text-[10px] font-black transition-all ${
+                    (customWidth === 750 && customHeight === 240) ? 'bg-indigo-600 text-white shadow-sm' : 'bg-white/5 text-slate-400 hover:text-white'
+                  }`}
                 >
                   750 × 240
+                </button>
+                <button 
+                  onClick={() => {
+                    setCustomWidth(200);
+                    setCustomHeight(200);
+                    setIsCustomDimensionsActive(true);
+                  }}
+                  className={`px-2 py-1 rounded-lg text-[10px] font-black transition-all ${
+                    (customWidth === 200 && customHeight === 200) ? 'bg-purple-600 text-white shadow-sm' : 'bg-white/5 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  200 × 200 (أفاتار)
                 </button>
                 <button 
                   onClick={() => {
@@ -3543,402 +5523,261 @@ export const MultiSvgaViewer: React.FC<MultiSvgaViewerProps> = ({ onCancel, curr
                     setIsCustomDimensionsActive(false);
                     setItems(prev => prev.map(i => ({ ...i, presetId: 'auto' })));
                   }}
-                  className={`px-3 py-1.5 rounded-xl text-[10px] font-black transition-all ${selectedPresetId === 'auto' && !isCustomDimensionsActive ? 'bg-white/10 text-white' : 'text-slate-400 hover:text-white'}`}
+                  className={`px-2 py-1 rounded-lg text-[10px] font-black transition-all ${
+                    !isCustomDimensionsActive && selectedPresetId === 'auto' ? 'bg-white/15 text-white' : 'bg-white/5 text-slate-400 hover:text-white'
+                  }`}
                 >
                   تلقائي
                 </button>
-              </div>
 
-              <div className="h-8 w-px bg-white/10 mx-1" />
+                {/* Native Presets Dropdown */}
+                <div className="relative inline-block mr-auto">
+                  <button 
+                    onClick={() => setShowPresetMenu(!showPresetMenu)}
+                    className="px-2.5 py-1 bg-white/5 hover:bg-white/10 text-indigo-300 border border-white/10 rounded-lg text-[10px] font-black flex items-center gap-1 transition-colors"
+                  >
+                    <Smartphone className="w-3 h-3" />
+                    <span>{selectedPreset ? selectedPreset.name : 'قائمة الأجهزة'}</span>
+                  </button>
 
-              <div className="relative">
-                <button 
-                  onClick={() => setShowPresetMenu(!showPresetMenu)}
-                  className={`px-6 py-3 rounded-2xl border font-black text-sm transition-all flex items-center gap-2 ${selectedPresetId !== 'auto' ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-white/5 border-white/10 text-slate-400 hover:text-white'}`}
-                >
-                  <Smartphone className="w-4 h-4" />
-                  {selectedPreset ? selectedPreset.name : 'تلقائي (Native)'}
-                </button>
+                  <AnimatePresence>
+                    {showPresetMenu && (
+                      <>
+                        <div className="fixed inset-0 z-[100]" onClick={() => setShowPresetMenu(false)} />
+                        <motion.div 
+                          initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                          animate={{ opacity: 1, y: 0, scale: 1 }}
+                          exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                          className="absolute top-full right-0 mt-2 w-[550px] max-h-[450px] bg-slate-900 border border-white/15 rounded-3xl shadow-2xl overflow-hidden z-[110] flex flex-col"
+                        >
+                          <div className="p-4 border-b border-white/5 flex items-center justify-between bg-white/2">
+                            <h4 className="text-white font-black text-xs flex items-center gap-2">
+                              <Monitor className="w-4 h-4 text-indigo-500" />
+                              اختر مقاس العرض المفضل
+                            </h4>
+                            <button onClick={() => { setSelectedPresetId('auto'); setShowPresetMenu(false); }} className="text-[10px] font-black text-indigo-400 hover:text-indigo-300 uppercase">
+                              إعادة للوضع التلقائي
+                            </button>
+                          </div>
 
-                <AnimatePresence>
-                  {showPresetMenu && (
-                    <>
-                      <div className="fixed inset-0 z-[100]" onClick={() => setShowPresetMenu(false)} />
-                      <motion.div 
-                        initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                        animate={{ opacity: 1, y: 0, scale: 1 }}
-                        exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                        className="absolute top-full right-0 mt-4 w-[600px] max-h-[500px] bg-slate-900 border border-white/10 rounded-[2.5rem] shadow-2xl overflow-hidden z-[110] flex flex-col"
-                      >
-                        <div className="p-6 border-b border-white/5 flex items-center justify-between bg-white/2">
-                          <h4 className="text-white font-black text-sm flex items-center gap-2">
-                            <Monitor className="w-4 h-4 text-indigo-500" />
-                            اختر مقاس العرض المفضل
-                          </h4>
-                          <button onClick={() => setSelectedPresetId('auto')} className="text-[10px] font-black text-indigo-400 hover:text-indigo-300 uppercase tracking-widest">
-                            إعادة للوضع التلقائي
-                          </button>
-                        </div>
-
-                        <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
-                          {['iPhone', 'Android', 'Tablet', 'PC'].map(cat => (
-                            <div key={cat} className="mb-8 last:mb-0">
-                              <h5 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
-                                <div className="w-1.5 h-1.5 bg-indigo-500 rounded-full" />
-                                {cat === 'iPhone' ? 'سلسلة آيفون' : cat === 'Android' ? 'سلسلة أندرويد' : cat === 'Tablet' ? 'سلسلة الأجهزة اللوحية' : 'سلسلة الكمبيوتر'}
-                              </h5>
-                              <div className="grid grid-cols-3 gap-2">
-                                {DEVICE_PRESETS.filter(p => p.category === cat).map(preset => (
-                                  <button
-                                    key={preset.id}
-                                    onClick={() => {
-                                      setSelectedPresetId(preset.id);
-                                      setShowPresetMenu(false);
-                                    }}
-                                    className={`px-3 py-2.5 rounded-xl text-[10px] font-bold text-right transition-all border ${selectedPresetId === preset.id ? 'bg-indigo-500 border-indigo-400 text-white shadow-lg shadow-indigo-500/20' : 'bg-white/5 border-white/5 text-slate-400 hover:bg-white/10 hover:text-white'}`}
-                                  >
-                                    <div className="flex flex-col">
-                                      <span>{preset.name}</span>
-                                      <span className="text-[8px] opacity-50">{preset.width} × {preset.height}</span>
-                                    </div>
-                                  </button>
-                                ))}
+                          <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
+                            {['iPhone', 'Android', 'Tablet', 'PC'].map(cat => (
+                              <div key={cat} className="mb-6 last:mb-0">
+                                <h5 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2.5 flex items-center gap-2">
+                                  <div className="w-1.5 h-1.5 bg-indigo-500 rounded-full" />
+                                  {cat === 'iPhone' ? 'سلسلة آيفون' : cat === 'Android' ? 'سلسلة أندرويد' : cat === 'Tablet' ? 'الأجهزة اللوحية' : 'الكمبيوتر'}
+                                </h5>
+                                <div className="grid grid-cols-3 gap-2">
+                                  {DEVICE_PRESETS.filter(p => p.category === cat).map(preset => (
+                                    <button
+                                      key={preset.id}
+                                      onClick={() => {
+                                        setSelectedPresetId(preset.id);
+                                        setShowPresetMenu(false);
+                                      }}
+                                      className={`px-2.5 py-2 rounded-xl text-[10px] font-bold text-right transition-all border ${selectedPresetId === preset.id ? 'bg-indigo-500 border-indigo-400 text-white shadow-lg shadow-indigo-500/20' : 'bg-white/5 border-white/5 text-slate-400 hover:bg-white/10 hover:text-white'}`}
+                                    >
+                                      <div className="flex flex-col">
+                                        <span>{preset.name}</span>
+                                        <span className="text-[8px] opacity-50">{preset.width} × {preset.height}</span>
+                                      </div>
+                                    </button>
+                                  ))}
+                                </div>
                               </div>
-                            </div>
-                          ))}
-                        </div>
-                      </motion.div>
-                    </>
-                  )}
-                </AnimatePresence>
+                            ))}
+                          </div>
+                        </motion.div>
+                      </>
+                    )}
+                  </AnimatePresence>
+                </div>
+              </div>
+            </div>
+
+            {/* Box 3: Video Export & Encoding Settings (إعدادات تصدير وجودة الفيديو) */}
+            <div className="lg:col-span-3 bg-black/40 border border-white/10 rounded-2xl p-3 flex flex-col justify-between gap-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-black text-amber-300 flex items-center gap-1.5">
+                  <Film className="w-3.5 h-3.5 text-amber-400" />
+                  إعدادات وجودة التصدير:
+                </span>
+                <span className="text-[10px] font-mono font-bold text-slate-400">
+                  {exportFormat.toUpperCase()} • {exportResolution}
+                </span>
               </div>
 
-              <div className="h-8 w-px bg-white/10 mx-2" />
+              {/* Dropdowns */}
+              <div className="grid grid-cols-3 gap-1.5">
+                <select 
+                  value={exportFormat}
+                  onChange={(e) => setExportFormat(e.target.value as ViewerExportFormat)}
+                  className="bg-slate-900 border border-white/15 rounded-xl text-[10px] font-black text-white px-2 py-1.5 focus:outline-none"
+                  title="صيغة التصدير"
+                >
+                  <option value="mp4" className="bg-slate-900 text-white">MP4</option>
+                  <option value="webm" className="bg-slate-900 text-white">WebM</option>
+                  <option value="vap" className="bg-slate-900 text-white">VAP (.mp4)</option>
+                  <option value="yyeva" className="bg-slate-900 text-white">YYEVA (.mp4)</option>
+                </select>
 
-              <div className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-2xl px-4 py-2">
-                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">عدد الأعمدة:</span>
-                <input 
-                  type="number" 
-                  min="1" 
-                  max="5"
-                  value={gridCols}
-                  onChange={(e) => setGridCols(Math.max(1, Math.min(5, parseInt(e.target.value) || 1)))}
-                  className="w-16 bg-transparent text-white font-black text-sm focus:outline-none text-center"
-                />
-              </div>
-              <div className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-2xl px-4 py-2">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input 
-                    type="checkbox" 
-                    checked={forceMobileSize}
-                    onChange={(e) => setForceMobileSize(e.target.checked)}
-                    className="w-4 h-4 accent-indigo-500"
-                  />
-                  <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">تصدير لمقاس جوال (9:16)</span>
-                </label>
-              </div>
-              <div className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-2xl px-4 py-2">
-                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">الدقة:</span>
                 <select 
                   value={exportResolution}
                   onChange={(e) => setExportResolution(e.target.value as 'natural' | '720p' | '1080p')}
-                  className="bg-transparent text-white font-black text-xs focus:outline-none"
+                  className="bg-slate-900 border border-white/15 rounded-xl text-[10px] font-black text-white px-2 py-1.5 focus:outline-none"
+                  title="دقة التصدير"
                 >
                   <option value="natural" className="bg-slate-900 text-white">طبيعي</option>
                   <option value="720p" className="bg-slate-900 text-white">720p</option>
                   <option value="1080p" className="bg-slate-900 text-white">1080p</option>
                 </select>
-              </div>
-              <div className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-2xl px-4 py-2">
-                <span className="text-[10px] font-black text-emerald-400 uppercase tracking-widest">صيغة التصدير:</span>
-                <select 
-                  value={exportFormat}
-                  onChange={(e) => setExportFormat(e.target.value as 'mp4' | 'webm')}
-                  className="bg-transparent text-white font-black text-xs focus:outline-none"
-                >
-                  <option value="mp4" className="bg-slate-900 text-white">MP4</option>
-                  <option value="webm" className="bg-slate-900 text-white">WebM</option>
-                </select>
-              </div>
-              <div className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-2xl px-4 py-2" title="التحكم في ضغط الفيديو وحجم الملف وسرعة التصدير">
-                <span className="text-[10px] font-black text-amber-400 uppercase tracking-widest">حجم/ضغط الفيديو:</span>
+
                 <select 
                   value={exportQuality}
                   onChange={(e) => setExportQuality(e.target.value as 'high' | 'medium' | 'low')}
-                  className="bg-transparent text-white font-black text-xs focus:outline-none"
+                  className="bg-slate-900 border border-white/15 rounded-xl text-[10px] font-black text-amber-300 px-1.5 py-1.5 focus:outline-none"
+                  title="حجم وضغط الفيديو"
                 >
-                  <option value="medium" className="bg-slate-900 text-white">⚡ متوازن (موصى به - حجم مثالي وسرعة)</option>
-                  <option value="low" className="bg-slate-900 text-white">🚀 فائق الضغط (حجم أصغر - أسرع تصدير)</option>
-                  <option value="high" className="bg-slate-900 text-white">💎 أعلى جودة (حجم أصلي)</option>
+                  <option value="medium" className="bg-slate-900 text-white">⚡ متوازن</option>
+                  <option value="low" className="bg-slate-900 text-white">🚀 فائق الضغط</option>
+                  <option value="high" className="bg-slate-900 text-white">💎 أعلى جودة</option>
                 </select>
               </div>
-              <div className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-2xl px-4 py-2">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input 
-                    type="checkbox" 
-                    checked={useNativeDuration}
-                    onChange={(e) => setUseNativeDuration(e.target.checked)}
-                    className="w-4 h-4 accent-indigo-500"
-                  />
-                  <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest">تصدير بالمدة الأصلية لكل ملف</span>
-                </label>
-              </div>
-              {!useNativeDuration && (
-                <div className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-2xl px-4 py-2">
-                  <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">مدة مخصصة (ثواني):</span>
-                  <input 
-                    type="number" 
-                    min="1" 
-                    max="60"
-                    value={exportDuration}
-                    onChange={(e) => setExportDuration(Math.max(1, parseInt(e.target.value) || 1))}
-                    className="w-16 bg-transparent text-white font-black text-sm focus:outline-none text-center"
-                  />
-                </div>
-              )}
-              <div className="flex items-center gap-2">
-                <button 
-                  onClick={handleDownloadAllGiftBundles}
-                  disabled={isZipping || isExporting || isPdfAllInOneExporting}
-                  className="relative overflow-hidden group px-6 py-3 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white rounded-2xl shadow-lg shadow-red-600/30 font-black text-sm transition-all flex items-center gap-2 disabled:opacity-50 border border-red-400/30"
-                  title="تنزيل جميع ملفات الهدايا مع أفضل صورة كادر واضحة للهدية في ملف مضغوط ZIP واحد"
-                >
-                  {isZipping ? <Loader2 className="w-4 h-4 animate-spin" /> : <Gift className="w-4 h-4 text-red-200" />}
-                  <span>{isZipping ? `جاري التحضير ${exportProgress}%` : 'تنزيل حزم الهدايا (الملف + أحلى صورة)'}</span>
-                  <span className="px-2 py-0.5 rounded-md bg-white/20 text-[10px] font-black uppercase tracking-wider">ZIP</span>
-                </button>
 
-                <div 
-                  className={`flex items-center gap-2 px-3.5 py-3 rounded-2xl border transition-all cursor-pointer select-none ${
-                    includePdfCatalog 
-                      ? 'bg-rose-500/20 border-rose-500/50 text-rose-300 shadow-lg shadow-rose-500/20' 
-                      : 'bg-white/5 border-white/10 text-slate-300 hover:bg-white/10'
-                  }`}
-                  onClick={() => setIncludePdfCatalog(!includePdfCatalog)}
-                  title="عند التفعيل: سيتم إضافة ملف PDF واحد يجمع كل صور الهدايا مع ملفات الـ ZIP"
-                >
+              {/* Dedicated Video Duration Control with Checkbox (علامة الصح للمدة المخصصة أو الأساسية) */}
+              <div className="bg-slate-950/80 border border-amber-500/30 rounded-xl p-3 flex flex-col gap-2.5">
+                {/* Header & Advanced Modal Button */}
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-black text-amber-300 flex items-center gap-1.5">
+                    <Clock className="w-3.5 h-3.5 text-amber-400" />
+                    <span>التحكم في وقت ومدة الفيديو:</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setShowDurationSpeedModal(true)}
+                    className="text-[10px] text-amber-300 hover:text-white font-bold flex items-center gap-1 bg-amber-500/10 hover:bg-amber-500/25 px-2 py-0.5 rounded-lg border border-amber-500/30 transition-all cursor-pointer"
+                    title="فتح استوديو تحديد مدة وسرعة الفيديو المتقدم"
+                  >
+                    <span>التحكم المتقدم</span>
+                  </button>
+                </div>
+
+                {/* Primary Checkbox (علامة الصح المطلوبة) */}
+                <label className="flex items-center gap-2.5 px-2 py-1.5 bg-white/5 hover:bg-white/10 rounded-xl border border-white/10 cursor-pointer select-none transition-all group">
                   <input 
                     type="checkbox" 
-                    id="include-pdf-catalog-toggle"
-                    checked={includePdfCatalog}
-                    onChange={(e) => setIncludePdfCatalog(e.target.checked)}
-                    onClick={(e) => e.stopPropagation()}
-                    className="w-4 h-4 accent-rose-500 rounded cursor-pointer"
+                    checked={!useNativeDuration}
+                    onChange={(e) => {
+                      const isCustom = e.target.checked;
+                      setUseNativeDuration(!isCustom);
+                    }}
+                    className="w-4 h-4 accent-amber-500 rounded cursor-pointer transition-transform group-hover:scale-110"
                   />
-                  <label htmlFor="include-pdf-catalog-toggle" className="text-xs font-bold flex items-center gap-1.5 cursor-pointer">
-                    <FileText className={`w-4 h-4 ${includePdfCatalog ? 'text-rose-400' : 'text-slate-400'}`} />
-                    <span>تضمين كتالوج PDF موحد</span>
+                  <div className="flex flex-col">
+                    <span className="text-xs font-black text-amber-200 group-hover:text-white flex items-center gap-1.5">
+                      <span>تحديد وتخصيص مدة وقت الفيديو (بالثواني)</span>
+                    </span>
+                    <span className="text-[9px] text-slate-400">
+                      {!useNativeDuration 
+                        ? 'مفعلة: سيتم تصدير الفيديو بالمدة التي تحددها بالأسفل' 
+                        : 'غير مفعلة: يتم تصدير كل ملف بمدته الأساسية الأصلية تلقائياً'}
+                    </span>
+                  </div>
+                </label>
+
+                {/* State 1: When Checkbox is UNCHECKED (غير متفعلة) -> Export with Base / Native Duration */}
+                {useNativeDuration ? (
+                  <div className="flex items-center justify-between px-3 py-2 bg-emerald-950/40 border border-emerald-500/30 rounded-xl text-[10px] text-emerald-300 font-bold">
+                    <span className="flex items-center gap-1.5">
+                      <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                      <span>يتم تصدير الفيديو بالمدة الأساسية والأصلية للملف تلقائياً</span>
+                    </span>
+                    <span className="text-[9px] bg-emerald-500/20 text-emerald-200 px-2 py-0.5 rounded-full font-mono font-bold">
+                      المدة الأساسية ✓
+                    </span>
+                  </div>
+                ) : (
+                  /* State 2: When Checkbox is CHECKED (متفعلة) -> User specifies the exact duration */
+                  <div className="flex flex-col gap-2 p-2 bg-amber-950/20 border border-amber-500/30 rounded-xl animate-fade-in">
+                    <div className="flex items-center justify-between text-[10px] font-bold text-amber-300">
+                      <span>حدد مدة الفيديو المطلوبة:</span>
+                      <span className="font-mono bg-amber-500/20 text-amber-200 px-2 py-0.5 rounded-md">
+                        {exportDuration} ثواني
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {/* Quick Choice Buttons */}
+                      {[2, 3, 5, 8, 10, 15].map(sec => (
+                        <button
+                          key={sec}
+                          type="button"
+                          onClick={() => setExportDuration(sec)}
+                          className={`flex-1 min-w-[34px] py-1 px-1.5 rounded-lg text-[10px] font-mono font-black transition-all cursor-pointer border text-center ${
+                            exportDuration === sec 
+                              ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-md shadow-amber-500/30 scale-105' 
+                              : 'bg-white/5 text-slate-300 hover:text-white border-white/10 hover:border-amber-500/40'
+                          }`}
+                          title={`تحديد مدة تصدير الفيديو إلى ${sec} ثواني`}
+                        >
+                          {sec}ث
+                        </button>
+                      ))}
+
+                      {/* Stepper with + and - */}
+                      <div className="flex items-center gap-1 bg-slate-900 border border-amber-400/60 ring-1 ring-amber-400/30 px-2 py-1 rounded-lg">
+                        <button
+                          type="button"
+                          onClick={() => setExportDuration(prev => Math.max(1, prev - 1))}
+                          className="text-slate-300 hover:text-white font-black text-xs px-1 cursor-pointer"
+                          title="تقليل ثانية واحدة"
+                        >
+                          <Minus size={11} />
+                        </button>
+                        <input 
+                          type="number" 
+                          min="1" 
+                          max="120"
+                          value={exportDuration}
+                          onChange={(e) => {
+                            const val = Math.max(1, parseInt(e.target.value) || 1);
+                            setExportDuration(val);
+                          }}
+                          className="w-8 bg-transparent text-amber-200 text-center font-mono font-black text-[11px] focus:outline-none"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setExportDuration(prev => Math.min(120, prev + 1))}
+                          className="text-slate-300 hover:text-white font-black text-xs px-1 cursor-pointer"
+                          title="زيادة ثانية واحدة"
+                        >
+                          <Plus size={11} />
+                        </button>
+                        <span className="text-[9px] text-slate-400 font-bold">ث</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Footer Sub-Info */}
+                <div className="flex items-center justify-between pt-1 border-t border-white/5 text-[9px]">
+                  <span className="text-amber-200/80 font-bold">
+                    {useNativeDuration ? '✓ المدة الأصلية لكل ملف' : `⏱️ مدة مخصصة: ${exportDuration} ثواني`}
+                  </span>
+                  <label className="flex items-center gap-1 cursor-pointer text-slate-300 hover:text-white">
+                    <input 
+                      type="checkbox" 
+                      checked={forceMobileSize}
+                      onChange={(e) => setForceMobileSize(e.target.checked)}
+                      className="w-3 h-3 accent-indigo-500 rounded"
+                    />
+                    <span>مقاس جوال (9:16)</span>
                   </label>
                 </div>
               </div>
-
-              <button 
-                onClick={handleDownloadAllSvgaInOnePdf}
-                disabled={isPdfAllInOneExporting || isZipping || isExporting}
-                className="relative overflow-hidden group px-6 py-3 bg-gradient-to-r from-amber-600 via-rose-600 to-pink-600 hover:from-amber-500 hover:via-rose-500 hover:to-pink-500 text-white rounded-2xl shadow-lg shadow-rose-600/30 font-black text-sm transition-all flex items-center gap-2.5 disabled:opacity-50 border border-rose-400/40 cursor-pointer"
-                title="تنزيل جميع ملفات SVGA في ملف PDF واحد مجمع، يحتوي على كل ملف مع صورته المعاينة وبياناته وملف SVGA الأصلي مدمج داخله"
-              >
-                {isPdfAllInOneExporting ? (
-                  <Loader2 className="w-4 h-4 animate-spin text-amber-200" />
-                ) : (
-                  <FileText className="w-4 h-4 text-amber-200" />
-                )}
-                <span className="whitespace-nowrap">
-                  {isPdfAllInOneExporting 
-                    ? `جاري التحضير ${pdfAllInOneProgress}%` 
-                    : 'تنزيل جميع ملفات SVGA في ملف PDF واحد'}
-                </span>
-                <span className="px-2 py-0.5 rounded-md bg-white/20 text-[10px] font-black uppercase tracking-wider text-amber-200 whitespace-nowrap">
-                  PDF 1 + الصور
-                </span>
-              </button>
-
-              <button 
-                onClick={handleDownloadAllCombined}
-                disabled={isZipping || isExporting || isPdfAllInOneExporting}
-                className="px-6 py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl shadow-lg shadow-emerald-600/20 font-black text-sm transition-all flex items-center gap-2 disabled:opacity-50"
-                title="تنزيل جميع الملفات المرفوعة (SVGA و VAP) مع الصور وكتالوج PDF في ملف مضغوط واحد"
-              >
-                {isZipping ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-                {isZipping ? `جاري التحضير ${exportProgress}%` : 'تنزيل الكل (الملفات + صور + PDF)'}
-              </button>
-
-              {/* Distinct High-Visibility Yellow Deduplication Button */}
-              <button 
-                type="button"
-                onClick={handleToggleDeduplication}
-                className={`px-6 py-3 rounded-2xl font-black text-sm transition-all flex items-center gap-2.5 shadow-xl border cursor-pointer select-none ${
-                  preventDuplicates 
-                    ? 'bg-yellow-400 hover:bg-yellow-300 text-slate-950 border-yellow-200 shadow-yellow-400/50 ring-4 ring-yellow-400/40' 
-                    : 'bg-yellow-400/20 hover:bg-yellow-400 hover:text-slate-950 text-yellow-300 border-yellow-400/60 shadow-lg shadow-yellow-500/20'
-                }`}
-                title="فحص فوري ومنع تكرار الملفات: الاحتفاظ بنسخة واحدة فقط وحذف أي ملف متكرر عند التنزيل أو الرفع"
-              >
-                <div className="w-5 h-5 rounded-md flex items-center justify-center bg-black/20 border border-black/30">
-                  {preventDuplicates ? (
-                    <CheckSquare className="w-4 h-4 text-slate-950 stroke-[3]" />
-                  ) : (
-                    <Square className="w-4 h-4 text-yellow-300" />
-                  )}
-                </div>
-                <ShieldCheck className={`w-5 h-5 ${preventDuplicates ? 'text-slate-950' : 'text-yellow-400'}`} />
-                <span className="font-black text-sm whitespace-nowrap">
-                  {preventDuplicates ? 'منع التكرار: مفعّل (تنزيل نسخة واحدة فقط)' : 'منع وحذف الملفات المكررة'}
-                </span>
-              </button>
-
-              <button 
-                onClick={handleDownloadAllSvga}
-                disabled={isZipping || isExporting || isPdfAllInOneExporting}
-                className="px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl shadow-lg shadow-blue-600/20 font-black text-sm transition-all flex items-center gap-2 disabled:opacity-50"
-                title="تنزيل جميع الملفات المرفوعة (SVGA و VAP و PAG) مع صورها في ملف مضغوط واحد"
-              >
-                {isZipping ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-                {isZipping ? `جاري التحضير ${exportProgress}%` : 'تنزيل كل الملفات المرفوعة (ZIP)'}
-              </button>
-
-              <button 
-                onClick={handleExportAllVapToMp4}
-                disabled={isExporting || isZipping || vapBatchProgress?.isOpen}
-                className="relative overflow-hidden group px-6 py-3 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white rounded-2xl shadow-lg shadow-indigo-600/30 font-black text-sm transition-all flex items-center gap-2 disabled:opacity-50 border border-indigo-400/30"
-                title="تصدير سريع لجميع ملفات VAP إلى فيديو MP4 عالي الجودة مع الصوت وقناة الشفافية"
-              >
-                {vapBatchProgress?.isOpen ? <Loader2 className="w-4 h-4 animate-spin" /> : <Video className="w-4 h-4 text-indigo-200" />}
-                <span>{vapBatchProgress?.isOpen ? `VAP (${vapBatchProgress.overallPercent}%)` : 'VAP → MP4 (فائق السرعة بالصوت)'}</span>
-                <span className="px-2 py-0.5 rounded-md bg-white/20 text-[10px] font-black uppercase tracking-wider">VAP</span>
-              </button>
-
-              <button 
-                onClick={() => handleExportIndividualVideos()}
-                disabled={isExporting || isZipping}
-                className="relative overflow-hidden group px-6 py-3 bg-purple-600 hover:bg-purple-500 text-white rounded-2xl shadow-lg shadow-purple-600/20 font-black text-sm transition-all flex items-center gap-2 disabled:opacity-50"
-              >
-                {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Film className="w-4 h-4" />}
-                {isExporting ? `جاري التصدير ${exportProgress}%` : 'تصدير كل ملف فيديو منفصل (ZIP)'}
-              </button>
-
-              <button 
-                onClick={handleExportGrid}
-                disabled={isExporting || isZipping}
-                className="relative overflow-hidden group px-8 py-3 bg-slate-800/60 border border-slate-700/60 rounded-2xl text-slate-300 font-bold text-xs uppercase tracking-wider hover:bg-slate-700/60 transition-all flex items-center gap-3 disabled:opacity-50"
-              >
-                <div className="w-2.5 h-2.5 bg-red-500 rounded-full animate-pulse shadow-[0_0_10px_rgba(239,68,68,0.5)]" />
-                {isExporting ? `جاري التسجيل ${exportProgress}%` : 'تسجيل فيديو مجمع (كل الملفات فيديو واحد)'}
-                {isExporting && (
-                  <motion.div 
-                    className="absolute bottom-0 left-0 h-1 bg-red-500"
-                    initial={{ width: 0 }}
-                    animate={{ width: `${exportProgress}%` }}
-                  />
-                )}
-              </button>
-              <button 
-                onClick={handleSelectAll}
-                className="px-6 py-3 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 rounded-2xl border border-indigo-500/20 font-black text-sm transition-all flex items-center gap-2"
-              >
-                <SquareCheck className="w-4 h-4" />
-                {selectedItemIds.size === (items as any[]).length && (items as any[]).length > 0 ? 'إلغاء التحديد' : 'تحديد الكل'}
-              </button>
-              <button 
-                onClick={clearAll}
-                className="px-6 py-3 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded-2xl border border-red-500/20 font-black text-sm transition-all flex items-center gap-2"
-              >
-                <Trash2 className="w-4 h-4" />
-                مسح الكل
-              </button>
-            </>
-          )}
-
-          {items.length === 0 && (
-            <button 
-              type="button"
-              onClick={handleToggleDeduplication}
-              className={`px-6 py-3 rounded-2xl font-black text-sm transition-all flex items-center gap-2.5 shadow-xl border cursor-pointer select-none ${
-                preventDuplicates 
-                  ? 'bg-yellow-400 hover:bg-yellow-300 text-slate-950 border-yellow-200 shadow-yellow-400/50 ring-4 ring-yellow-400/40' 
-                  : 'bg-yellow-400/20 hover:bg-yellow-400 hover:text-slate-950 text-yellow-300 border-yellow-400/60 shadow-lg shadow-yellow-500/20'
-              }`}
-              title="تفعيل فحص ومنع تكرار الملفات تلقائياً عند الرفع والتنزيل"
-            >
-              <div className="w-5 h-5 rounded-md flex items-center justify-center bg-black/20 border border-black/30">
-                {preventDuplicates ? (
-                  <CheckSquare className="w-4 h-4 text-slate-950 stroke-[3]" />
-                ) : (
-                  <Square className="w-4 h-4 text-yellow-300" />
-                )}
-              </div>
-              <ShieldCheck className={`w-5 h-5 ${preventDuplicates ? 'text-slate-950' : 'text-yellow-400'}`} />
-              <span className="font-black text-sm whitespace-nowrap">
-                {preventDuplicates ? 'منع التكرار: مفعّل (نسخة واحدة فقط)' : 'منع تكرار الملفات'}
-              </span>
-            </button>
-          )}
-          <button 
-            onClick={() => fileInputRef.current?.click()}
-            className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl shadow-lg shadow-indigo-600/20 font-black text-sm transition-all flex items-center gap-2"
-          >
-            <Upload className="w-4 h-4" />
-            رفع ملفات
-          </button>
-          <button 
-            onClick={() => {
-              const input = document.createElement('input');
-              input.type = 'file';
-              input.multiple = true;
-              input.webkitdirectory = true;
-              input.onchange = (e: any) => {
-                if (e.target.files) {
-                  const fileObjects = Array.from(e.target.files as FileList).map(file => ({
-                    file,
-                    folderPath: file.webkitRelativePath.split('/').slice(0, -1).join('/'),
-                    folderName: file.webkitRelativePath.split('/').slice(-2, -1)[0]
-                  }));
-                  handleFiles(fileObjects);
-                }
-              };
-              input.click();
-            }}
-            className="px-6 py-3 bg-fuchsia-600 hover:bg-fuchsia-500 text-white rounded-2xl shadow-lg shadow-fuchsia-600/20 font-black text-sm transition-all flex items-center gap-2"
-          >
-            <Upload className="w-4 h-4" />
-            رفع مجلدات
-          </button>
-          <button 
-            onClick={() => {
-              const input = document.createElement('input');
-              input.type = 'file';
-              input.multiple = true;
-              // Accept .pdf, .PDF, application/pdf, and allow all files so OS file chooser never hides or greys out PDF files
-              input.accept = '.pdf,.PDF,application/pdf,*/*';
-              input.onchange = (e: any) => {
-                if (e.target.files) {
-                  const fileObjects = Array.from(e.target.files as FileList).map(file => ({ file }));
-                  handleFiles(fileObjects);
-                }
-              };
-              input.click();
-            }}
-            className="px-6 py-3 bg-gradient-to-r from-amber-600 via-rose-600 to-pink-600 hover:from-amber-500 hover:via-rose-500 hover:to-pink-500 text-white rounded-2xl shadow-lg shadow-rose-600/25 font-black text-sm transition-all flex items-center gap-2 cursor-pointer border border-rose-400/30"
-            title="استدعاء ملفات PDF واستخراج ملفات SVGA منها حتى لو كانت مقفولة بكلمة مرور"
-          >
-            <Lock className="w-4 h-4 text-amber-200" />
-            <span>فك واستخراج من PDF</span>
-          </button>
-          <input 
-            ref={fileInputRef}
-            type="file" 
-            multiple 
-            accept=".svga,.SVGA,.pag,.PAG,.vap,.VAP,.mp4,.MP4,.zip,.ZIP,.pdf,.PDF,application/pdf,*/*" 
-            className="hidden" 
-            onChange={(e) => {
-              if (e.target.files) {
-                const fileObjects = Array.from(e.target.files).map(file => ({ file }));
-                handleFiles(fileObjects);
-                e.target.value = '';
-              }
-            }}
-          />
-        </div>
+            </div>
+          </div>
+        )}
       </div>
 
         {/* Toolbar: Background & Watermark */}
@@ -3954,8 +5793,13 @@ export const MultiSvgaViewer: React.FC<MultiSvgaViewerProps> = ({ onCancel, curr
         {loadProgress && (
           <div className="bg-indigo-500/10 border border-indigo-500/30 rounded-2xl p-4 flex flex-col gap-2 mb-4">
             <div className="flex justify-between items-center text-xs font-black">
-              <span className="text-white flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin text-indigo-400" /> جاري التحميل...</span>
-              <span className="text-indigo-400">{loadProgress.current} / {loadProgress.total}</span>
+              <span className="text-white flex items-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
+                جاري فحص وتحميل الملفات... ({Math.round((loadProgress.current / loadProgress.total) * 100)}%)
+              </span>
+              <span className="text-indigo-400 font-mono">
+                {loadProgress.current} من أصل {loadProgress.total}
+              </span>
             </div>
             <div className="h-2 w-full bg-black/50 rounded-full overflow-hidden">
               <div 
@@ -3966,103 +5810,314 @@ export const MultiSvgaViewer: React.FC<MultiSvgaViewerProps> = ({ onCancel, curr
           </div>
         )}
 
-        <div className="flex flex-wrap items-center gap-8">
-          <div className="flex items-center gap-3 border-r border-white/10 pr-6">
-            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">الخلفية:</span>
-            <div className="flex gap-2">
+        <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-5 w-full">
+          {/* Background selector with guaranteed pristine presets & no broken external images */}
+          <div className="flex items-center gap-2.5 bg-slate-900/60 p-2.5 sm:p-3 rounded-2xl border border-white/10 shrink-0 backdrop-blur-md shadow-lg">
+            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">الخلفية:</span>
+            <div className="flex items-center gap-1.5">
+              {/* 1. Transparent */}
               <button 
                 onClick={() => setPreviewBg(null)}
-                className={`w-10 h-10 rounded-xl border transition-all ${!previewBg ? 'border-indigo-500 bg-indigo-500/20' : 'border-white/10 bg-white/5'}`}
-                title="شفاف"
+                className={`w-9 h-9 rounded-xl border transition-all flex items-center justify-center cursor-pointer ${
+                  !previewBg ? 'border-indigo-400 bg-indigo-500/25 ring-2 ring-indigo-500/30' : 'border-white/10 bg-white/5 hover:bg-white/10'
+                }`}
+                title="خلفية شفافة (أصلية)"
               >
-                <X className="w-4 h-4 mx-auto text-slate-400" />
+                <X className="w-4 h-4 text-slate-300" />
               </button>
-              {presetBgs.slice(0, 5).map(bg => (
-                <button 
-                  key={bg.id}
-                  onClick={() => setPreviewBg(bg.url)}
-                  className={`w-10 h-10 rounded-xl border relative overflow-hidden transition-all ${previewBg === bg.url ? 'border-indigo-500 ring-2 ring-indigo-500/20' : 'border-white/10'}`}
-                >
-                  <img src={bg.url} alt={bg.label || "Background"} className="absolute inset-0 w-full h-full object-cover" referrerPolicy="no-referrer" />
-                </button>
-              ))}
+
+              {/* 2. Studio Dark */}
+              <button
+                onClick={() => setPreviewBg('linear-gradient(135deg, #0b0f19 0%, #111827 50%, #030712 100%)')}
+                className={`w-9 h-9 rounded-xl border transition-all relative overflow-hidden cursor-pointer ${
+                  previewBg?.includes('#0b0f19') ? 'border-indigo-400 ring-2 ring-indigo-500/30' : 'border-white/10 hover:border-white/30'
+                }`}
+                style={{ background: 'linear-gradient(135deg, #0b0f19, #111827)' }}
+                title="استوديو داكن فاخر"
+              />
+
+              {/* 3. Cyber Navy */}
+              <button
+                onClick={() => setPreviewBg('linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%)')}
+                className={`w-9 h-9 rounded-xl border transition-all relative overflow-hidden cursor-pointer ${
+                  previewBg?.includes('#1e1b4b') ? 'border-indigo-400 ring-2 ring-indigo-500/30' : 'border-white/10 hover:border-white/30'
+                }`}
+                style={{ background: 'linear-gradient(135deg, #0f172a, #1e1b4b)' }}
+                title="فضاء سيبراني كحلي"
+              />
+
+              {/* 4. Pure Black */}
+              <button
+                onClick={() => setPreviewBg('#000000')}
+                className={`w-9 h-9 rounded-xl border transition-all relative overflow-hidden cursor-pointer ${
+                  previewBg === '#000000' ? 'border-indigo-400 ring-2 ring-indigo-500/30' : 'border-white/10 hover:border-white/30'
+                }`}
+                style={{ background: '#000000' }}
+                title="أسود فاحم سينمائي"
+              />
+
+              {/* 5. Custom Background Upload */}
               <button 
                 onClick={() => bgInputRef.current?.click()}
-                className="w-10 h-10 rounded-xl border border-white/10 bg-white/5 flex items-center justify-center hover:bg-white/10 transition-all"
-                title="خلفية مخصصة"
+                className="w-9 h-9 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 flex items-center justify-center transition-all cursor-pointer text-slate-300 hover:text-white"
+                title="رفع صورة خلفية مخصصة من جهازك"
               >
-                <ImageIcon className="w-4 h-4 text-slate-400" />
+                <ImageIcon className="w-4 h-4" />
               </button>
               <input type="file" ref={bgInputRef} className="hidden" accept="image/*" onChange={(e) => e.target.files?.[0] && setPreviewBg(URL.createObjectURL(e.target.files[0]))} />
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
-            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">العلامة المائية:</span>
-            <button 
-              onClick={() => watermarkInputRef.current?.click()}
-              className={`px-5 py-2.5 rounded-xl border text-[10px] font-black uppercase transition-all flex items-center gap-2 ${watermark ? 'border-emerald-500 bg-emerald-500/10 text-emerald-400' : 'border-white/10 bg-white/5 text-slate-400'}`}
-            >
-              <ShieldCheck className="w-4 h-4" />
-              {watermark ? 'تم التحديد' : 'رفع شعار'}
-            </button>
-            {watermark && (
-              <div className="flex items-center gap-4 ml-2">
-                <select 
-                  value={wmSettings.position}
-                  onChange={(e) => setWmSettings(prev => ({ ...prev, position: e.target.value as any }))}
-                  className="bg-white/5 border border-white/10 rounded-lg px-2 py-1 text-[10px] text-white focus:outline-none"
-                  disabled={wmSettings.isAnimated}
+          {/* EXACT Anti-Theft Watermark Card as in User Screenshot */}
+          <div className="flex-1 max-w-2xl bg-[#090d1c] border border-pink-500/30 hover:border-pink-500/50 rounded-2xl p-4 sm:p-5 space-y-3 shadow-[0_0_25px_rgba(244,63,94,0.15)] transition-all">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 sm:w-10 sm:h-10 bg-pink-500/20 rounded-2xl flex items-center justify-center border border-pink-500/30 shrink-0">
+                  <Shield className="w-5 h-5 text-pink-400" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-white flex items-center gap-2">
+                    علامة مائية متحركة لمنع السرقة
+                    {wmSettings.enabled && (
+                      <span className="w-2 h-2 rounded-full bg-pink-500 animate-ping" />
+                    )}
+                  </h3>
+                  <p className="text-[11px] text-slate-400 font-medium">تتنقل باستمرار عبر الإطارات لتصعيب السرقة والقص</p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={wmSettings.enabled}
+                    onChange={(e) => setWmSettings(prev => ({ ...prev, enabled: e.target.checked }))}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:right-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-pink-600 shadow-inner"></div>
+                </label>
+
+                <button
+                  type="button"
+                  onClick={() => setIsWatermarkModalOpen(true)}
+                  className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white text-[11px] font-bold transition-all border border-white/10"
+                  title="خيارات متقدمة ورفع شعار"
                 >
-                  <option value="top-left">أعلى يسار</option>
-                  <option value="top-right">أعلى يمين</option>
-                  <option value="bottom-left">أسفل يسار</option>
-                  <option value="bottom-right">أسفل يمين</option>
-                  <option value="center">منتصف</option>
-                </select>
-                <div className="flex flex-col gap-1">
-                  <span className="text-[8px] text-slate-500 uppercase font-black">الحجم</span>
-                  <input 
-                    type="range" min="5" max="100" value={wmSettings.size} 
-                    onChange={(e) => setWmSettings(prev => ({ ...prev, size: parseInt(e.target.value) }))}
-                    className="w-16 accent-indigo-500"
-                  />
-                </div>
-                <div className="flex flex-col gap-1">
-                  <span className="text-[8px] text-slate-500 uppercase font-black">الشفافية</span>
-                  <input 
-                    type="range" min="0.1" max="1" step="0.1" value={wmSettings.opacity} 
-                    onChange={(e) => setWmSettings(prev => ({ ...prev, opacity: parseFloat(e.target.value) }))}
-                    className="w-16 accent-indigo-500"
-                  />
-                </div>
-                <div className="flex items-center gap-2 border-r border-white/10 pr-4 ml-2">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input 
-                      type="checkbox" 
-                      checked={wmSettings.isAnimated}
-                      onChange={(e) => setWmSettings(prev => ({ ...prev, isAnimated: e.target.checked }))}
-                      className="accent-indigo-500"
-                    />
-                    <span className="text-[10px] text-slate-300 font-bold">متحرك</span>
-                  </label>
-                  {wmSettings.isAnimated && (
-                    <div className="flex flex-col gap-1">
-                      <span className="text-[8px] text-slate-500 uppercase font-black">السرعة</span>
-                      <input 
-                        type="range" min="1" max="10" value={wmSettings.animationSpeed} 
-                        onChange={(e) => setWmSettings(prev => ({ ...prev, animationSpeed: parseInt(e.target.value) }))}
-                        className="w-16 accent-indigo-500"
+                  خيارات متقدمة ⚙️
+                </button>
+              </div>
+            </div>
+
+            {wmSettings.enabled && (
+              <div className="space-y-3 pt-2 border-t border-white/5 animate-in fade-in duration-300">
+                {/* Notification toast for permanent pin */}
+                {pinnedNotice && (
+                  <div className="text-[11px] font-bold text-emerald-300 bg-emerald-950/70 border border-emerald-500/40 p-2 rounded-xl flex items-center gap-1.5 animate-in fade-in duration-200 shadow-md">
+                    <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                    <span>{pinnedNotice}</span>
+                  </div>
+                )}
+
+                {/* Text and Color Row with Pin Button */}
+                <div className="flex flex-col sm:flex-row items-center gap-2">
+                  <div className="flex items-center gap-1.5 bg-black/40 p-1.5 rounded-xl border border-white/5 shrink-0">
+                    {([
+                      { color: '#be185d', label: 'وردي داكن' },
+                      { color: '#0284c7', label: 'أزرق سماوي' },
+                      { color: '#ca8a04', label: 'ذهبي' },
+                      { color: '#ffffff', label: 'أبيض' }
+                    ] as const).map(({ color, label }) => (
+                      <button
+                        key={color}
+                        type="button"
+                        onClick={() => updateAndSaveWmSettings(prev => ({ ...prev, color }))}
+                        style={{ backgroundColor: color }}
+                        className={`w-6 h-6 rounded-lg transition-transform cursor-pointer ${
+                          wmSettings.color.toLowerCase() === color.toLowerCase() 
+                            ? 'scale-110 ring-2 ring-white shadow-md' 
+                            : 'opacity-70 hover:opacity-100'
+                        }`}
+                        title={label}
                       />
+                    ))}
+                  </div>
+
+                  <div className="flex-1 flex items-center gap-1.5 w-full">
+                    <input
+                      type="text"
+                      value={wmSettings.text}
+                      onChange={(e) => updateAndSaveWmSettings(prev => ({ ...prev, text: e.target.value }))}
+                      placeholder="🔒 اكتب اسمك أو علامتك المائية"
+                      className="flex-1 bg-black/40 text-white text-xs font-bold px-3 py-2 rounded-xl border border-white/10 focus:outline-none focus:ring-1 focus:ring-pink-500 text-right"
+                    />
+
+                    {/* Pin as Permanent Default Button */}
+                    <button
+                      type="button"
+                      onClick={() => pinAsPermanentDefault()}
+                      className={`px-3 py-2 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 shrink-0 border cursor-pointer select-none ${
+                        wmSettings.text.trim() === pinnedName.trim()
+                          ? 'bg-amber-500/25 text-amber-200 border-amber-400 shadow-[0_0_12px_rgba(245,158,11,0.3)]'
+                          : 'bg-white/5 hover:bg-amber-500/20 text-slate-300 hover:text-amber-200 border-white/10 hover:border-amber-400/40'
+                      }`}
+                      title="تثبيت هذا الاسم كاسمك الافتراضي الدائم، لتجده دائماً جاهزاً في كل مرة تفتح فيها الموقع لتسريع عملك"
+                    >
+                      <Pin className={`w-3.5 h-3.5 ${wmSettings.text.trim() === pinnedName.trim() ? 'text-amber-400 fill-amber-400' : 'text-slate-400'}`} />
+                      <span className="hidden xs:inline">
+                        {wmSettings.text.trim() === pinnedName.trim() ? 'مثبت دائماً ✓' : 'تثبيت دائم 📌'}
+                      </span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Quick Presets & Permanent Name Chips Row */}
+                <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+                  <span className="text-[10px] text-amber-300 font-black flex items-center gap-1">
+                    <Star className="w-3 h-3 text-amber-400 fill-amber-400" />
+                    <span>أسمائي السريعة:</span>
+                  </span>
+
+                  {/* 1. Permanent Default Button */}
+                  {pinnedName && (
+                    <button
+                      type="button"
+                      onClick={() => updateAndSaveWmSettings(prev => ({ ...prev, text: pinnedName }))}
+                      className={`px-2 py-0.5 rounded-lg border text-[10px] font-black transition-all flex items-center gap-1 cursor-pointer ${
+                        wmSettings.text === pinnedName 
+                          ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-md font-black' 
+                          : 'bg-amber-500/15 hover:bg-amber-500/25 text-amber-200 border-amber-500/30'
+                      }`}
+                      title="استعادة اسمك المثبت دائماً بضغطة واحدة"
+                    >
+                      <span>📌 {pinnedName}</span>
+                      <span className="text-[8px] px-1 py-0.2 rounded bg-black/40 text-amber-200 font-mono">دائم</span>
+                    </button>
+                  )}
+
+                  {/* 2. Other Saved Presets */}
+                  {savedPresets.filter(p => p !== pinnedName).map(preset => (
+                    <div key={preset} className="inline-flex items-center">
+                      <button
+                        type="button"
+                        onClick={() => updateAndSaveWmSettings(prev => ({ ...prev, text: preset }))}
+                        className={`px-2 py-0.5 rounded-lg border text-[10px] font-bold transition-all cursor-pointer ${
+                          wmSettings.text === preset
+                            ? 'bg-pink-600 text-white border-pink-400 shadow-sm'
+                            : 'bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white border-white/5'
+                        }`}
+                      >
+                        {preset}
+                      </button>
+                    </div>
+                  ))}
+
+                  {/* 3. Add Current Text to Presets */}
+                  {wmSettings.text && !savedPresets.includes(wmSettings.text) && (
+                    <button
+                      type="button"
+                      onClick={() => addCustomPreset(wmSettings.text)}
+                      className="px-2 py-0.5 rounded-lg bg-pink-500/10 hover:bg-pink-500/20 text-pink-300 border border-pink-500/30 text-[9px] font-bold transition-all cursor-pointer"
+                      title="إضافة الاسم المكتوب حالياً إلى القائمة السريعة"
+                    >
+                      + حفظ بالقائمة
+                    </button>
+                  )}
+                </div>
+
+                {/* 4 Mode Buttons exactly matching screenshot */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 bg-black/40 p-1 rounded-xl border border-white/5">
+                  {[
+                    { id: 'floating', label: 'عائمة ومتحركة 🪄' },
+                    { id: 'horizontal_bands', label: 'انسياب قطري 📜' },
+                    { id: 'diagonal_repeat', label: 'شبكة مكررة 🛡️' },
+                    { id: 'pulse', label: 'نبض بالزاوية 💫' }
+                  ].map(st => (
+                    <button
+                      key={st.id}
+                      type="button"
+                      onClick={() => updateAndSaveWmSettings(prev => ({ ...prev, pattern: st.id as any }))}
+                      className={`py-2 px-2 rounded-lg text-[11px] font-black transition-all cursor-pointer text-center ${
+                        wmSettings.pattern === st.id 
+                          ? 'bg-pink-600 text-white shadow-md shadow-pink-600/30' 
+                          : 'text-slate-400 hover:text-white hover:bg-white/5'
+                      }`}
+                    >
+                      {st.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Dedicated Watermark Motion & Animation Control Row (أوبشن تحريك العلامة المائية) */}
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-2.5 p-2.5 rounded-xl bg-black/40 border border-pink-500/20">
+                  <div className="flex items-center gap-2">
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={wmSettings.isAnimated !== false}
+                        onChange={(e) => updateAndSaveWmSettings(prev => ({ ...prev, isAnimated: e.target.checked }))}
+                        className="sr-only peer"
+                      />
+                      <div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:right-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-pink-500 shadow-inner"></div>
+                    </label>
+
+                    <div className="flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-pink-400 animate-pulse" />
+                      <span className="text-xs font-black text-white">
+                        تحريك العلامة المائية مستمراً 🎬
+                      </span>
+                      <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${
+                        wmSettings.isAnimated !== false 
+                          ? 'bg-pink-500/25 text-pink-200 border border-pink-500/40' 
+                          : 'bg-white/5 text-slate-400 border border-white/10'
+                      }`}>
+                        {wmSettings.isAnimated !== false ? 'مفعلة (متحركة عبر الفيديو) ✓' : 'ثابتة'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Motion Speed Selector */}
+                  {wmSettings.isAnimated !== false && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-slate-400 font-bold">سرعة الحركة:</span>
+                      <div className="flex items-center gap-1">
+                        {[
+                          { speed: 2, label: 'بطيء 🐢' },
+                          { speed: 5, label: 'عادي ⚡' },
+                          { speed: 8, label: 'سريع 🚀' },
+                        ].map(s => (
+                          <button
+                            key={s.speed}
+                            type="button"
+                            onClick={() => updateAndSaveWmSettings(prev => ({ ...prev, animationSpeed: s.speed }))}
+                            className={`px-2 py-1 rounded-lg text-[10px] font-bold border transition-all cursor-pointer ${
+                              (wmSettings.animationSpeed || 5) === s.speed
+                                ? 'bg-pink-600 text-white border-pink-400 shadow-md font-black'
+                                : 'bg-white/5 hover:bg-white/10 text-slate-300 border-white/5'
+                            }`}
+                          >
+                            {s.label}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   )}
                 </div>
-                <button onClick={() => setWatermark(null)} className="text-red-500 hover:text-red-400 ml-2">
-                  <X className="w-4 h-4" />
-                </button>
+
+                {/* Opacity slider with pink accent */}
+                <div className="flex items-center justify-between text-xs text-slate-400 pt-1">
+                  <span className="font-bold">الشفافية: {Math.round(wmSettings.opacity * 100)}%</span>
+                  <input
+                    type="range"
+                    min={0.15}
+                    max={0.9}
+                    step={0.05}
+                    value={wmSettings.opacity}
+                    onChange={(e) => updateAndSaveWmSettings(prev => ({ ...prev, opacity: parseFloat(e.target.value) }))}
+                    className="w-48 h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-pink-500"
+                  />
+                </div>
               </div>
             )}
-            <input type="file" ref={watermarkInputRef} className="hidden" accept="image/*" onChange={(e) => e.target.files?.[0] && setWatermark(URL.createObjectURL(e.target.files[0]))} />
           </div>
         </div>
       </div>
@@ -4086,7 +6141,7 @@ export const MultiSvgaViewer: React.FC<MultiSvgaViewerProps> = ({ onCancel, curr
               <Upload className="w-10 h-10 text-indigo-400" />
             </div>
             <h3 className="text-xl font-black text-white mb-2">اسحب الملفات أو المجلدات أو ملفات PDF هنا للبدء</h3>
-            <p className="text-slate-400 text-sm font-bold tracking-wide max-w-lg mb-6">يدعم ملفات SVGA, VAP, PAG, ZIP واستدعاء وفك ملفات PDF المقفولة واستخراج الـ SVGA منها</p>
+            <p className="text-slate-400 text-sm font-bold tracking-wide max-w-lg mb-6">يدعم ملفات SVGA بكافة المسميات (التعرف الذكي التلقائي من المحتوى)، و VAP, PAG, ZIP وفك ملفات PDF واستخراج الـ SVGA منها</p>
             
             <div className="flex flex-wrap items-center justify-center gap-3">
               <button
@@ -4119,55 +6174,175 @@ export const MultiSvgaViewer: React.FC<MultiSvgaViewerProps> = ({ onCancel, curr
           </div>
         ) : (
           <div className="p-8 overflow-y-auto max-h-[calc(100vh-320px)] custom-scrollbar flex flex-col gap-12">
-            {Object.entries(
-              items.reduce((acc, item) => {
-                const folder = item.folderPath || 'الملفات العامة';
-                if (!acc[folder]) acc[folder] = [];
-                acc[folder].push(item);
-                return acc;
-              }, {} as Record<string, MultiSvgaItem[]>)
-            ).map(([folderPath, folderItems]) => (
-              <div key={folderPath} className="flex flex-col gap-4">
-                {folderPath !== 'الملفات العامة' && (
-                  <div className="flex items-center gap-3 border-b border-white/5 pb-2">
-                    <div className="p-2 bg-indigo-500/20 text-indigo-400 rounded-lg">
-                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-                      </svg>
+            {false ? (
+              Object.entries(
+                items.reduce((acc, item) => {
+                  const folder = item.folderPath || 'الملفات العامة';
+                  if (!acc[folder]) acc[folder] = [];
+                  acc[folder].push(item);
+                  return acc;
+                }, {} as Record<string, MultiSvgaItem[]>)
+              ).map(([folderPath, folderItems]) => (
+                <div key={folderPath} className="flex flex-col gap-4">
+                  {folderPath !== 'الملفات العامة' && (
+                    <div className="flex items-center gap-3 border-b border-white/5 pb-2">
+                      <div className="p-2 bg-indigo-500/20 text-indigo-400 rounded-lg">
+                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                        </svg>
+                      </div>
+                      <h3 className="text-xl font-bold text-white">{folderPath.split('/').pop()}</h3>
+                      <span className="text-xs text-slate-400 font-bold bg-white/5 px-2 py-1 rounded-md">{(folderItems as any[]).length} ملفات</span>
                     </div>
-                    <h3 className="text-xl font-bold text-white">{folderPath.split('/').pop()}</h3>
-                    <span className="text-xs text-slate-400 font-bold bg-white/5 px-2 py-1 rounded-md">{(folderItems as any[]).length} ملفات</span>
+                  )}
+                  <div 
+                    className={`grid gap-6 w-full transition-all ${
+                      (folderItems as any[]).length === 1 
+                        ? 'max-w-2xl sm:max-w-3xl mx-auto grid-cols-1' 
+                        : (folderItems as any[]).length === 2
+                        ? 'max-w-5xl mx-auto grid-cols-1 sm:grid-cols-2'
+                        : 'grid-cols-1 sm:grid-cols-2 md:grid-cols-3'
+                    }`}
+                    style={
+                      (folderItems as any[]).length > 2 
+                        ? { gridTemplateColumns: `repeat(auto-fill, minmax(min(100%, ${gridCols <= 2 ? '440px' : gridCols === 3 ? '360px' : '300px'}), 1fr))` }
+                        : undefined
+                    }
+                  >
+                    <AnimatePresence mode="popLayout">
+                      {(folderItems as any[]).map((item) => (
+                        <SvgaCard 
+                          key={`${item.id}-${item.presetId}-${customWidth}-${customHeight}-${gridCols}`} 
+                          item={item} 
+                          gridCols={gridCols}
+                          customDimensions={isCustomDimensionsActive && customWidth && customHeight ? { width: customWidth, height: customHeight } : null}
+                          onRemove={() => removeItem(item.id)} 
+                          onMaximize={() => setSelectedItemId(item.id)}
+                          onDownload={() => handleDownloadSingleImage(item)}
+                          onDownloadSvga={() => handleDownloadSvga(item)}
+                          onDownloadGiftBundle={() => handleDownloadSingleGiftBundle(item)}
+                          onExportVideo={() => handleExportIndividualVideos([item])}
+                          previewBg={previewBg}
+                          watermark={watermark}
+                          wmSettings={wmSettings}
+                          onUpdatePreset={(presetId) => setItems(prev => prev.map(i => i.id === item.id ? { ...i, presetId } : i))}
+                          isSelected={selectedItemIds.has(item.id)}
+                          onToggleSelect={() => handleToggleSelect(item.id)}
+                          onUpdateItem={(updates) => setItems(prev => prev.map(i => i.id === item.id ? { ...i, ...updates } : i))}
+                          updateAndSaveWmSettings={updateAndSaveWmSettings}
+                          globalPausedRef={globalPausedRef}
+                          isGlobalPaused={globalPaused}
+                        />
+                      ))}
+                    </AnimatePresence>
                   </div>
-                )}
-                <div 
-                  className="grid gap-8"
-                  style={{ gridTemplateColumns: `repeat(${gridCols}, minmax(0, 1fr))` }}
-                >
-                  <AnimatePresence mode="popLayout">
-                    {(folderItems as any[]).map((item) => (
-                      <SvgaCard 
-                        key={`${item.id}-${item.presetId}-${customWidth}-${customHeight}`} 
-                        item={item} 
-                        customDimensions={isCustomDimensionsActive && customWidth && customHeight ? { width: customWidth, height: customHeight } : null}
-                        onRemove={() => removeItem(item.id)} 
-                        onMaximize={() => setSelectedItemId(item.id)}
-                        onDownload={() => handleDownloadSingleImage(item)}
-                        onDownloadSvga={() => handleDownloadSvga(item)}
-                        onDownloadGiftBundle={() => handleDownloadSingleGiftBundle(item)}
-                        onExportVideo={() => handleExportIndividualVideos([item])}
-                        previewBg={previewBg}
-                        watermark={watermark}
-                        wmSettings={wmSettings}
-                        onUpdatePreset={(presetId) => setItems(prev => prev.map(i => i.id === item.id ? { ...i, presetId } : i))}
-                        isSelected={selectedItemIds.has(item.id)}
-                        onToggleSelect={() => handleToggleSelect(item.id)}
-                        onUpdateItem={(updates) => setItems(prev => prev.map(i => i.id === item.id ? { ...i, ...updates } : i))}
-                      />
+                </div>
+              ))
+            ) : (
+              <div 
+                className="grid gap-6 w-full transition-all"
+                style={{
+                  gridTemplateColumns: `repeat(${gridCols}, minmax(0, 1fr))`
+                }}
+              >
+                <AnimatePresence mode="popLayout">
+                  {(paginatedItems as any[]).map((item) => (
+                    <SvgaCard 
+                      key={`${item.id}-${item.presetId}-${customWidth}-${customHeight}-${gridCols}`} 
+                      item={item} 
+                      gridCols={gridCols}
+                      customDimensions={isCustomDimensionsActive && customWidth && customHeight ? { width: customWidth, height: customHeight } : null}
+                      onRemove={() => removeItem(item.id)} 
+                      onMaximize={() => setSelectedItemId(item.id)}
+                      onDownload={() => handleDownloadSingleImage(item)}
+                      onDownloadSvga={() => handleDownloadSvga(item)}
+                      onDownloadGiftBundle={() => handleDownloadSingleGiftBundle(item)}
+                      onExportVideo={() => handleExportIndividualVideos([item])}
+                      previewBg={previewBg}
+                      watermark={watermark}
+                      wmSettings={wmSettings}
+                      onUpdatePreset={(presetId) => setItems(prev => prev.map(i => i.id === item.id ? { ...i, presetId } : i))}
+                      isSelected={selectedItemIds.has(item.id)}
+                      onToggleSelect={() => handleToggleSelect(item.id)}
+                      onUpdateItem={(updates) => setItems(prev => prev.map(i => i.id === item.id ? { ...i, ...updates } : i))}
+                      updateAndSaveWmSettings={updateAndSaveWmSettings}
+                      globalPausedRef={globalPausedRef}
+                      isGlobalPaused={globalPaused}
+                    />
+                  ))}
+                </AnimatePresence>
+              </div>
+            )}
+
+            {/* Smart High-Performance Pagination Bar (Active when items > 24) */}
+            {(items as any[]).length > 24 && (
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-4 rounded-2xl bg-[#0c1324]/90 border border-white/10 backdrop-blur-xl shadow-xl mt-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-xl bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400 font-black text-xs">
+                    ⚡
+                  </div>
+                  <div className="text-right">
+                    <span className="text-xs font-black text-white block">
+                      عرض {paginatedItems.length} من أصل {(items as any[]).length} ملف
+                    </span>
+                    <span className="text-[10px] text-emerald-400 font-medium">
+                      تشغيل متزامن لجميع ملفات المعاينة نشط ({pageSize > 0 ? `كل ${paginatedItems.length} ملف بالصفحة` : 'جميع الملفات معاً'}) • سلاسة كاملة وتأثيرات مستمرة
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  {/* Page Size Switcher */}
+                  <div className="flex items-center bg-black/40 border border-white/10 rounded-xl p-1 gap-1">
+                    <span className="text-[10px] text-slate-400 px-2 font-bold">لكل صفحة:</span>
+                    {[24, 36, 72, 0].map((size) => (
+                      <button
+                        key={size}
+                        type="button"
+                        onClick={() => {
+                          setPageSize(size);
+                          setCurrentPage(1);
+                        }}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-black transition-all cursor-pointer ${
+                          pageSize === size
+                            ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
+                            : 'text-slate-400 hover:text-white hover:bg-white/5'
+                        }`}
+                      >
+                        {size === 0 ? 'الكل (عام)' : size}
+                      </button>
                     ))}
-                  </AnimatePresence>
+                  </div>
+
+                  {/* Navigation Pages */}
+                  {pageSize > 0 && totalPages > 1 && (
+                    <div className="flex items-center gap-1 bg-black/40 border border-white/10 rounded-xl p-1">
+                      <button
+                        type="button"
+                        onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                        disabled={safeCurrentPage <= 1}
+                        className="px-3 py-1 rounded-lg text-xs font-bold text-slate-300 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:pointer-events-none transition-all cursor-pointer"
+                      >
+                        السابق
+                      </button>
+
+                      <div className="px-3 py-1 text-xs font-mono font-black text-indigo-300">
+                        {safeCurrentPage} / {totalPages}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                        disabled={safeCurrentPage >= totalPages}
+                        className="px-3 py-1 rounded-lg text-xs font-bold text-slate-300 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:pointer-events-none transition-all cursor-pointer"
+                      >
+                        التالي
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
-            ))}
+            )}
           </div>
         )}
       </div>
@@ -4223,7 +6398,14 @@ export const MultiSvgaViewer: React.FC<MultiSvgaViewerProps> = ({ onCancel, curr
                 >
                   {previewBg && <img src={previewBg} alt="Background" className="absolute inset-0 w-full h-full object-cover z-0" referrerPolicy="no-referrer" />}
                   <SvgaPlayer item={selectedItem} />
-                  {watermark && <WatermarkOverlay watermark={watermark} settings={wmSettings} />}
+                  {(wmSettings?.enabled || watermark) && (
+                    <WatermarkOverlay 
+                      watermark={watermark} 
+                      settings={wmSettings} 
+                      onUpdateSettings={(newSettings) => updateAndSaveWmSettings(prev => ({ ...prev, ...newSettings }))}
+                      onOpenModal={() => setIsWatermarkModalOpen(true)}
+                    />
+                  )}
                 </div>
               </div>
 
@@ -4266,6 +6448,24 @@ export const MultiSvgaViewer: React.FC<MultiSvgaViewerProps> = ({ onCancel, curr
           </div>
         )}
       </AnimatePresence>
+
+      {/* Comprehensive Watermark Studio Modal */}
+      <MultiSvgaWatermarkModal
+        isOpen={isWatermarkModalOpen}
+        onClose={() => setIsWatermarkModalOpen(false)}
+        settings={wmSettings}
+        onSave={(newSettings) => {
+          updateAndSaveWmSettings(newSettings);
+          if (newSettings.logoUrl) {
+            setWatermark(newSettings.logoUrl);
+          }
+        }}
+        watermarkLogo={watermark}
+        onLogoChange={(url) => {
+          setWatermark(url);
+          updateAndSaveWmSettings(prev => ({ ...prev, logoUrl: url }));
+        }}
+      />
 
       {/* VAP Batch Export Progress Modal */}
       <AnimatePresence>
@@ -4415,6 +6615,79 @@ export const MultiSvgaViewer: React.FC<MultiSvgaViewerProps> = ({ onCancel, curr
           </div>
         )}
       </AnimatePresence>
+
+      {/* Right Fixed Action Dock (Optional Overlay) */}
+      {showSideDock && (
+        <SvgaActionDock 
+          itemsCount={(items as any[]).length}
+          selectedCount={selectedItemIds.size}
+          allSelected={selectedItemIds.size === (items as any[]).length && (items as any[]).length > 0}
+          onSelectAll={handleSelectAll}
+          onClearAll={clearAll}
+          preventDuplicates={preventDuplicates}
+          onToggleDeduplication={handleToggleDeduplication}
+          includePdfCatalog={includePdfCatalog}
+          onToggleIncludePdfCatalog={() => setIncludePdfCatalog(!includePdfCatalog)}
+          isZipping={isZipping}
+          isExporting={isExporting}
+          isPdfAllInOneExporting={isPdfAllInOneExporting}
+          exportProgress={exportProgress}
+          pdfAllInOneProgress={pdfAllInOneProgress}
+          vapBatchProgress={vapBatchProgress}
+          onDownloadGiftBundles={handleDownloadAllGiftBundles}
+          onDownloadAllSvgaInOnePdf={handleDownloadAllSvgaInOnePdf}
+          onDownloadSinglePdfsDirect={handleDownloadSinglePdfsDirect}
+          isExportingCustomPdf={isExportingCustomPdf}
+          onDownloadAllCombined={handleDownloadAllCombined}
+          onDownloadAllSvga={handleDownloadAllSvga}
+          onExportAllVapToMp4={handleExportAllVapToMp4}
+          onExportIndividualVideos={() => handleExportIndividualVideos()}
+          onExportGrid={handleExportGrid}
+          onUploadFiles={() => fileInputRef.current?.click()}
+          onUploadFolders={handleUploadFolders}
+          onExtractFromPdf={handleExtractFromPdf}
+          isCollapsed={isDockCollapsed}
+          onToggleCollapse={setIsDockCollapsed}
+          onVideoDurationSpeedOpen={() => setShowDurationSpeedModal(true)}
+          exportDuration={exportDuration}
+          useNativeDuration={useNativeDuration}
+          onOpenWatermarkModal={() => setIsWatermarkModalOpen(true)}
+          wmSettings={wmSettings}
+        />
+      )}
+
+      {/* Video Duration & Speed Control Modal */}
+      <VideoDurationSpeedModal
+        isOpen={showDurationSpeedModal}
+        onClose={() => setShowDurationSpeedModal(false)}
+        initialFiles={(items as any[]).map(i => i.file).filter(Boolean)}
+        currentDuration={exportDuration}
+        onApplyToConverter={(targetDuration) => {
+          setExportDuration(targetDuration);
+          setUseNativeDuration(false);
+          setShowDurationSpeedModal(false);
+        }}
+      />
+
+      {/* Adobe After Effects Project & JSX Export Modal */}
+      {isAeExportModalOpen && aeExportItem && (
+        <AeExportModal
+          isOpen={isAeExportModalOpen}
+          onClose={() => setIsAeExportModalOpen(false)}
+          metadata={{
+            name: aeExportItem.name ? aeExportItem.name.replace(/\.[^/.]+$/, '') : 'SVGA_Project',
+            width: aeExportItem.dimensions?.width || (aeExportItem as any).width || 500,
+            height: aeExportItem.dimensions?.height || (aeExportItem as any).height || 500,
+            fps: aeExportItem.fps || 30,
+            frames: aeExportItem.frames || 60,
+            version: '2.0'
+          }}
+          sprites={aeExportItem.videoItem?.sprites || []}
+          imagesData={aeExportItem.videoItem?.images || {}}
+          previewBg={previewBg}
+          onSuccessToast={(msg) => alert(msg)}
+        />
+      )}
     </div>
   );
 };
@@ -4490,7 +6763,7 @@ const SvgaPlayer: React.FC<{ item: any }> = ({ item }) => {
             webgl.canvas.style.objectFit = 'contain';
             containerRef.current?.appendChild(webgl.canvas);
           } catch (e) {
-            console.error("WebGL VAP error", e);
+            console.warn("[VAP] Renderer notice:", e);
           }
 
           const rawVideoW = vapConfig?.info?.videoW || vw;
@@ -4730,9 +7003,20 @@ const SvgaPlayer: React.FC<{ item: any }> = ({ item }) => {
   );
 };
 
+// Global Concurrent Active Animation Pool (Allows all visible/paginated items to play smoothly)
+const activeRunningAnimationIds = new Set<string>();
+const animationSlotListeners = new Set<() => void>();
+
+const notifyAnimationSlotFreed = () => {
+  animationSlotListeners.forEach(listener => {
+    try { listener(); } catch (_) {}
+  });
+};
+
 const SvgaCard: React.FC<{ 
   item: MultiSvgaItem; 
   customDimensions?: { width: number; height: number } | null;
+  gridCols?: number;
   onRemove: () => void; 
   onMaximize: () => void;
   onDownload: () => void;
@@ -4746,7 +7030,10 @@ const SvgaCard: React.FC<{
   isSelected?: boolean;
   onToggleSelect?: () => void;
   onUpdateItem?: (updates: Partial<MultiSvgaItem>) => void;
-}> = ({ item, customDimensions, onRemove, onMaximize, onDownload, onDownloadSvga, onDownloadGiftBundle, onExportVideo, previewBg, watermark, wmSettings, onUpdatePreset, isSelected, onToggleSelect, onUpdateItem }) => {
+  updateAndSaveWmSettings: (updater: any) => void;
+  globalPausedRef: React.MutableRefObject<boolean>;
+  isGlobalPaused?: boolean;
+}> = ({ item, customDimensions, gridCols, onRemove, onMaximize, onDownload, onDownloadSvga, onDownloadGiftBundle, onExportVideo, previewBg, watermark, wmSettings, onUpdatePreset, isSelected, onToggleSelect, onUpdateItem, updateAndSaveWmSettings, globalPausedRef, isGlobalPaused }) => {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<any>(null);
@@ -4757,15 +7044,23 @@ const SvgaCard: React.FC<{
   const [isLoaded, setIsLoaded] = useState(false);
   const [hasAudio, setHasAudio] = useState(false);
     
+  const [cardDimensions, setCardDimensions] = useState<{ width: number; height: number } | null>(item.dimensions || null);
+
+  useEffect(() => {
+    if (item.dimensions && (item.dimensions.width !== cardDimensions?.width || item.dimensions.height !== cardDimensions?.height)) {
+      setCardDimensions(item.dimensions);
+    }
+  }, [item.dimensions?.width, item.dimensions?.height]);
+
   // Derived properties
-  const itemWidth = item.dimensions?.width || 500;
-  const itemHeight = item.dimensions?.height || 500;
+  const itemWidth = cardDimensions?.width || item.dimensions?.width || 500;
+  const itemHeight = cardDimensions?.height || item.dimensions?.height || 500;
   const itemFrames = item.frames || 1;
   const itemFps = item.fps || 30;
   const isPortrait = itemHeight > itemWidth;
   const selectedPreset = useMemo(() => DEVICE_PRESETS.find(p => p.id === item.presetId), [item.presetId]);
 
-    const [isVisible, setIsVisible] = useState(false);
+  const [isVisible, setIsVisible] = useState(true);
 
   const isPlayingRef = useRef(isPlaying);
   const pagSurfaceRef = useRef<any>(null);
@@ -4774,15 +7069,20 @@ const SvgaCard: React.FC<{
     isPlayingRef.current = isPlaying;
   }, [isPlaying]);
 
+  const [isCardHovered, setIsCardHovered] = useState(false);
+
   useEffect(() => {
     const observer = new IntersectionObserver((entries) => {
       entries.forEach(entry => {
         setIsVisible(entry.isIntersecting);
       });
-    }, { threshold: 0, rootMargin: '300px' });
+    }, { threshold: 0, rootMargin: '1200px' });
     if (wrapperRef.current) observer.observe(wrapperRef.current);
     return () => observer.disconnect();
   }, []);
+
+  // Concurrent slot: all mounted cards on active page or 'All' play simultaneously
+  const hasActiveSlot = true;
 
   useEffect(() => {
     let isCanceled = false;
@@ -4790,17 +7090,16 @@ const SvgaCard: React.FC<{
     const loadAndPlay = async () => {
       if (!isVisible) {
         if (playerRef.current) {
-          if (item.type === "pag") {
-            try { playerRef.current.destroy?.(); } catch (e) {}
-            try { pagSurfaceRef.current?.destroy?.(); } catch (e) {}
-          } else if (item.type === "vap") {
-            try { playerRef.current.stopAnimation?.(); } catch (e) {}
-          }
-          else playerRef.current.stopAnimation();
-          playerRef.current = null;
-          pagSurfaceRef.current = null;
+          try { playerRef.current.pauseAnimation?.(); } catch (e) {}
         }
-        if (containerRef.current) containerRef.current.innerHTML = "";
+        return;
+      }
+
+      // If player is already constructed, resume smoothly without re-rendering
+      if (playerRef.current) {
+        if (isPlayingRef.current && !globalPausedRef.current) {
+          try { playerRef.current.startAnimation?.(); } catch (e) {}
+        }
         return;
       }
 
@@ -4843,11 +7142,12 @@ const SvgaCard: React.FC<{
             let cfgW = rgbRect[2];
             let cfgH = rgbRect[3];
 
-            if (!item.dimensions) {
-              item.dimensions = { width: cfgW, height: cfgH };
-              item.fps = vapConfig?.info?.f || 24;
-              item.frames = Math.floor((video.duration || 3) * item.fps);
-            }
+            const newDims = { width: cfgW, height: cfgH };
+            item.dimensions = newDims;
+            item.fps = vapConfig?.info?.f || 24;
+            item.frames = Math.floor((video.duration || 3) * item.fps);
+            setCardDimensions(newDims);
+            onUpdateItem?.({ dimensions: newDims, fps: item.fps, frames: item.frames });
             if (!isCanceled) setIsLoaded(true);
 
             try {
@@ -4857,7 +7157,7 @@ const SvgaCard: React.FC<{
               webgl.canvas.style.objectFit = 'contain';
               containerRef.current?.appendChild(webgl.canvas);
             } catch (e) {
-              console.error("WebGL VAP error", e);
+              console.warn("[VAP] Renderer notice:", e);
             }
 
             const rawVideoW = vapConfig?.info?.videoW || vw;
@@ -4873,8 +7173,10 @@ const SvgaCard: React.FC<{
             const srcAlphaW = Math.round(alphaRect[2] * scaleX);
             const srcAlphaH = Math.round(alphaRect[3] * scaleY);
 
-            if (isPlayingRef.current) {
+            if (isPlayingRef.current && !globalPausedRef.current) {
               video.play().catch(() => {});
+            } else {
+              video.pause();
             }
 
             const renderFrame = () => {
@@ -4911,11 +7213,12 @@ const SvgaCard: React.FC<{
             const PAG = await getPAG();
             pagFile = await PAG.PAGFile.load(await item.file.arrayBuffer());
             item.pagFile = pagFile;
-            if (!item.dimensions) {
-              item.dimensions = { width: pagFile.width(), height: pagFile.height() };
-              item.fps = pagFile.frameRate() || 30;
-              item.frames = Math.floor((pagFile.duration() / 1000000) * item.fps);
-            }
+            const newDims = { width: pagFile.width(), height: pagFile.height() };
+            item.dimensions = newDims;
+            item.fps = pagFile.frameRate() || 30;
+            item.frames = Math.floor((pagFile.duration() / 1000000) * item.fps);
+            setCardDimensions(newDims);
+            onUpdateItem?.({ dimensions: newDims, fps: item.fps, frames: item.frames });
             if (!isCanceled) setIsLoaded(true);
           } catch (e) {
             console.error("PAG load error", e);
@@ -4961,7 +7264,7 @@ const SvgaCard: React.FC<{
             const delta = now - lastTime;
             lastTime = now;
             
-            if (isPlayingRef.current && playerRef.current) {
+            if (isPlayingRef.current && !globalPausedRef.current && playerRef.current) {
               accumulatedTime += delta;
               const progress = (accumulatedTime % durationMs) / durationMs;
               playerRef.current.setProgress(progress);
@@ -4989,11 +7292,12 @@ const SvgaCard: React.FC<{
             }, reject);
           });
           item.videoItem = videoItem;
-          if (!item.dimensions) {
-            item.dimensions = { width: videoItem.videoSize?.width || 500, height: videoItem.videoSize?.height || 500 };
-            item.fps = videoItem.FPS || videoItem.fps || 30;
-            item.frames = videoItem.frames || 1;
-          }
+          const newDims = { width: videoItem.videoSize?.width || 500, height: videoItem.videoSize?.height || 500 };
+          item.dimensions = newDims;
+          item.fps = videoItem.FPS || videoItem.fps || 30;
+          item.frames = videoItem.frames || 1;
+          setCardDimensions(newDims);
+          onUpdateItem?.({ dimensions: newDims, fps: item.fps, frames: item.frames });
           if (videoItem && (videoItem.audios?.length > 0 || extractAudioData({ ...item, videoItem }) !== null)) {
             setHasAudio(true);
           }
@@ -5016,8 +7320,11 @@ const SvgaCard: React.FC<{
         player.setVideoItem(videoItem);
       }
       
-      if (isPlayingRef.current) playerRef.current.startAnimation();
-      else playerRef.current.pauseAnimation();
+      if (isPlayingRef.current && !globalPausedRef.current && !isGlobalPaused) {
+        playerRef.current.startAnimation();
+      } else {
+        playerRef.current.pauseAnimation();
+      }
     };
 
     loadAndPlay();
@@ -5033,20 +7340,34 @@ const SvgaCard: React.FC<{
       playerRef.current = null;
       pagSurfaceRef.current = null;
     };
-  }, [item.url, item.type, isVisible]); // Removed isLoaded and isPlaying from dependencies
+  }, [item.url, item.type, isVisible]);
 
+  // Update animation state when globalPaused changes or isVisible changes or isPlaying changes
+  useEffect(() => {
+    if (playerRef.current) {
+      if (item.type === "pag") {
+        // PAG handling is manual in a render loop
+      } else {
+        if (isVisible && !isGlobalPaused && !globalPausedRef.current && isPlaying) {
+          try { playerRef.current.startAnimation?.(); } catch (e) {}
+        } else {
+          try { playerRef.current.pauseAnimation?.(); } catch (e) {}
+        }
+      }
+    }
+  }, [isGlobalPaused, isVisible, isPlaying]);
 
     // Separate effect for Zoom and Preset style updates - much faster and smoother
     useEffect(() => {
-    const updateCanvasStyles = () => {
+      const updateCanvasStyles = () => {
         if (!wrapperRef.current || !containerRef.current) return;
         
         const wrapperWidth = wrapperRef.current.clientWidth;
         const wrapperHeight = wrapperRef.current.clientHeight;
-        const svgaWidth = item.dimensions?.width || 500;
-        const svgaHeight = item.dimensions?.height || 500;
+        const svgaWidth = cardDimensions?.width || item.dimensions?.width || 500;
+        const svgaHeight = cardDimensions?.height || item.dimensions?.height || 500;
   
-        // Fixed container dimensions as requested
+        // Fixed container dimensions matching preset, custom, or native file
         const containerWidth = (customDimensions && customDimensions.width > 0) ? customDimensions.width : (selectedPreset ? selectedPreset.width : svgaWidth);
         const containerHeight = (customDimensions && customDimensions.height > 0) ? customDimensions.height : (selectedPreset ? selectedPreset.height : svgaHeight);
   
@@ -5058,31 +7379,35 @@ const SvgaCard: React.FC<{
         // 2. Scale the container to fit inside the card wrapper
         const wrapperScale = Math.min(wrapperWidth / containerWidth, wrapperHeight / containerHeight);
   
+        const userScale = item.scale !== undefined ? item.scale : 1;
+        const userPosX = item.posX || 0;
+        const userPosY = item.posY || 0;
+
         // Size the inner container to exactly match the scaled SVGA dimensions
-        // and scale it down to fit the wrapper
+        // and scale it down to fit the wrapper with zero empty spaces
         Object.assign(containerRef.current.style, {
           width: `${finalSvgaWidth}px`,
           height: `${finalSvgaHeight}px`,
           position: 'absolute',
           top: '50%',
           left: '50%',
-          // Combine the wrapper scale and the user zoom
-          transform: `translate(-50%, -50%) scale(${wrapperScale * zoom})`,
+          transform: `translate(calc(-50% + ${userPosX}px), calc(-50% + ${userPosY}px)) scale(${wrapperScale * zoom * userScale})`,
           transformOrigin: 'center center',
-          zIndex: '1'
+          zIndex: '1',
+          opacity: item.opacity !== undefined ? String(item.opacity) : '1'
         });
   
-        const canvas = containerRef.current.querySelector('canvas');
+        const canvas = containerRef.current.querySelector('canvas, video');
         if (canvas) {
-          Object.assign(canvas.style, {
+          Object.assign((canvas as HTMLElement).style, {
             width: '100%',
             height: '100%',
             display: 'block',
-            objectFit: 'fill'
+            objectFit: 'contain'
           });
         }
       };
-  
+
       const resizeObserver = new ResizeObserver(() => {
         updateCanvasStyles();
       });
@@ -5108,7 +7433,7 @@ const SvgaCard: React.FC<{
         mutationObserver.disconnect();
         clearTimeout(timer);
       };
-    }, [selectedPreset, zoom, item.dimensions, customDimensions]);
+    }, [selectedPreset, zoom, item.dimensions, cardDimensions, customDimensions, item.scale, item.posX, item.posY, item.opacity]);
 
   const togglePlay = () => {
     if (item.type === 'pag') {
@@ -5150,47 +7475,58 @@ const SvgaCard: React.FC<{
     }
   };
 
+  const effectiveRatio = (customDimensions && customDimensions.width > 0 && customDimensions.height > 0)
+    ? (customDimensions.height / customDimensions.width)
+    : selectedPreset 
+    ? (selectedPreset.height / selectedPreset.width) 
+    : (itemHeight / (itemWidth || 1));
+
   return (
     <motion.div 
       layout
-      initial={{ opacity: 0, scale: 0.9, y: 20 }}
+      onMouseEnter={() => setIsCardHovered(true)}
+      onMouseLeave={() => setIsCardHovered(false)}
+      initial={{ opacity: 0, scale: 0.95, y: 10 }}
       animate={{ opacity: 1, scale: 1, y: 0 }}
-      exit={{ opacity: 0, scale: 0.9, y: 20 }}
-      className={`group relative bg-white/5 rounded-[3rem] border border-white/10 overflow-hidden hover:border-indigo-500/50 transition-all duration-500 hover:shadow-2xl hover:shadow-indigo-500/10 flex flex-col shrink-0 ${selectedPreset ? 'w-[350px]' : 'w-[400px]'}`}
+      exit={{ opacity: 0, scale: 0.95, y: 10 }}
+      className="group relative bg-[#0b1022]/90 hover:bg-[#0e142a] rounded-3xl border-2 border-white/10 hover:border-indigo-500/70 transition-all duration-300 hover:shadow-[0_10px_40px_rgba(99,102,241,0.2)] flex flex-col w-full min-w-0 overflow-hidden shadow-2xl"
     >
-      {/* Preview Area - Forced Ratio */}
+      {/* Preview Area - Matches uploaded dimensions with zero empty margin spaces */}
       <div 
         ref={wrapperRef}
-        className={`relative bg-slate-950/50 flex items-center justify-center overflow-hidden w-full`}
-        style={{
-          height: (customDimensions && customDimensions.width > 0 && customDimensions.height > 0)
-            ? `${(customDimensions.height / customDimensions.width) * 350}px`
-            : selectedPreset 
-            ? `${(selectedPreset.height / selectedPreset.width) * 350}px` 
-            : `${(itemHeight / itemWidth) * 350}px`
+        className="relative bg-slate-950/90 flex items-center justify-center overflow-hidden w-full transition-all"
+        style={{ 
+          aspectRatio: selectedPreset 
+            ? `${selectedPreset.width} / ${selectedPreset.height}` 
+            : (customDimensions && customDimensions.width > 0 && customDimensions.height > 0)
+            ? `${customDimensions.width} / ${customDimensions.height}`
+            : `${itemWidth} / ${itemHeight}`,
+          width: '100%'
         }}
       >
         {previewBg && <img src={previewBg} alt="Background" className="absolute inset-0 w-full h-full object-cover z-0 pointer-events-none" referrerPolicy="no-referrer" />}
         <div 
           ref={containerRef} 
-          className="relative z-10 transition-transform duration-100"
-          style={{
-            opacity: item.opacity !== undefined ? item.opacity : 1,
-            transform: `scale(${item.scale !== undefined ? item.scale : 1}) translate(${item.posX || 0}px, ${item.posY || 0}px)`,
-            transformOrigin: 'center center'
-          }}
+          className="z-10 pointer-events-none"
         />
 
         {/* Watermark */}
-        {watermark && <WatermarkOverlay watermark={watermark} settings={wmSettings} />}
+        {(wmSettings?.enabled || watermark) && (
+          <WatermarkOverlay 
+            watermark={watermark} 
+            settings={wmSettings} 
+            onUpdateSettings={(newSettings) => updateAndSaveWmSettings(prev => ({ ...prev, ...newSettings }))}
+            onOpenModal={() => {}}
+          />
+        )}
         
         {/* Selection Checkbox */}
         {onToggleSelect && (
-          <div className={`absolute top-4 left-4 z-30 transition-opacity duration-300 ${isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+          <div className={`absolute top-3.5 left-3.5 z-30 transition-opacity duration-300 ${isSelected ? 'opacity-100' : (isCardHovered ? 'opacity-100' : 'opacity-0 pointer-events-none')}`}>
             <button
               onClick={onToggleSelect}
-              className={`w-8 h-8 rounded-full border-2 flex items-center justify-center transition-all ${
-                isSelected ? "bg-indigo-500 border-indigo-500 text-white shadow-lg shadow-indigo-500/20" : "bg-black/40 backdrop-blur-md border-white/50 hover:border-white hover:bg-black/60 text-transparent"
+              className={`w-8 h-8 rounded-full border-2 flex items-center justify-center transition-all cursor-pointer shadow-lg ${
+                isSelected ? "bg-indigo-500 border-indigo-400 text-white shadow-indigo-500/50 scale-105" : "bg-black/70 backdrop-blur-md border-white/60 hover:border-white hover:bg-black/90 text-transparent"
               }`}
             >
               <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
@@ -5202,49 +7538,51 @@ const SvgaCard: React.FC<{
         
         {/* Audio Badge */}
         {hasAudio && (
-          <div className={`absolute ${onToggleSelect ? 'top-14' : 'top-4'} left-4 z-20 px-3 py-1.5 bg-indigo-500/80 backdrop-blur-md border border-indigo-400/50 rounded-xl flex items-center gap-2 shadow-lg`}>
-            <Volume2 className="w-4 h-4 text-white" />
-            <span className="text-[10px] font-black text-white uppercase tracking-wider">يحتوي صوت</span>
+          <div className={`absolute ${onToggleSelect ? 'top-14' : 'top-3.5'} left-3.5 z-20 px-3 py-1 bg-indigo-500/90 backdrop-blur-md border border-indigo-400/60 rounded-xl flex items-center gap-1.5 shadow-xl transition-opacity duration-300 ${isCardHovered ? 'opacity-100' : 'opacity-30'}`}>
+            <Volume2 className="w-4 h-4 text-white animate-pulse" />
+            <span className="text-[10px] font-black text-white uppercase tracking-wider">مدمج صوت 🔊</span>
           </div>
         )}
 
         {/* Info Badge */}
-        <div className="absolute bottom-4 left-4 flex flex-col gap-1 z-20">
-          <div className="px-3 py-1.5 bg-black/60 backdrop-blur-md border border-white/10 rounded-xl flex items-center gap-2">
-            <span className="text-[10px] font-black text-white">
+        <div className={`absolute bottom-3.5 left-3.5 flex flex-col gap-1.5 z-20 transition-opacity duration-300 ${isCardHovered ? 'opacity-100' : 'opacity-40'}`}>
+          <div className="px-3 py-1.5 bg-black/80 backdrop-blur-md border border-white/20 rounded-xl flex items-center gap-2 shadow-xl" dir="ltr">
+            <span className="text-[11px] font-black text-white font-mono tracking-wide">
               {selectedPreset ? `${selectedPreset.width} × ${selectedPreset.height}` : `${itemWidth} × ${itemHeight}`}
             </span>
-            {isPortrait ? <Smartphone className="w-3 h-3 text-sky-400" /> : <Monitor className="w-3 h-3 text-indigo-400" />}
+            {isPortrait ? <Smartphone className="w-3.5 h-3.5 text-sky-400" /> : <Monitor className="w-3.5 h-3.5 text-indigo-400" />}
           </div>
           {selectedPreset && (
-            <div className="px-2 py-0.5 bg-indigo-500/20 border border-indigo-500/30 rounded-lg text-[8px] font-black text-indigo-300 uppercase tracking-tighter text-center">
+            <div className="px-2.5 py-0.5 bg-indigo-500/30 border border-indigo-500/50 rounded-lg text-[9px] font-black text-indigo-200 uppercase tracking-wider text-center shadow-md">
               مقاس إجباري (Fill)
             </div>
           )}
         </div>
         
-        {/* Overlay Controls */}
-        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex flex-col items-center justify-center gap-6 z-20">
+        {/* Overlay Center Controls */}
+        <div className={`absolute inset-0 bg-black/40 flex flex-col items-center justify-center gap-5 z-20 transition-all duration-300 ${isCardHovered ? 'opacity-100 pointer-events-auto scale-100' : 'opacity-0 pointer-events-none scale-95'}`}>
           <div className="flex items-center gap-4">
             <button 
               onClick={togglePlay}
-              className="w-12 h-12 bg-white text-black rounded-full flex items-center justify-center hover:scale-110 transition-transform"
+              className="w-12 h-12 bg-white text-slate-950 rounded-full flex items-center justify-center hover:scale-110 transition-transform shadow-[0_0_30px_rgba(255,255,255,0.4)] cursor-pointer"
+              title={isPlaying ? "إيقاف مؤقت" : "تشغيل الأنيميشن"}
             >
-              {isPlaying ? <Pause className="w-6 h-6" /> : <Play className="w-6 h-6 ml-1" />}
+              {isPlaying ? <Pause className="w-6 h-6" /> : <Play className="w-6 h-6 ml-0.5" />}
             </button>
             <button 
               onClick={replay}
-              className="w-12 h-12 bg-white/20 backdrop-blur-md text-white rounded-full flex items-center justify-center hover:scale-110 transition-transform"
+              className="w-12 h-12 bg-white/25 backdrop-blur-md text-white rounded-full flex items-center justify-center hover:scale-110 transition-transform shadow-2xl cursor-pointer hover:bg-white/35 border border-white/30"
+              title="إعادة التشغيل من أول إطار"
             >
               <RotateCcw className="w-6 h-6" />
             </button>
           </div>
 
           {/* Zoom Slider */}
-          <div className="w-48 px-4 py-3 bg-black/60 backdrop-blur-md rounded-2xl border border-white/10 flex flex-col gap-2">
-            <div className="flex justify-between items-center">
-              <span className="text-[10px] font-black text-white uppercase tracking-widest">تكبير العرض (Zoom)</span>
-              <span className="text-[10px] font-black text-indigo-400">{Math.round(zoom * 100)}%</span>
+          <div className="w-48 px-4 py-2.5 bg-black/80 backdrop-blur-md rounded-2xl border border-white/20 flex flex-col gap-1.5 shadow-2xl">
+            <div className="flex justify-between items-center text-[10px] font-black text-white">
+              <span className="tracking-wide">تكبير العرض (Zoom)</span>
+              <span className="text-indigo-400 font-mono font-black text-xs">{Math.round(zoom * 100)}%</span>
             </div>
             <input 
               type="range" 
@@ -5253,124 +7591,129 @@ const SvgaCard: React.FC<{
               step="0.1" 
               value={zoom} 
               onChange={(e) => setZoom(parseFloat(e.target.value))}
-              className="w-full h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+              className="w-full h-1.5 bg-white/20 rounded-lg appearance-none cursor-pointer accent-indigo-500"
             />
           </div>
         </div>
 
-        {/* Top Right Actions */}
-        <div className="absolute top-4 right-4 flex flex-col gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-20">
+        {/* Prominent Vertical Action Dock on the SIDE (تختفي تماماً وتظهر بالكامل عند مرور الماوس فقط) */}
+        <div className={`absolute top-3.5 right-3.5 flex flex-col gap-2 z-30 bg-black/95 backdrop-blur-xl p-2 rounded-2xl border-2 border-white/20 shadow-[0_8px_32px_rgba(0,0,0,0.85)] transition-all duration-300 ${isCardHovered ? 'opacity-100 pointer-events-auto scale-100' : 'opacity-0 pointer-events-none scale-90'}`}>
           <button 
             onClick={onRemove}
-            className="w-10 h-10 bg-red-500/20 backdrop-blur-md text-red-500 rounded-xl flex items-center justify-center hover:bg-red-500 hover:text-white transition-all"
+            className="w-8 h-8 sm:w-9 sm:h-9 bg-red-500/20 hover:bg-red-500 text-red-400 hover:text-white rounded-xl flex items-center justify-center transition-all cursor-pointer shadow-md hover:scale-110 active:scale-95 border border-red-500/30"
+            title="حذف هذا الملف"
           >
-            <Trash2 className="w-5 h-5" />
+            <Trash2 className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
           </button>
           <button 
             onClick={onMaximize}
-            className="w-10 h-10 bg-indigo-500/20 backdrop-blur-md text-indigo-400 rounded-xl flex items-center justify-center hover:bg-indigo-500 hover:text-white transition-all"
+            className="w-8 h-8 sm:w-9 sm:h-9 bg-indigo-500/20 hover:bg-indigo-500 text-indigo-300 hover:text-white rounded-xl flex items-center justify-center transition-all cursor-pointer shadow-md hover:scale-110 active:scale-95 border border-indigo-500/30"
+            title="تكبير ملء الشاشة"
           >
-            <Maximize2 className="w-5 h-5" />
-          </button>
-          <button 
-            onClick={onDownloadGiftBundle || onDownloadSvga}
-            className="w-10 h-10 bg-amber-500/20 backdrop-blur-md text-amber-300 rounded-xl flex items-center justify-center hover:bg-amber-500 hover:text-white transition-all shadow-lg shadow-amber-500/10"
-            title="تنزيل حزمة الهدية (الملف + أحلى كادر صورة في ملف ZIP)"
-          >
-            <Gift className="w-5 h-5" />
-          </button>
-          <button 
-            onClick={onDownload}
-            className="w-10 h-10 bg-emerald-500/20 backdrop-blur-md text-emerald-400 rounded-xl flex items-center justify-center hover:bg-emerald-500 hover:text-white transition-all"
-            title="تنزيل صورة"
-          >
-            <Camera className="w-5 h-5" />
-          </button>
-          <button 
-            onClick={onDownloadSvga}
-            className="w-10 h-10 bg-blue-500/20 backdrop-blur-md text-blue-400 rounded-xl flex items-center justify-center hover:bg-blue-500 hover:text-white transition-all"
-            title={item.type === 'vap' ? "تنزيل ملف VAP" : item.type === 'pag' ? "تنزيل ملف PAG" : "تنزيل ملف SVGA"}
-          >
-            <Download className="w-5 h-5" />
+            <Maximize2 className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
           </button>
           {onExportVideo && (
             <button 
               onClick={onExportVideo}
-              className={`w-10 h-10 ${item.type === 'vap' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/30' : 'bg-purple-500/20 text-purple-400'} backdrop-blur-md rounded-xl flex items-center justify-center hover:bg-purple-500 hover:text-white transition-all`}
+              className={`w-8 h-8 sm:w-9 sm:h-9 ${item.type === 'vap' ? 'bg-indigo-600 text-white shadow-indigo-500/40' : 'bg-purple-500/20 text-purple-300 hover:bg-purple-600 hover:text-white border border-purple-500/30'} rounded-xl flex items-center justify-center transition-all cursor-pointer shadow-md hover:scale-110 active:scale-95`}
               title={item.type === 'vap' ? "تصدير VAP إلى MP4" : "تصدير كفيديو MP4"}
             >
-              <Video className="w-5 h-5" />
+              <Video className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
             </button>
           )}
           <button 
-            onClick={() => setShowItemControls(!showItemControls)}
-            className={`w-10 h-10 backdrop-blur-md rounded-xl flex items-center justify-center transition-all ${showItemControls ? 'bg-purple-600 text-white shadow-lg shadow-purple-500/30' : 'bg-purple-500/20 text-purple-300 hover:bg-purple-500 hover:text-white'}`}
-            title="أدوات تحكم الهدية المستقلة (الشفافية، الحجم، الموضع)"
+            onClick={onDownloadSvga}
+            className="w-8 h-8 sm:w-9 sm:h-9 bg-blue-500/20 hover:bg-blue-600 text-blue-300 hover:text-white rounded-xl flex items-center justify-center transition-all cursor-pointer shadow-md hover:scale-110 active:scale-95 border border-blue-500/30"
+            title={item.type === 'vap' ? "تنزيل ملف VAP" : item.type === 'pag' ? "تنزيل ملف PAG" : "تنزيل ملف SVGA"}
           >
-            <SlidersHorizontal className="w-5 h-5" />
+            <Download className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
+          </button>
+          <button 
+            onClick={onDownload}
+            className="w-8 h-8 sm:w-9 sm:h-9 bg-emerald-500/20 hover:bg-emerald-600 text-emerald-300 hover:text-white rounded-xl flex items-center justify-center transition-all cursor-pointer shadow-md hover:scale-110 active:scale-95 border border-emerald-500/30"
+            title="أخذ لقطة صورة فورية"
+          >
+            <Camera className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
+          </button>
+          <button 
+            onClick={onDownloadGiftBundle || onDownloadSvga}
+            className="w-8 h-8 sm:w-9 sm:h-9 bg-amber-500/20 hover:bg-amber-600 text-amber-300 hover:text-white rounded-xl flex items-center justify-center transition-all cursor-pointer shadow-md hover:scale-110 active:scale-95 border border-amber-500/30"
+            title="حزمة الهدية (الملف + أحلى كادر صورة في ملف ZIP)"
+          >
+            <Gift className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
+          </button>
+          <button 
+            onClick={() => setShowItemControls(!showItemControls)}
+            className={`w-8 h-8 sm:w-9 sm:h-9 rounded-xl flex items-center justify-center transition-all cursor-pointer shadow-md hover:scale-110 active:scale-95 ${showItemControls ? 'bg-purple-600 text-white ring-2 ring-purple-400 shadow-purple-500/50' : 'bg-white/10 hover:bg-white/20 text-slate-300 border border-white/20'}`}
+            title="تخصيص الهدية (الشفافية، الحجم، الموضع)"
+          >
+            <SlidersHorizontal className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
           </button>
           <button 
             onClick={() => setShowInfo(!showInfo)}
-            className={`w-10 h-10 backdrop-blur-md rounded-xl flex items-center justify-center transition-all ${showInfo ? 'bg-indigo-500 text-white' : 'bg-white/10 text-white hover:bg-white/20'}`}
+            className={`w-8 h-8 sm:w-9 sm:h-9 rounded-xl flex items-center justify-center transition-all cursor-pointer shadow-md hover:scale-110 active:scale-95 ${showInfo ? 'bg-indigo-500 text-white shadow-indigo-500/50' : 'bg-white/10 hover:bg-white/20 text-slate-300 border border-white/20'}`}
+            title="تفاصيل ومعلومات الملف"
           >
-            <Info className="w-5 h-5" />
+            <Info className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
           </button>
         </div>
       </div>
 
       {/* Info Footer */}
-      <div className="p-5 bg-white/[0.02] z-10">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2 truncate max-w-[170px]">
+      <div className="p-4 sm:p-5 bg-white/[0.03] z-10 border-t border-white/10 flex flex-col gap-3">
+        <div className="flex items-center justify-between gap-2.5">
+          <div className="flex items-center gap-2.5 truncate flex-1 min-w-0">
             {item.type === 'vap' && (
-              <span className="px-1.5 py-0.5 rounded bg-indigo-500/30 border border-indigo-400/40 text-[9px] font-black text-indigo-300 uppercase shrink-0">
+              <span className="px-2.5 py-1 rounded-lg bg-indigo-500/30 border border-indigo-400/50 text-[10px] font-black text-indigo-300 uppercase shrink-0 shadow-sm">
                 VAP
               </span>
             )}
             {item.type === 'pag' && (
-              <span className="px-1.5 py-0.5 rounded bg-amber-500/30 border border-amber-400/40 text-[9px] font-black text-amber-300 uppercase shrink-0">
+              <span className="px-2.5 py-1 rounded-lg bg-amber-500/30 border border-amber-400/50 text-[10px] font-black text-amber-300 uppercase shrink-0 shadow-sm">
                 PAG
               </span>
             )}
-            <h4 className="text-white font-black text-sm truncate" title={item.name}>
+            {item.type !== 'vap' && item.type !== 'pag' && (
+              <span className="px-2.5 py-1 rounded-lg bg-blue-500/25 border border-blue-400/40 text-[10px] font-black text-blue-300 uppercase shrink-0 shadow-sm">
+                SVGA
+              </span>
+            )}
+            <h4 className="text-white font-black text-sm sm:text-base truncate tracking-wide" title={item.name}>
               {item.name}
             </h4>
           </div>
-          <span className="text-[10px] text-slate-500 font-bold">
+          <span className="text-xs text-slate-400 font-mono font-bold shrink-0 bg-black/40 px-2.5 py-1 rounded-lg border border-white/5">
             {(item.size / 1024).toFixed(1)} KB
           </span>
         </div>
         
-        {/* Preset Selector */}
-        <select 
-          value={item.presetId}
-          onChange={(e) => onUpdatePreset(e.target.value)}
-          className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-[10px] text-white font-black uppercase tracking-widest focus:outline-none focus:border-indigo-500 transition-all mb-2"
-        >
-          <option value="auto">تلقائي (Native)</option>
-          {DEVICE_PRESETS.map(p => (
-            <option key={p.id} value={p.id}>{p.name}</option>
-          ))}
-        </select>
+        {/* Preset Selector & Custom Button Row */}
+        <div className="flex items-center gap-2.5">
+          <select 
+            value={item.presetId}
+            onChange={(e) => onUpdatePreset(e.target.value)}
+            className="flex-1 bg-black/60 border border-white/20 rounded-xl px-3 py-2 text-xs text-slate-200 font-bold focus:outline-none focus:border-indigo-500 transition-all cursor-pointer shadow-inner"
+          >
+            <option value="auto">تلقائي (Native)</option>
+            {DEVICE_PRESETS.map(p => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
 
-        {/* Toggle Independent Controls Panel Button */}
-        <button
-          type="button"
-          onClick={() => setShowItemControls(!showItemControls)}
-          className={`w-full py-2 px-3 rounded-xl border text-[11px] font-black flex items-center justify-between transition-all mb-3 cursor-pointer ${
-            showItemControls 
-              ? 'bg-purple-500/20 border-purple-500/50 text-purple-200 shadow-sm' 
-              : 'bg-white/5 border-white/10 text-slate-300 hover:text-white hover:bg-white/10'
-          }`}
-        >
-          <span className="flex items-center gap-2">
-            <SlidersHorizontal className="w-3.5 h-3.5 text-purple-400" />
-            تحكم الهدية (الشفافية، الحجم، الموضع)
-          </span>
-          <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-500/30 text-purple-200">
-            مستقل
-          </span>
-        </button>
+          <button
+            type="button"
+            onClick={() => setShowItemControls(!showItemControls)}
+            className={`px-3.5 py-2 rounded-xl border text-xs font-black flex items-center gap-2 transition-all cursor-pointer shrink-0 ${
+              showItemControls 
+                ? 'bg-purple-600 text-white border-purple-400 shadow-lg shadow-purple-500/30' 
+                : 'bg-white/5 border-white/15 text-slate-300 hover:text-white hover:bg-white/10'
+            }`}
+            title="تحكم مخصص للهدية"
+          >
+            <SlidersHorizontal className="w-4 h-4 text-purple-300" />
+            <span>تخصيص الهدية</span>
+          </button>
+        </div>
 
         {/* Dedicated Independent Controls Panel for this SVGA Item */}
         <AnimatePresence>
@@ -5379,7 +7722,7 @@ const SvgaCard: React.FC<{
               initial={{ height: 0, opacity: 0 }}
               animate={{ height: 'auto', opacity: 1 }}
               exit={{ height: 0, opacity: 0 }}
-              className="overflow-hidden mb-4 p-3.5 bg-slate-900/90 border border-purple-500/30 rounded-2xl space-y-3 shadow-inner"
+              className="overflow-hidden p-2.5 bg-slate-900/90 border border-purple-500/30 rounded-xl space-y-2.5 shadow-inner"
             >
               <div className="flex items-center justify-between text-[10px] font-black text-purple-300 border-b border-white/5 pb-1.5">
                 <span>تخصيص الهدية الحالية فقط</span>
@@ -5454,6 +7797,84 @@ const SvgaCard: React.FC<{
                   onChange={(e) => onUpdateItem?.({ posY: Number(e.target.value) })}
                   className="w-full h-1 bg-white/10 rounded-lg appearance-none cursor-pointer accent-purple-500"
                 />
+              </div>
+
+              {/* Avatar / Frame Fixed Dimensions Controller */}
+              <div className="space-y-1.5 pt-2 border-t border-white/10">
+                <div className="flex justify-between items-center text-[10px] font-bold">
+                  <span className="text-indigo-300 flex items-center gap-1">
+                    <ImageIcon className="w-3 h-3 text-indigo-400" />
+                    تثبيت مقاس الصورة / الأفاتار
+                  </span>
+                  <span className="text-indigo-300 font-mono text-[9px]">
+                    {item.avatarWidth || 200} × {item.avatarHeight || 200}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 flex items-center gap-1 bg-black/50 border border-indigo-400/30 rounded-lg px-2 py-1">
+                    <span className="text-[8px] text-slate-400 font-bold">عرض:</span>
+                    <input 
+                      type="number"
+                      value={item.avatarWidth || 200}
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value) || 0;
+                        const updates: any = { avatarWidth: val };
+                        if (item.lockAvatarAspect !== false && item.avatarWidth && item.avatarHeight) {
+                          const ratio = item.avatarHeight / item.avatarWidth;
+                          updates.avatarHeight = Math.round(val * ratio);
+                        }
+                        onUpdateItem?.(updates);
+                      }}
+                      className="w-full bg-transparent text-white font-mono font-bold text-[10px] text-center focus:outline-none"
+                    />
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => onUpdateItem?.({ lockAvatarAspect: !(item.lockAvatarAspect !== false) })}
+                    className={`p-1 rounded-md text-[9px] font-bold transition-all ${item.lockAvatarAspect !== false ? 'bg-indigo-500 text-white' : 'bg-white/5 text-slate-400'}`}
+                    title={item.lockAvatarAspect !== false ? 'قفل نسبة أبعاد الصورة' : 'أبعاد حرة'}
+                  >
+                    {item.lockAvatarAspect !== false ? <Lock className="w-3 h-3" /> : <Unlock className="w-3 h-3" />}
+                  </button>
+
+                  <div className="flex-1 flex items-center gap-1 bg-black/50 border border-indigo-400/30 rounded-lg px-2 py-1">
+                    <span className="text-[8px] text-slate-400 font-bold">طول:</span>
+                    <input 
+                      type="number"
+                      value={item.avatarHeight || 200}
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value) || 0;
+                        const updates: any = { avatarHeight: val };
+                        if (item.lockAvatarAspect !== false && item.avatarWidth && item.avatarHeight) {
+                          const ratio = item.avatarWidth / item.avatarHeight;
+                          updates.avatarWidth = Math.round(val * ratio);
+                        }
+                        onUpdateItem?.(updates);
+                      }}
+                      className="w-full bg-transparent text-white font-mono font-bold text-[10px] text-center focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                {/* Quick Avatar Dimension Buttons */}
+                <div className="grid grid-cols-3 gap-1 pt-1">
+                  {[
+                    { label: '200 × 200', w: 200, h: 200 },
+                    { label: '300 × 300', w: 300, h: 300 },
+                    { label: '150 × 150', w: 150, h: 150 }
+                  ].map(preset => (
+                    <button
+                      key={preset.label}
+                      type="button"
+                      onClick={() => onUpdateItem?.({ avatarWidth: preset.w, avatarHeight: preset.h })}
+                      className={`py-0.5 px-1 rounded bg-white/5 hover:bg-white/10 border text-[8px] font-bold transition-all text-center ${(item.avatarWidth === preset.w && item.avatarHeight === preset.h) ? 'border-indigo-400 text-indigo-300 bg-indigo-500/10' : 'border-white/5 text-slate-400'}`}
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
               </div>
             </motion.div>
           )}

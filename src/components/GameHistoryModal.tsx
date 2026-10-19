@@ -14,8 +14,7 @@ export const GameHistoryModal: React.FC<GameHistoryModalProps> = ({
   onClose,
   history,
 }) => {
-  const { t: baseT, isRTL, language } = useLanguage();
-  const t: any = baseT;
+  const { t, isRTL, language } = useLanguage();
   if (!isOpen) return null;
 
   return (

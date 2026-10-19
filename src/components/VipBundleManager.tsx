@@ -46,7 +46,7 @@ const AVAILABLE_ICONS = [
   { id: 'crown', label: '👑 تاج', icon: Crown },
   { id: 'sparkles', label: '✨ بريق', icon: Sparkles },
   { id: 'gem', label: '💎 ماسة', icon: Gem },
-  { id: 'flame', label: '🔥 جديد', icon: Flame },
+  { id: 'flame', label: '🔥 مميز', icon: Flame },
   { id: 'rocket', label: '🚀 صاروخ', icon: Rocket },
   { id: 'star', label: '⭐ نجمة', icon: Star },
   { id: 'layers', label: '📦 حزمة', icon: Layers }

@@ -1,0 +1,1321 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MP4 → SVGA Pro | ضغط فائق وتحويل MP4 إلى SVGA 2.0</title>
+
+<!-- Libraries from high-availability ESM CDNs -->
+<script src="https://cdn.jsdelivr.net/npm/protobufjs@7.4.0/dist/protobuf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
+
+<style>
+*{box-sizing:border-box}
+
+body{
+    margin:0;
+    background:#060911;
+    color:#fff;
+    font-family:'Segoe UI',Arial,Tahoma,sans-serif;
+    -webkit-font-smoothing:antialiased;
+}
+
+.container{
+    width:min(1050px,94%);
+    margin:auto;
+    padding:25px 0 60px;
+}
+
+.header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    margin-bottom:20px;
+}
+
+.logo{
+    width:48px;
+    height:48px;
+    border-radius:14px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background:linear-gradient(145deg,#2a2111,#111722);
+    border:1px solid #6d5730;
+    color:#f3d277;
+    font-size:24px;
+}
+
+.title{
+    display:flex;
+    align-items:center;
+    gap:12px;
+}
+
+h1{
+    margin:0;
+    font-size:23px;
+    background:linear-gradient(135deg,#ffffff,#dfbd61);
+    -webkit-background-clip:text;
+    -webkit-text-fill-color:transparent;
+}
+
+.subtitle{
+    color:#8995a8;
+    font-size:12px;
+    margin-top:4px;
+}
+
+.card{
+    background:linear-gradient(145deg,#111824,#0b1019);
+    border:1px solid #253044;
+    border-radius:20px;
+    padding:18px;
+    margin-bottom:16px;
+    box-shadow:0 10px 30px rgba(0,0,0,0.4);
+}
+
+.estimateCard{
+    background:linear-gradient(135deg,#101726,#0a0f19);
+    border:1px solid #2e3e58;
+    border-radius:18px;
+    padding:16px;
+    margin-bottom:16px;
+    display:none;
+}
+
+.estimateCard.show{
+    display:block;
+}
+
+.estimateHeader{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    flex-wrap:wrap;
+    gap:10px;
+}
+
+.estimateBig{
+    font-size:28px;
+    font-family:monospace;
+    font-weight:bold;
+    color:#f4d77e;
+    margin-top:4px;
+}
+
+.badge{
+    display:inline-block;
+    padding:3px 9px;
+    border-radius:20px;
+    font-size:11px;
+    font-weight:bold;
+}
+
+.badge-safe{
+    background:rgba(16,185,129,0.15);
+    color:#34d399;
+    border:1px solid rgba(16,185,129,0.3);
+}
+
+.upload{
+    min-height:200px;
+    border:2px dashed #39475c;
+    border-radius:18px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    text-align:center;
+    cursor:pointer;
+    transition:.2s;
+}
+
+.upload:hover,
+.upload.drag{
+    border-color:#e0bd61;
+    background:#15150f;
+}
+
+.upload input{
+    display:none;
+}
+
+.uploadIcon{
+    width:65px;
+    height:65px;
+    margin:auto auto 12px;
+    border-radius:18px;
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    background:#171e2b;
+    border:1px solid #344156;
+    font-size:30px;
+    color:#f3d277;
+}
+
+.uploadTitle{
+    font-size:18px;
+    font-weight:bold;
+}
+
+.uploadText{
+    color:#8995a8;
+    font-size:12px;
+    margin-top:7px;
+}
+
+.file{
+    display:none;
+    align-items:center;
+    gap:12px;
+    margin-top:15px;
+    background:#0a0f17;
+    padding:10px;
+    border-radius:14px;
+    border:1px solid #263247;
+}
+
+.file.show{
+    display:flex;
+}
+
+.preview{
+    width:100px;
+    height:65px;
+    object-fit:cover;
+    border-radius:10px;
+    background:#000;
+}
+
+.fileInfo{
+    flex:1;
+    min-width:0;
+}
+
+.fileName{
+    font-weight:bold;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+}
+
+.fileMeta{
+    color:#8995a8;
+    font-size:11px;
+    margin-top:5px;
+}
+
+.grid{
+    display:grid;
+    grid-template-columns:repeat(2,1fr);
+    gap:12px;
+}
+
+.field{
+    background:#090e16;
+    border:1px solid #222d40;
+    border-radius:14px;
+    padding:13px;
+}
+
+label{
+    display:block;
+    color:#9da8b9;
+    font-size:12px;
+    margin-bottom:8px;
+    font-weight:500;
+}
+
+select,
+input[type=number]{
+    width:100%;
+    padding:12px;
+    border-radius:10px;
+    border:1px solid #2b384d;
+    background:#121a27;
+    color:white;
+    outline:none;
+    font-size:13px;
+}
+
+select:focus,
+input:focus{
+    border-color:#cba84f;
+}
+
+.fps{
+    display:flex;
+    gap:7px;
+    flex-wrap:wrap;
+}
+
+.fps button{
+    border:1px solid #2b384d;
+    background:#111824;
+    color:#aeb8c8;
+    padding:7px 11px;
+    border-radius:10px;
+    cursor:pointer;
+    transition:0.2s;
+    font-size:12px;
+}
+
+.fps button:hover{
+    border-color:#7e8a9d;
+}
+
+.fps button.active{
+    background:#2a2110;
+    border-color:#d3ad52;
+    color:#f4d77e;
+    font-weight:bold;
+}
+
+.range{
+    display:grid;
+    grid-template-columns:1fr 65px;
+    gap:10px;
+    align-items:center;
+}
+
+input[type=range]{
+    width:100%;
+    accent-color:#dfbd61;
+}
+
+.note{
+    color:#7e8a9d;
+    font-size:11px;
+    line-height:1.6;
+    margin-top:8px;
+}
+
+.actions{
+    display:flex;
+    gap:10px;
+    margin-top:16px;
+    flex-wrap:wrap;
+}
+
+button,
+.download{
+    border:1px solid #39465c;
+    background:#141c29;
+    color:white;
+    padding:13px 20px;
+    border-radius:12px;
+    cursor:pointer;
+    font-weight:bold;
+    text-decoration:none;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    gap:8px;
+    transition:.2s;
+}
+
+button:hover,
+.download:hover{
+    background:#1c2738;
+}
+
+.primary{
+    background:linear-gradient(135deg,#d4aa4d,#f4d77e);
+    color:#151108;
+    border-color:#e8c96e;
+    box-shadow:0 4px 15px rgba(212,170,77,0.25);
+}
+
+.primary:hover{
+    background:linear-gradient(135deg,#deb457,#fae188);
+}
+
+button:disabled{
+    opacity:.35;
+    cursor:not-allowed;
+    filter:grayscale(1);
+}
+
+.progress{
+    display:none;
+    margin-top:18px;
+}
+
+.progress.show{
+    display:block;
+}
+
+.progressTop{
+    display:flex;
+    justify-content:space-between;
+    color:#aeb8c8;
+    font-size:12px;
+    margin-bottom:8px;
+}
+
+.bar{
+    width:100%;
+    height:10px;
+    background:#070b11;
+    border:1px solid #202b3d;
+    border-radius:20px;
+    overflow:hidden;
+}
+
+.fill{
+    height:100%;
+    width:0;
+    background:linear-gradient(90deg,#a87d2c,#f0d377);
+    transition:.2s;
+}
+
+.status{
+    color:#8995a8;
+    font-size:11px;
+    margin-top:8px;
+}
+
+.result{
+    display:none;
+}
+
+.result.show{
+    display:block;
+}
+
+.stats{
+    display:grid;
+    grid-template-columns:repeat(4,1fr);
+    gap:10px;
+    margin-bottom:16px;
+}
+
+.stat{
+    background:#090e16;
+    border:1px solid #222d40;
+    padding:14px;
+    border-radius:12px;
+}
+
+.stat small{
+    display:block;
+    color:#7e8a9d;
+    font-size:11px;
+}
+
+.stat strong{
+    display:block;
+    margin-top:5px;
+    font-size:15px;
+    color:#f4d77e;
+}
+
+.playerBox{
+    background:#04060a;
+    border:1px solid #222d40;
+    border-radius:14px;
+    padding:16px;
+    margin-top:16px;
+    text-align:center;
+}
+
+.playerCanvas{
+    max-width:100%;
+    max-height:350px;
+    object-fit:contain;
+    border-radius:8px;
+    background:repeating-conic-gradient(#101520 0% 25%, #080c14 0% 50%) 50% / 16px 16px;
+    box-shadow:0 8px 24px rgba(0,0,0,0.6);
+}
+
+.playerControls{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:12px;
+    margin-top:12px;
+}
+
+.targetButtons{
+    display:flex;
+    gap:6px;
+    flex-wrap:wrap;
+    margin-top:8px;
+}
+
+.targetBtn{
+    font-size:11px;
+    padding:5px 10px;
+    border-radius:8px;
+    background:#162133;
+    border:1px solid #27374f;
+    color:#d8e2ef;
+    cursor:pointer;
+}
+
+.targetBtn:hover{
+    border-color:#dfbd61;
+}
+
+@media(max-width:700px){
+    .grid{
+        grid-template-columns:1fr;
+    }
+
+    .stats{
+        grid-template-columns:repeat(2,1fr);
+    }
+
+    .container{
+        width:94%;
+    }
+}
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+<header class="header">
+    <div class="title">
+        <div class="logo">✦</div>
+        <div>
+            <h1>MP4 → SVGA Pro</h1>
+            <div class="subtitle">
+                ضغط فائق متقدم وتحويل MP4 إلى SVGA 2.0 مع حساب حجم الملف الفوري
+            </div>
+        </div>
+    </div>
+</header>
+
+<section class="card">
+
+<label class="upload" id="uploadBox">
+<input
+    id="videoInput"
+    type="file"
+    accept=".mp4,video/mp4,video/*"
+>
+<div>
+    <div class="uploadIcon">⇧</div>
+    <div class="uploadTitle">رفع ملف الفيديو</div>
+    <div class="uploadText">اضغط لاختيار فيديو MP4 أو اسحب الملف هنا</div>
+</div>
+</label>
+
+<div class="file" id="fileBox">
+<video
+    id="videoPreview"
+    class="preview"
+    muted
+    playsinline
+    controls
+></video>
+
+<div class="fileInfo">
+    <div class="fileName" id="fileName">-</div>
+    <div class="fileMeta" id="fileMeta">-</div>
+</div>
+
+<button id="removeFile" type="button">إزالة</button>
+</div>
+
+</section>
+
+<!-- Estimated Live Size Card -->
+<div id="estimateCard" class="estimateCard">
+    <div class="estimateHeader">
+        <div>
+            <span style="font-size:12px;color:#94a3b8">الحجم التقديري المتوقع للملف المصدر:</span>
+            <div class="estimateBig" id="estimatedSizeText">~ 0 KB</div>
+            <div id="savingPercent" style="font-size:12px;color:#34d399;margin-top:3px">-</div>
+        </div>
+        <div>
+            <span style="font-size:11px;color:#94a3b8;display:block;margin-bottom:4px">قيود منصات البث السريعة:</span>
+            <div class="targetButtons">
+                <button type="button" class="targetBtn" onclick="applyTargetPreset(0.5)">&lt; 500 KB (فائق)</button>
+                <button type="button" class="targetBtn" onclick="applyTargetPreset(1.0)">&lt; 1 MB (تيك توك)</button>
+                <button type="button" class="targetBtn" onclick="applyTargetPreset(2.0)">&lt; 2 MB (بيجو لايف)</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<section class="card">
+
+<div class="grid">
+
+<div class="field">
+<label style="color:#f4d77e">تحديد وقص مدة الفيديو للضغط الفائق (Trim Duration)</label>
+<div style="display:flex;gap:10px;align-items:center;margin-top:6px">
+    <div style="flex:1">
+        <span style="font-size:11px;color:#94a3b8;display:block;margin-bottom:2px">البداية (ثانية):</span>
+        <input id="trimStart" type="number" step="0.1" value="0" min="0" style="width:100%">
+    </div>
+    <div style="flex:1">
+        <span style="font-size:11px;color:#94a3b8;display:block;margin-bottom:2px">النهاية (ثانية):</span>
+        <input id="trimEnd" type="number" step="0.1" value="2.5" min="0.1" style="width:100%">
+    </div>
+</div>
+<div class="note">قص الفيديو واختيار أول ثانيتين أو 3 ثوانٍ يقلص حجم الملف للصفر فوراً!</div>
+</div>
+
+<div class="field">
+<label>المقاس المطلوب</label>
+<select id="size">
+    <option value="source">الأصلي (Original)</option>
+    <option value="750x1334">750 × 1334 (Livestream Gifts / قصص تيك توك)</option>
+    <option value="500x500">500 × 500 (أفاتار / هدايا مربعة)</option>
+    <option value="1080x1920">1080 × 1920 (دقة عالية FHD)</option>
+    <option value="2000x2000">2000 × 2000 (أعلى دقة)</option>
+    <option value="custom">مخصص (Custom)...</option>
+</select>
+
+<div id="customSize" style="display:none;margin-top:8px">
+    <div style="display:flex;gap:8px">
+        <input id="customWidth" type="number" placeholder="العرض" min="16">
+        <input id="customHeight" type="number" placeholder="الارتفاع" min="16">
+    </div>
+</div>
+</div>
+
+<div class="field">
+<label>معدل الإطارات (FPS)</label>
+<div class="fps">
+    <button data-fps="10">10</button>
+    <button data-fps="12">12</button>
+    <button data-fps="15">15</button>
+    <button class="active" data-fps="20">20</button>
+    <button data-fps="24">24</button>
+    <button data-fps="30">30</button>
+</div>
+<div class="note">خفض الـ FPS يقلل الحجم بنسبة 40% مباشرة مع بقاء الحركة طبيعية.</div>
+</div>
+
+<div class="field">
+<label>صيغة ضغط الصور الداخلية</label>
+<select id="imageFormat">
+    <option value="webp" selected>WebP — أقصى ضغط وتوفير 60% من الحجم (موصى به)</option>
+    <option value="jpeg">JPEG — ضغط عالي جداً للمقاطع بدون شفافية</option>
+    <option value="png">PNG — متوافق تقليدي مع شفافية كاملة</option>
+</select>
+<div class="note">صيغة WebP توفر أصغر حجم ممكن بدون أي تشويش.</div>
+</div>
+
+<div class="field">
+<label>دقة البايتات الداخلية (Scale Factor)</label>
+<select id="scaleFactor">
+    <option value="1.0" selected>100% — الدقة الكاملة (المقاس الفعلي مطابق)</option>
+    <option value="0.85">85% — توفير 30% من الحجم</option>
+    <option value="0.75">75% — توفير 45% من الحجم (موصى به للهدايا)</option>
+    <option value="0.5">50% — أقصى تقليص 75%</option>
+</select>
+<div class="note">100% تحفظ المقاس الأصلي بالكامل، وتقليلها يقلص البايتات مع ملء الشاشة.</div>
+</div>
+
+<div class="field">
+<label>الجودة / ضغط الإطارات</label>
+<div class="range">
+    <input id="quality" type="range" min="25" max="100" value="75">
+    <input id="qualityNumber" type="number" min="25" max="100" value="75">
+</div>
+<div class="note">
+    نسبة 70% - 75% تعطي أفضل توازن بين أصغر حجم ملف وأعلى صفاء.
+</div>
+</div>
+
+<div class="field">
+<label style="color:#34d399">إزالة الخلفية السوداء وتحويلها لشفافة (توفير 70% من الحجم)</label>
+<label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:4px">
+    <input type="checkbox" id="removeBlackBg" checked style="width:18px;height:18px;accent-color:#10b981">
+    <span style="font-size:12px;color:#a7f3d0">تفعيل الشفافية للهدايا العائمة (Chroma Key)</span>
+</label>
+<div class="note">تحويل السواد إلى شفافية يجعل ملف الـ SVGA فائق الصغر ومناسباً لهدايا البث المباشر.</div>
+</div>
+
+<div class="field">
+<label>التحجيم (Fit Mode)</label>
+<select id="fit">
+    <option value="contain">Contain — احتواء كامل بدون قص</option>
+    <option value="cover">Cover — ملء المقاس مع قص الحواف</option>
+    <option value="stretch">Stretch — تمديد ليناسب الأبعاد</option>
+</select>
+</div>
+
+</div>
+
+<div class="actions">
+<button id="exportBtn" class="primary" disabled>✦ بدء الضغط الفائق وتصدير SVGA</button>
+<button id="previewBtn" disabled>▶ معاينة الفيديو</button>
+</div>
+
+<div id="progress" class="progress">
+<div class="progressTop">
+    <span id="stage">جاري التحضير...</span>
+    <strong id="percent">0%</strong>
+</div>
+<div class="bar">
+    <div id="fill" class="fill"></div>
+</div>
+<div id="status" class="status"></div>
+</div>
+
+</section>
+
+<section id="result" class="card result">
+
+<h3>✦ تم إنشاء ملف SVGA 2.0 بنجاح</h3>
+
+<div class="stats">
+<div class="stat">
+    <small>حجم الملف النهائي</small>
+    <strong id="resultSize">-</strong>
+</div>
+<div class="stat">
+    <small>المقاس النهائي</small>
+    <strong id="resultDimensions">-</strong>
+</div>
+<div class="stat">
+    <small>معدل الفريمات</small>
+    <strong id="resultFPS">-</strong>
+</div>
+<div class="stat">
+    <small>إجمالي الفريمات</small>
+    <strong id="resultFrames">-</strong>
+</div>
+</div>
+
+<div class="playerBox">
+    <label style="margin-bottom:8px">معاينة مشغل SVGA المباشرة:</label>
+    <div>
+        <canvas id="svgaCanvas" class="playerCanvas"></canvas>
+    </div>
+    <div class="playerControls">
+        <button id="playPauseBtn" type="button">إيقاف مؤقت ❚❚</button>
+        <button id="replayBtn" type="button">إعادة من البداية ↻</button>
+        <span id="frameCounter" style="font-size:12px;color:#aeb8c8">0 / 0</span>
+    </div>
+</div>
+
+<div class="actions">
+<a id="downloadBtn" class="download primary" download="animation.svga">
+    ⇩ تحميل ملف SVGA الآن
+</a>
+</div>
+
+</section>
+
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+
+let selectedFile = null;
+let currentBlobUrl = null;
+let animationTimer = null;
+let isPlaying = true;
+let currentFrameIndex = 0;
+let animationFrames = [];
+let animWidth = 500;
+let animHeight = 500;
+let animFps = 20;
+let videoDuration = 1;
+let videoW = 640;
+let videoH = 360;
+
+function formatSize(bytes){
+    if(bytes < 1024) return bytes + " B";
+    if(bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+    return (bytes / 1024 / 1024).toFixed(2) + " MB";
+}
+
+function progress(value, stage, status=""){
+    $("progress").classList.add("show");
+    $("fill").style.width = value + "%";
+    $("percent").textContent = Math.round(value) + "%";
+    $("stage").textContent = stage;
+    $("status").textContent = status;
+}
+
+function updateLiveEstimate(){
+    if(!selectedFile) return;
+    const fps = getFPS();
+    const totalFrames = Math.max(1, Math.round(videoDuration * fps));
+    const targetDim = getTargetDimensions(videoW, videoH);
+    const scale = Number($("scaleFactor").value) || 0.75;
+    const pixels = Math.round(targetDim.width * scale) * Math.round(targetDim.height * scale);
+    const q = Number($("quality").value) || 75;
+    const format = $("imageFormat").value;
+
+    let byteFactor = 0.04;
+    if(format === 'webp') byteFactor = 0.038 * Math.pow(q / 100, 1.3);
+    else if(format === 'jpeg') byteFactor = 0.052 * Math.pow(q / 100, 1.3);
+    else byteFactor = 0.18 * Math.pow(q / 100, 0.8);
+
+    let estBytes = (pixels * byteFactor * totalFrames * 0.92) + (totalFrames * 25);
+    $("estimatedSizeText").textContent = "~ " + formatSize(estBytes);
+    
+    if(selectedFile.size > 0 && estBytes < selectedFile.size){
+        const saved = Math.round(((selectedFile.size - estBytes) / selectedFile.size) * 100);
+        $("savingPercent").textContent = "توفير " + saved + "% من حجم الفيديو الأصلي";
+    } else {
+        $("savingPercent").textContent = "حجم مثالي لبثوث تيك توك وبيجو";
+    }
+}
+
+function applyTargetPreset(mb){
+    if(mb <= 0.5){
+        $("imageFormat").value = "webp";
+        $("scaleFactor").value = "0.5";
+        $("quality").value = 60;
+        $("qualityNumber").value = 60;
+        setFpsVal(12);
+    } else if(mb <= 1.0){
+        $("imageFormat").value = "webp";
+        $("scaleFactor").value = "0.75";
+        $("quality").value = 70;
+        $("qualityNumber").value = 70;
+        setFpsVal(15);
+    } else {
+        $("imageFormat").value = "webp";
+        $("scaleFactor").value = "0.85";
+        $("quality").value = 80;
+        $("qualityNumber").value = 80;
+        setFpsVal(20);
+    }
+    updateLiveEstimate();
+}
+
+function setFpsVal(val){
+    document.querySelectorAll(".fps button").forEach(b => {
+        b.classList.toggle("active", b.dataset.fps == val);
+    });
+}
+
+function setFile(file){
+    if(!file) return;
+    if(!file.type.startsWith("video/") && !file.name.toLowerCase().endsWith(".mp4")){
+        alert("من فضلك اختر ملف MP4 صالح.");
+        return;
+    }
+
+    selectedFile = file;
+    $("fileName").textContent = file.name;
+    $("fileMeta").textContent = formatSize(file.size);
+    const url = URL.createObjectURL(file);
+    $("videoPreview").src = url;
+
+    const tmpVid = document.createElement("video");
+    tmpVid.preload = "auto";
+    tmpVid.src = url;
+
+    const onDimsReady = () => {
+        if(tmpVid.videoWidth > 0 && tmpVid.videoHeight > 0){
+            videoDuration = tmpVid.duration || 1;
+            videoW = tmpVid.videoWidth;
+            videoH = tmpVid.videoHeight;
+            $("fileMeta").textContent = formatSize(file.size) + " | " + videoW + " × " + videoH + " px | " + videoDuration.toFixed(1) + "ث";
+            updateLiveEstimate();
+        }
+    };
+
+    tmpVid.onloadedmetadata = () => {
+        onDimsReady();
+        if(tmpVid.videoWidth === 0) {
+            try { tmpVid.currentTime = 0.001; } catch(e){}
+        }
+    };
+    tmpVid.onloadeddata = onDimsReady;
+    tmpVid.oncanplay = onDimsReady;
+    tmpVid.onseeked = onDimsReady;
+
+    $("uploadBox").style.display = "none";
+    $("fileBox").classList.add("show");
+    $("estimateCard").classList.add("show");
+    $("exportBtn").disabled = false;
+    $("previewBtn").disabled = false;
+}
+
+$("videoInput").addEventListener("change", e => setFile(e.target.files[0]));
+
+$("uploadBox").addEventListener("dragover", e => {
+    e.preventDefault();
+    $("uploadBox").classList.add("drag");
+});
+
+$("uploadBox").addEventListener("dragleave", () => {
+    $("uploadBox").classList.remove("drag");
+});
+
+$("uploadBox").addEventListener("drop", e => {
+    e.preventDefault();
+    $("uploadBox").classList.remove("drag");
+    if(e.dataTransfer.files.length) {
+        setFile(e.dataTransfer.files[0]);
+    }
+});
+
+$("removeFile").onclick = () => {
+    selectedFile = null;
+    $("videoInput").value = "";
+    $("fileBox").classList.remove("show");
+    $("estimateCard").classList.remove("show");
+    $("uploadBox").style.display = "flex";
+    $("exportBtn").disabled = true;
+    $("previewBtn").disabled = true;
+    $("result").classList.remove("show");
+    if(animationTimer) cancelAnimationFrame(animationTimer);
+};
+
+$("previewBtn").onclick = () => {
+    $("videoPreview").play().catch(()=>{});
+};
+
+$("size").onchange = () => {
+    $("customSize").style.display = $("size").value === "custom" ? "block" : "none";
+    updateLiveEstimate();
+};
+
+$("scaleFactor").onchange = updateLiveEstimate;
+$("imageFormat").onchange = updateLiveEstimate;
+
+$("quality").oninput = e => {
+    $("qualityNumber").value = e.target.value;
+    updateLiveEstimate();
+};
+
+$("qualityNumber").oninput = e => {
+    let value = Number(e.target.value);
+    value = Math.max(25, Math.min(100, value || 75));
+    e.target.value = value;
+    $("quality").value = value;
+    updateLiveEstimate();
+};
+
+document.querySelectorAll(".fps button").forEach(button => {
+    button.onclick = () => {
+        document.querySelectorAll(".fps button").forEach(x => x.classList.remove("active"));
+        button.classList.add("active");
+        updateLiveEstimate();
+    };
+});
+
+function getFPS(){
+    const active = document.querySelector(".fps button.active");
+    return Number(active ? active.dataset.fps : 20);
+}
+
+function getTargetDimensions(sourceWidth, sourceHeight){
+    const val = $("size").value;
+    if(val === "source") return { width: sourceWidth, height: sourceHeight };
+    if(val === "custom") {
+        return {
+            width: Number($("customWidth").value) || sourceWidth,
+            height: Number($("customHeight").value) || sourceHeight
+        };
+    }
+    const [w, h] = val.split("x").map(Number);
+    return { width: w, height: h };
+}
+
+/* SVGA 2.0 Protobuf definition */
+const svgaProtoDefinition = {
+    nested: {
+        com: {
+            nested: {
+                opensource: {
+                    nested: {
+                        svga: {
+                            nested: {
+                                MovieParams: {
+                                    fields: {
+                                        viewBoxWidth: { type: "float", id: 1 },
+                                        viewBoxHeight: { type: "float", id: 2 },
+                                        fps: { type: "int32", id: 3 },
+                                        frames: { type: "int32", id: 4 }
+                                    }
+                                },
+                                Layout: {
+                                    fields: {
+                                        x: { type: "float", id: 1 },
+                                        y: { type: "float", id: 2 },
+                                        width: { type: "float", id: 3 },
+                                        height: { type: "float", id: 4 }
+                                    }
+                                },
+                                Transform: {
+                                    fields: {
+                                        a: { type: "float", id: 1 },
+                                        b: { type: "float", id: 2 },
+                                        c: { type: "float", id: 3 },
+                                        d: { type: "float", id: 4 },
+                                        tx: { type: "float", id: 5 },
+                                        ty: { type: "float", id: 6 }
+                                    }
+                                },
+                                ShapeEntity: {
+                                    fields: {
+                                        type: { type: "int32", id: 1 }
+                                    }
+                                },
+                                FrameEntity: {
+                                    fields: {
+                                        alpha: { type: "float", id: 1 },
+                                        layout: { type: "Layout", id: 2 },
+                                        transform: { type: "Transform", id: 3 },
+                                        clipPath: { type: "string", id: 4 },
+                                        shapes: { rule: "repeated", type: "ShapeEntity", id: 5 }
+                                    }
+                                },
+                                SpriteEntity: {
+                                    fields: {
+                                        imageKey: { type: "string", id: 1 },
+                                        frames: { rule: "repeated", type: "FrameEntity", id: 2 },
+                                        matteKey: { type: "string", id: 3 }
+                                    }
+                                },
+                                MovieEntity: {
+                                    fields: {
+                                        version: { type: "string", id: 1 },
+                                        params: { type: "MovieParams", id: 2 },
+                                        images: { keyType: "string", type: "bytes", id: 3 },
+                                        sprites: { rule: "repeated", type: "SpriteEntity", id: 4 }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+};
+
+function seekVideo(video, time){
+    return new Promise((resolve) => {
+        if(Math.abs(video.currentTime - time) < 0.005){
+            resolve();
+            return;
+        }
+        let fired = false;
+        const handler = () => {
+            if(!fired){
+                fired = true;
+                video.removeEventListener('seeked', handler);
+                resolve();
+            }
+        };
+        video.addEventListener('seeked', handler, { once: true });
+        setTimeout(() => {
+            if(!fired){
+                fired = true;
+                video.removeEventListener('seeked', handler);
+                resolve();
+            }
+        }, 1200);
+        video.currentTime = time;
+    });
+}
+
+function canvasToBytes(canvas, format, quality){
+    return new Promise((resolve) => {
+        let mime = 'image/png';
+        if(format === 'webp') mime = 'image/webp';
+        else if(format === 'jpeg') mime = 'image/jpeg';
+
+        canvas.toBlob(async blob => {
+            const ab = await blob.arrayBuffer();
+            resolve(new Uint8Array(ab));
+        }, mime, quality / 100);
+    });
+}
+
+$("exportBtn").onclick = async () => {
+    if(!selectedFile) return;
+
+    $("exportBtn").disabled = true;
+    $("previewBtn").disabled = true;
+    $("result").classList.remove("show");
+
+    try {
+        progress(5, "قراءة بيانات الفيديو وفحص الأبعاد...", "تطبيق إعدادات الضغط الفائق");
+
+        const video = document.createElement("video");
+        video.muted = true;
+        video.playsInline = true;
+        const vUrl = URL.createObjectURL(selectedFile);
+        video.src = vUrl;
+
+        await new Promise((resolve, reject) => {
+            video.onloadedmetadata = () => resolve();
+            video.onerror = () => reject(new Error("تعذر قراءة بيانات الفيديو"));
+        });
+
+        const vW = video.videoWidth || videoW || 750;
+        const vH = video.videoHeight || videoH || 1334;
+        const rawDur = video.duration || videoDuration || 1;
+        const startSec = Math.max(0, Number($("trimStart") ? $("trimStart").value : 0) || 0);
+        const endSec = Math.min(rawDur, Math.max(startSec + 0.1, Number($("trimEnd") ? $("trimEnd").value : rawDur) || rawDur));
+        const duration = Math.max(0.1, endSec - startSec);
+        const fps = getFPS();
+        const totalFrames = Math.max(1, Math.round(duration * fps));
+        const targetDim = getTargetDimensions(vW, vH);
+        const targetW = targetDim.width;
+        const targetH = targetDim.height;
+        const scale = Number($("scaleFactor").value) || 1.0;
+        const renderW = Math.max(16, Math.round(targetW * scale));
+        const renderH = Math.max(16, Math.round(targetH * scale));
+
+        const fitMode = $("fit").value;
+        const imgFormat = $("imageFormat").value;
+        const quality = Number($("quality").value) || 75;
+
+        const offCanvas = document.createElement("canvas");
+        offCanvas.width = renderW;
+        offCanvas.height = renderH;
+        const ctx = offCanvas.getContext("2d");
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = "high";
+
+        const imagesMap = {};
+        const playerBitmaps = [];
+        let lastKey = '';
+        let prevPixelData = null;
+        let frameMap = [];
+        const vAspect = vW / vH;
+        const tAspect = renderW / renderH;
+
+        for(let i = 0; i < totalFrames; i++){
+            const frameTime = startSec + Math.min(duration - 0.001, i / fps);
+            await seekVideo(video, frameTime);
+
+            ctx.clearRect(0, 0, renderW, renderH);
+
+            if(fitMode === 'stretch'){
+                ctx.drawImage(video, 0, 0, renderW, renderH);
+            } else if(fitMode === 'cover'){
+                if(vAspect > tAspect){
+                    const sW = vH * tAspect;
+                    const sx = (vW - sW) / 2;
+                    ctx.drawImage(video, sx, 0, sW, vH, 0, 0, renderW, renderH);
+                } else {
+                    const sH = vW / tAspect;
+                    const sy = (vH - sH) / 2;
+                    ctx.drawImage(video, 0, sy, vW, sH, 0, 0, renderW, renderH);
+                }
+            } else {
+                // contain
+                if(vAspect > tAspect){
+                    const dW = renderW;
+                    const dH = renderW / vAspect;
+                    const dy = (renderH - dH) / 2;
+                    ctx.drawImage(video, 0, dy, dW, dH);
+                } else {
+                    const dH = renderH;
+                    const dW = renderH * vAspect;
+                    const dx = (renderW - dW) / 2;
+                    ctx.drawImage(video, dx, 0, dW, dH);
+                }
+            }
+
+            // Remove black background if enabled
+            if($("removeBlackBg") && $("removeBlackBg").checked){
+                try {
+                    const imgData = ctx.getImageData(0, 0, renderW, renderH);
+                    const d = imgData.data;
+                    for(let p = 0; p < d.length; p += 4){
+                        const maxC = Math.max(d[p], d[p+1], d[p+2]);
+                        if(maxC <= 24){
+                            d[p+3] = 0;
+                        } else if(maxC < 48){
+                            d[p+3] = Math.round(d[p+3] * ((maxC - 24) / 24));
+                        }
+                    }
+                    ctx.putImageData(imgData, 0, 0);
+                } catch(e){}
+            }
+
+            // Deduplication check
+            let isDuplicate = false;
+            let currentPixelData = null;
+            try {
+                currentPixelData = ctx.getImageData(0, 0, renderW, renderH).data;
+                if(prevPixelData && lastKey){
+                    let diffSum = 0;
+                    let samples = 0;
+                    const step = Math.max(4, Math.floor(currentPixelData.length / 1000)) * 4;
+                    for(let p = 0; p < currentPixelData.length; p += step){
+                        diffSum += (Math.abs(currentPixelData[p] - prevPixelData[p]) +
+                                    Math.abs(currentPixelData[p+1] - prevPixelData[p+1]) +
+                                    Math.abs(currentPixelData[p+2] - prevPixelData[p+2])) / 3;
+                        samples++;
+                        if(diffSum / samples > 4.5) break;
+                    }
+                    if(diffSum / samples <= 4.5){
+                        isDuplicate = true;
+                        frameMap.push(lastKey);
+                    }
+                }
+            } catch(e){}
+
+            if(!isDuplicate){
+                const imgBytes = await canvasToBytes(offCanvas, imgFormat, quality);
+                const imageKey = "frame_" + i;
+                imagesMap[imageKey] = imgBytes;
+                lastKey = imageKey;
+                frameMap.push(imageKey);
+                prevPixelData = currentPixelData ? new Uint8ClampedArray(currentPixelData) : null;
+
+                // Cache for preview player
+                if(window.createImageBitmap){
+                    const bmp = await createImageBitmap(new Blob([imgBytes]));
+                    playerBitmaps.push(bmp);
+                }
+            } else {
+                if(playerBitmaps.length > 0){
+                    playerBitmaps.push(playerBitmaps[playerBitmaps.length - 1]);
+                }
+            }
+
+            const pct = Math.min(80, 5 + Math.round(((i + 1) / totalFrames) * 75));
+            progress(pct, "المرحلة 1 و 2: رندرة الإطارات كصور وضغطها (" + (i + 1) + "/" + totalFrames + ")...", "ضغط الصورة " + (i + 1) + " من " + totalFrames + " بتقنية " + imgFormat.toUpperCase());
+        }
+
+        URL.revokeObjectURL(vUrl);
+
+        progress(85, "المرحلة 3: تجميع وبناء ملف SVGA 2.0 وحزم Protobuf...", "ربط إطارات الصور المضغوطة");
+
+        const transformScaleX = targetW / renderW;
+        const transformScaleY = targetH / renderH;
+
+        const sprites = [];
+        for(let i = 0; i < totalFrames; i++){
+            const framesList = [];
+            for(let f = 0; f < totalFrames; f++){
+                if(f === i){
+                    framesList.push({
+                        alpha: 1.0,
+                        layout: { x: 0, y: 0, width: targetW, height: targetH },
+                        transform: { a: transformScaleX, b: 0, c: 0, d: transformScaleY, tx: 0, ty: 0 }
+                    });
+                } else {
+                    framesList.push({
+                        alpha: 0.0,
+                        layout: { x: 0, y: 0, width: 0, height: 0 },
+                        transform: { a: 1.0, b: 0, c: 0, d: 1.0, tx: 0, ty: 0 }
+                    });
+                }
+            }
+            sprites.push({
+                imageKey: frameMap[i] || ("frame_" + i),
+                frames: framesList
+            });
+        }
+
+        const moviePayload = {
+            version: "2.0",
+            params: {
+                viewBoxWidth: targetW,
+                viewBoxHeight: targetH,
+                fps: fps,
+                frames: totalFrames
+            },
+            images: imagesMap,
+            sprites: sprites
+        };
+
+        progress(92, "ترميز البروتوكول الثنائي (Protobuf)...", "توليد بايتات MovieEntity");
+
+        const root = protobuf.Root.fromJSON(svgaProtoDefinition);
+        const MovieEntity = root.lookupType("com.opensource.svga.MovieEntity");
+        const message = MovieEntity.create(moviePayload);
+        const protoBuffer = MovieEntity.encode(message).finish();
+
+        progress(96, "ضغط Zlib Deflate بأقصى مستوى Level 9...", "حزم ملف SVGA النهائي فائق الصغر");
+
+        const deflated = pako.deflate(protoBuffer, { level: 9 });
+        const svgaBlob = new Blob([deflated], { type: "application/octet-stream" });
+
+        progress(100, "اكتمل بنجاح بأقصى ضغط!", "الملف جاهز بحجم " + formatSize(svgaBlob.size));
+
+        if(currentBlobUrl) URL.revokeObjectURL(currentBlobUrl);
+        currentBlobUrl = URL.createObjectURL(svgaBlob);
+
+        $("resultSize").textContent = formatSize(svgaBlob.size);
+        $("resultDimensions").textContent = targetW + " × " + targetH;
+        $("resultFPS").textContent = fps + " FPS";
+        $("resultFrames").textContent = totalFrames + " فريم (" + duration.toFixed(1) + "ث)";
+
+        const baseName = selectedFile.name.replace(/\.[^/.]+$/, "");
+        $("downloadBtn").href = currentBlobUrl;
+        $("downloadBtn").download = baseName + "_compressed.svga";
+
+        // Setup Player
+        animationFrames = playerBitmaps;
+        animWidth = targetW;
+        animHeight = targetH;
+        animFps = fps;
+        startPlayer();
+
+        $("result").classList.add("show");
+
+    } catch (err) {
+        alert("حدث خطأ أثناء المعالجة: " + err.message);
+        console.error(err);
+    } finally {
+        $("exportBtn").disabled = false;
+        $("previewBtn").disabled = false;
+    }
+};
+
+function startPlayer(){
+    const canvas = $("svgaCanvas");
+    canvas.width = animWidth;
+    canvas.height = animHeight;
+    const ctx = canvas.getContext("2d");
+
+    if(animationTimer) cancelAnimationFrame(animationTimer);
+    isPlaying = true;
+    $("playPauseBtn").textContent = "إيقاف مؤقت ❚❚";
+    currentFrameIndex = 0;
+
+    let lastTime = performance.now();
+    const interval = 1000 / animFps;
+
+    function renderLoop(now){
+        if(isPlaying && animationFrames.length > 0){
+            const elapsed = now - lastTime;
+            if(elapsed >= interval){
+                lastTime = now - (elapsed % interval);
+                currentFrameIndex = (currentFrameIndex + 1) % animationFrames.length;
+                $("frameCounter").textContent = (currentFrameIndex + 1) + " / " + animationFrames.length;
+
+                ctx.clearRect(0, 0, animWidth, animHeight);
+                const bmp = animationFrames[currentFrameIndex];
+                if(bmp){
+                    ctx.drawImage(bmp, 0, 0, animWidth, animHeight);
+                }
+            }
+        }
+        animationTimer = requestAnimationFrame(renderLoop);
+    }
+
+    animationTimer = requestAnimationFrame(renderLoop);
+}
+
+$("playPauseBtn").onclick = () => {
+    isPlaying = !isPlaying;
+    $("playPauseBtn").textContent = isPlaying ? "إيقاف مؤقت ❚❚" : "تشغيل ▶";
+};
+
+$("replayBtn").onclick = () => {
+    currentFrameIndex = 0;
+    isPlaying = true;
+    $("playPauseBtn").textContent = "إيقاف مؤقت ❚❚";
+};
+</script>
+
+</body>
+</html>

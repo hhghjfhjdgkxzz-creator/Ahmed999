@@ -327,7 +327,7 @@ export const TeenPattiTable: React.FC<TeenPattiTableProps> = ({
                         }`}
                       >
                         <span className="font-serif font-black text-[10px] xs:text-xs sm:text-sm tracking-wide drop-shadow">
-                          {(t as any).chair || (t as any).chairA || 'كرسي'} {spotCfg.name}
+                          {t.chair} {spotCfg.name}
                         </span>
                       </div>
 

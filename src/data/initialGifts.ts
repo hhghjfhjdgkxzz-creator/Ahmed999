@@ -20,7 +20,7 @@ export const INITIAL_GIFTS: GiftItem[] = [
       { name: 'WEBP序列', size: '4.5MB', notes: '轻量动图' }
     ],
     tags: ['AI原创', '中秋节', '礼物', '2D', '爆款'],
-    category: 'general',
+    category: 'ancient',
     theme: '中秋节',
     effectType: '2D',
     author: {
@@ -59,7 +59,7 @@ export const INITIAL_GIFTS: GiftItem[] = [
       { name: 'PAG文件', size: '6.1MB' }
     ],
     tags: ['AI原创', '情侣双人', '礼物', '2D', '热销'],
-    category: 'general',
+    category: 'romance',
     theme: '浪漫七夕',
     effectType: '2D',
     author: {
@@ -95,7 +95,7 @@ export const INITIAL_GIFTS: GiftItem[] = [
       { name: 'PAG文件', size: '9.2MB' }
     ],
     tags: ['中秋节', '全屏唯美', '礼物', '2D'],
-    category: 'general',
+    category: 'ancient',
     theme: '中秋专属',
     effectType: '2D',
     author: {
@@ -130,7 +130,7 @@ export const INITIAL_GIFTS: GiftItem[] = [
       { name: 'VAP透明通道', size: '13.1MB' }
     ],
     tags: ['AI原创', '清秀空灵', '礼物', '2D'],
-    category: 'general',
+    category: 'character',
     theme: '梦幻仙侠',
     effectType: '2D',
     author: {
@@ -164,7 +164,7 @@ export const INITIAL_GIFTS: GiftItem[] = [
       { name: '3D工程源文件', size: '420MB' }
     ],
     tags: ['纯手绘', '情侣CP', '礼物', '3D', '爆款'],
-    category: 'general',
+    category: 'romance',
     theme: '梦幻婚礼',
     effectType: '3D',
     author: {
@@ -198,7 +198,7 @@ export const INITIAL_GIFTS: GiftItem[] = [
       { name: 'VAP透明通道', size: '14.5MB' }
     ],
     tags: ['热销表白', '全屏满屏', '礼物', '3D'],
-    category: 'general',
+    category: 'romance',
     theme: '浪漫告白',
     effectType: '3D',
     author: {
@@ -232,7 +232,7 @@ export const INITIAL_GIFTS: GiftItem[] = [
       { name: 'VAP透明通道', size: '8.4MB' }
     ],
     tags: ['玉兔', '中秋节', '礼物', '2D'],
-    category: 'general',
+    category: 'festival',
     theme: '中秋节',
     effectType: '2D',
     author: {
@@ -265,7 +265,7 @@ export const INITIAL_GIFTS: GiftItem[] = [
       { name: 'PAG文件', size: '6.5MB' }
     ],
     tags: ['可爱萌宠', '科幻星球', '礼物', '2D'],
-    category: 'general',
+    category: 'fun',
     theme: '萌系潮玩',
     effectType: '2D',
     author: {
@@ -298,7 +298,7 @@ export const INITIAL_GIFTS: GiftItem[] = [
       { name: 'VAP透明通道', size: '16.0MB' }
     ],
     tags: ['全屏唯美', '极光粒子', '礼物', '3D'],
-    category: 'general',
+    category: 'character',
     theme: '唯美神话',
     effectType: '3D',
     author: {
@@ -330,7 +330,7 @@ export const INITIAL_GIFTS: GiftItem[] = [
       { name: 'VAP透明通道', size: '19.1MB' }
     ],
     tags: ['硬核机甲', '酷炫变身', '礼物', '3D'],
-    category: 'general',
+    category: 'tech',
     theme: '机甲电竞',
     effectType: '3D',
     author: {
@@ -363,7 +363,7 @@ export const INITIAL_GIFTS: GiftItem[] = [
       { name: 'PAG文件', size: '6.0MB' }
     ],
     tags: ['互动连击', '经典街机', '礼物', '2D'],
-    category: 'general',
+    category: 'fun',
     theme: '趣味游戏',
     effectType: '2D',
     author: {
@@ -396,7 +396,7 @@ export const INITIAL_GIFTS: GiftItem[] = [
       { name: '3D超清工程', size: '680MB' }
     ],
     tags: ['尊贵帝王', '霸气巨龙', '礼物', '3D', '爆款'],
-    category: 'general',
+    category: 'ancient',
     theme: '国潮至尊',
     effectType: '3D',
     author: {

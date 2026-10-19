@@ -58,6 +58,8 @@ import * as UPNG from 'upng-js';
 import { GIFEncoder, quantize, applyPalette } from 'gifenc';
 import JSZip from 'jszip';
 import { SVGAFileExtended } from '../types';
+import { exportAsVap, downloadBlob } from './AnimationManager/utils/exportEngine';
+import { backgroundExportManager } from '../services/backgroundExportManager';
 
 // Additional Layer / Child Overlay Config (دمج كقناع Alpha Matte / مسح ضوئي متواصل)
 export interface AdditionalLayerConfig {
@@ -154,6 +156,8 @@ export interface AELayer {
   // Image Specific Properties
   imageSrc?: string;
   imageElement?: HTMLImageElement | null;
+  tintColor?: string;
+  tintOpacity?: number;
 }
 
 export interface CompositionSettings {
@@ -168,6 +172,7 @@ export interface CompositionSettings {
 interface AfterEffectsStudioProps {
   initialFile?: File | null;
   initialMetadata?: any;
+  initialDimensions?: { width: number; height: number } | null;
   onOpenInViewer?: (file: SVGAFileExtended) => void;
   onCancel?: () => void;
   onClose?: () => void;
@@ -265,6 +270,7 @@ const NumericInput: React.FC<NumericInputProps> = ({
 export const AfterEffectsStudio: React.FC<AfterEffectsStudioProps> = ({ 
   initialFile,
   initialMetadata,
+  initialDimensions,
   onOpenInViewer, 
   onCancel, 
   onClose 
@@ -276,8 +282,8 @@ export const AfterEffectsStudio: React.FC<AfterEffectsStudioProps> = ({
   // Composition Settings
   const [compSettings, setCompSettings] = useState<CompositionSettings>({
     name: initialFile ? initialFile.name.replace(/\.[^/.]+$/, "") : 'Comp 1',
-    width: 750,
-    height: 750,
+    width: initialDimensions?.width || 750,
+    height: initialDimensions?.height || 750,
     fps: 30,
     totalFrames: 90, // 3 seconds at 30 fps
     backgroundColor: '#000000'
@@ -289,10 +295,65 @@ export const AfterEffectsStudio: React.FC<AfterEffectsStudioProps> = ({
       let isMounted = true;
       (async () => {
         try {
+          if (initialFile.type.startsWith('image/') || /\.(png|jpe?g|webp|svg)$/i.test(initialFile.name)) {
+            const url = URL.createObjectURL(initialFile);
+            const img = new Image();
+            img.src = url;
+            img.onload = () => {
+              if (!isMounted) return;
+              const w = initialDimensions?.width || img.naturalWidth || 750;
+              const h = initialDimensions?.height || img.naturalHeight || 750;
+              setCompSettings({
+                name: initialFile.name.replace(/\.[^/.]+$/, "") || 'Comp 1',
+                width: w,
+                height: h,
+                fps: 30,
+                totalFrames: 90,
+                backgroundColor: '#000000'
+              });
+              setModalWidth(w);
+              setModalHeight(h);
+              const baseLayer: AELayer = {
+                id: `layer-${Date.now()}`,
+                name: initialFile.name.replace(/\.[^/.]+$/, ''),
+                kind: 'image',
+                visible: true,
+                locked: false,
+                colorLabel: 'orange',
+                expanded: false,
+                position: { x: 0, y: 0 },
+                scale: 100,
+                rotation: 0,
+                opacity: 100,
+                animatingPosition: false,
+                positionKeyframes: [],
+                animatingScale: false,
+                scaleKeyframes: [],
+                animatingRotation: false,
+                rotationKeyframes: [],
+                animatingOpacity: false,
+                opacityKeyframes: [],
+                width: w,
+                height: h,
+                imageSrc: url,
+                imageElement: img
+              };
+              setLayers([baseLayer]);
+              setSelectedLayerId(baseLayer.id);
+              setHasProject(true);
+              setShowCompSettingsModal(false);
+              setIsPlaying(true);
+              setTimeout(() => {
+                fitToView();
+              }, 150);
+            };
+            return;
+          }
+
           const res = await parseSvgaToProject(initialFile);
-          if (!isMounted || !res) return;
-          const project = (res as any)?.project || res;
-          const layersList = (res as any)?.layers || project.layers || [];
+          const project = res?.project;
+          const parsedLayers = res?.layers || [];
+          if (!isMounted || !project) return;
           
           setCompSettings({
             name: initialFile.name.replace(/\.[^/.]+$/, "") || 'Comp 1',
@@ -305,8 +366,8 @@ export const AfterEffectsStudio: React.FC<AfterEffectsStudioProps> = ({
 
           // Map layers
           const loadedLayers: AELayer[] = [];
-          for (let idx = 0; idx < layersList.length; idx++) {
-            const l = layersList[idx];
+          for (let idx = 0; idx < parsedLayers.length; idx++) {
+            const l = parsedLayers[idx];
             const src = l.thumbnailUrl || (l.imageKey && project.imagesMap ? project.imagesMap[l.imageKey] : undefined);
             let imgEl: HTMLImageElement | null = null;
             if (src) {
@@ -322,24 +383,24 @@ export const AfterEffectsStudio: React.FC<AfterEffectsStudioProps> = ({
               kind: src ? 'image' : 'shape',
               visible: l.visible !== false,
               locked: !!l.locked,
-              colorLabel: 'purple',
+              colorLabel: '#6366f1',
               expanded: false,
               position: { x: l.transform?.x || 0, y: l.transform?.y || 0 },
               scale: (l.transform?.scaleX || 1) * 100,
               rotation: l.transform?.rotation || 0,
               opacity: l.transform?.opacity !== undefined ? l.transform.opacity : 100,
-              animatingPosition: (l.keyframes?.length || 0) > 0,
-              animatingScale: (l.keyframes?.length || 0) > 0,
-              animatingRotation: (l.keyframes?.length || 0) > 0,
-              animatingOpacity: (l.keyframes?.length || 0) > 0,
+              animatingPosition: Boolean(l.keyframes && l.keyframes.length > 0),
+              positionKeyframes: l.keyframes?.map(k => ({ frame: k.frame, value: { x: k.x ?? 0, y: k.y ?? 0 } })) || [],
+              animatingScale: Boolean(l.keyframes && l.keyframes.length > 0),
+              scaleKeyframes: l.keyframes?.map(k => ({ frame: k.frame, value: (k.scaleX ?? 1) * 100 })) || [],
+              animatingRotation: Boolean(l.keyframes && l.keyframes.length > 0),
+              rotationKeyframes: l.keyframes?.map(k => ({ frame: k.frame, value: k.rotation ?? 0 })) || [],
+              animatingOpacity: Boolean(l.keyframes && l.keyframes.length > 0),
+              opacityKeyframes: l.keyframes?.map(k => ({ frame: k.frame, value: k.opacity ?? 100 })) || [],
               width: l.transform?.width || imgEl?.naturalWidth || 200,
               height: l.transform?.height || imgEl?.naturalHeight || 200,
               imageSrc: src,
-              imageElement: imgEl,
-              positionKeyframes: l.keyframes?.map((k: any) => ({ frame: k.frame, value: { x: k.x ?? 0, y: k.y ?? 0 } })) || [],
-              scaleKeyframes: l.keyframes?.map((k: any) => ({ frame: k.frame, value: (k.scaleX ?? 1) * 100 })) || [],
-              rotationKeyframes: l.keyframes?.map((k: any) => ({ frame: k.frame, value: k.rotation ?? 0 })) || [],
-              opacityKeyframes: l.keyframes?.map((k: any) => ({ frame: k.frame, value: k.opacity ?? 100 })) || []
+              imageElement: imgEl
             });
           }
 
@@ -386,6 +447,9 @@ export const AfterEffectsStudio: React.FC<AfterEffectsStudioProps> = ({
     const baseName = file.name.replace(/\.[^/.]+$/, "").replace(/\s+/g, "_");
     setModalName(baseName);
 
+    const fileNameLower = file.name.toLowerCase();
+    const isVideo = fileNameLower.endsWith('.avi') || fileNameLower.endsWith('.mp4') || fileNameLower.endsWith('.mov') || fileNameLower.endsWith('.webm') || file.type.startsWith('video/') || file.type === 'video/x-msvideo';
+
     if (file.type.startsWith('image/')) {
       const url = URL.createObjectURL(file);
       const img = new Image();
@@ -396,10 +460,25 @@ export const AfterEffectsStudio: React.FC<AfterEffectsStudioProps> = ({
         URL.revokeObjectURL(url);
       };
       img.src = url;
+    } else if (isVideo) {
+      try {
+        const { probeMp4Video } = await import('./SvgaLayerEditor/mp4SvgaEngine');
+        const probe = await probeMp4Video(file);
+        setModalWidth(probe.width || 750);
+        setModalHeight(probe.height || 1334);
+        setModalFps(probe.fps || 30);
+        const totalF = Math.max(1, Math.round((probe.duration || 3) * (probe.fps || 30)));
+        setModalTotalFrames(totalF);
+        setModalDurationSec(Number(probe.duration.toFixed(2)));
+      } catch (err) {
+        console.warn("Failed to probe video in After Effects Studio Settings:", err);
+      } finally {
+        setIsReadingFile(false);
+      }
     } else if (file.name.toLowerCase().endsWith('.svga')) {
       try {
         const res = await parseSvgaToProject(file);
-        const proj = (res as any)?.project || res;
+        const proj = res?.project;
         if (proj) {
           setModalWidth(proj.width || 500);
           setModalHeight(proj.height || 500);
@@ -421,6 +500,17 @@ export const AfterEffectsStudio: React.FC<AfterEffectsStudioProps> = ({
   const [layers, setLayers] = useState<AELayer[]>([]);
   const [selectedLayerId, setSelectedLayerId] = useState<string | null>(null);
 
+  // Image Import modal state for configuring custom/original size upon upload
+  const [imageImportPending, setImageImportPending] = useState<{
+    file: File;
+    url: string;
+    naturalWidth: number;
+    naturalHeight: number;
+    img: HTMLImageElement;
+  } | null>(null);
+  const [imageImportWidth, setImageImportWidth] = useState<string>('');
+  const [imageImportHeight, setImageImportHeight] = useState<string>('');
+
   // Drag and Drop Layer Stacking / Reorder State
   const [draggedLayerIdx, setDraggedLayerIdx] = useState<number | null>(null);
   const [dropTargetIdx, setDropTargetIdx] = useState<number | null>(null);
@@ -440,6 +530,19 @@ export const AfterEffectsStudio: React.FC<AfterEffectsStudioProps> = ({
   const [zoomLevel, setZoomLevel] = useState<number>(1); // 1 = 100%
   const [showTransparencyGrid, setShowTransparencyGrid] = useState<boolean>(true);
   const [activeTool, setActiveTool] = useState<'select' | 'hand' | 'rotate' | 'shape' | 'text'>('select');
+
+  // Mobile Responsiveness State
+  const [isMobile, setIsMobile] = useState<boolean>(() => typeof window !== 'undefined' ? window.innerWidth < 1024 : false);
+  const [aeMobileTab, setAeMobileTab] = useState<'viewport' | 'layers' | 'properties' | 'timeline'>('viewport');
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobile(window.innerWidth < 1024);
+    };
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   // Export State
   const [exportModalOpen, setExportModalOpen] = useState<boolean>(false);
@@ -462,6 +565,10 @@ export const AfterEffectsStudio: React.FC<AfterEffectsStudioProps> = ({
     startCanvasX: number;
     startCanvasY: number;
     startLayerPos: { x: number; y: number };
+    resizeHandle?: string;
+    startWidth?: number;
+    startHeight?: number;
+    startScale?: number;
   } | null>(null);
 
   const handleStageMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -782,6 +889,7 @@ export const AfterEffectsStudio: React.FC<AfterEffectsStudioProps> = ({
 
   // Additional Masked Child Layer State (دمج طبقة إضافية مباشرة من الجهاز كقناع Alpha Matte كامل الحركة)
   const additionalLayerFileInputRef = useRef<HTMLInputElement | null>(null);
+  const importGeneralLayerInputRef = useRef<HTMLInputElement | null>(null);
 
   // Upload an icon/piece directly from user device and attach as a masked layer (Alpha Matte)
   const handleUploadMaskedChildLayer = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -853,7 +961,7 @@ export const AfterEffectsStudio: React.FC<AfterEffectsStudioProps> = ({
     if (modalDurationMode === 'seconds') {
       setModalTotalFrames(Math.round(modalDurationSec * newFps));
     } else {
-      setModalDurationSec(Number(((Number(modalTotalFrames) || 1) / (Number(newFps) || 30)).toFixed(2)));
+      setModalDurationSec(Number(((Number(modalTotalFrames) || 90) / newFps).toFixed(2)));
     }
   };
 
@@ -1176,6 +1284,57 @@ export const AfterEffectsStudio: React.FC<AfterEffectsStudioProps> = ({
     return Math.abs(lx) <= halfW && Math.abs(ly) <= halfH;
   }, [getLayerWorldTransform, getLayerDimensions]);
 
+  // Hit-test handles of a layer in canvas coordinate space
+  const hitTestHandles = useCallback((
+    layer: AELayer,
+    canvasX: number,
+    canvasY: number,
+    frame: number,
+    compW: number,
+    compH: number
+  ): string | null => {
+    const { pos, scale, rotation } = getLayerWorldTransform(layer, frame);
+    const { width: lw, height: lh } = getLayerDimensions(layer, compW, compH);
+    const halfW = lw / 2;
+    const halfH = lh / 2;
+
+    const cx = compW / 2 + pos.x;
+    const cy = compH / 2 + pos.y;
+
+    const handles = [
+      { name: 'tl', x: -halfW, y: -halfH },
+      { name: 'tc', x: 0, y: -halfH },
+      { name: 'tr', x: halfW, y: -halfH },
+      { name: 'mr', x: halfW, y: 0 },
+      { name: 'br', x: halfW, y: halfH },
+      { name: 'bc', x: 0, y: halfH },
+      { name: 'bl', x: -halfW, y: halfH },
+      { name: 'ml', x: -halfW, y: 0 }
+    ];
+
+    const s = scale / 100;
+    const rad = (rotation * Math.PI) / 180;
+    const cos = Math.cos(rad);
+    const sin = Math.sin(rad);
+
+    for (const h of handles) {
+      const rx = h.x * s;
+      const ry = h.y * s;
+      const hCanvasX = cx + (rx * cos - ry * sin);
+      const hCanvasY = cy + (rx * sin + ry * cos);
+
+      const dx = canvasX - hCanvasX;
+      const dy = canvasY - hCanvasY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      if (dist <= 14) {
+        return h.name;
+      }
+    }
+
+    return null;
+  }, [getLayerWorldTransform, getLayerDimensions]);
+
   // Draw a masked child layer inside its parent's coordinate space (Alpha Matte)
   const drawChildLayerInsideParent = useCallback((
     ctx: CanvasRenderingContext2D,
@@ -1359,6 +1518,15 @@ export const AfterEffectsStudio: React.FC<AfterEffectsStudioProps> = ({
           const w = layer.width || layer.imageElement.width;
           const h = layer.height || layer.imageElement.height;
           ctx.drawImage(layer.imageElement, -w / 2, -h / 2, w, h);
+
+          if (layer.tintColor) {
+            ctx.save();
+            ctx.globalCompositeOperation = 'source-atop';
+            ctx.fillStyle = layer.tintColor;
+            ctx.globalAlpha = layer.tintOpacity !== undefined ? layer.tintOpacity / 100 : 0.5;
+            ctx.fillRect(-w / 2, -h / 2, w, h);
+            ctx.restore();
+          }
         }
         break;
       }
@@ -1488,6 +1656,31 @@ export const AfterEffectsStudio: React.FC<AfterEffectsStudioProps> = ({
     const canvasX = (clientX / rect.width) * compSettings.width;
     const canvasY = (clientY / rect.height) * compSettings.height;
 
+    // 0. Check if clicked on any of the 8 selection handles of the currently selected layer
+    if (selectedLayerId) {
+      const currentSelected = layers.find(l => l.id === selectedLayerId);
+      if (currentSelected) {
+        const hitHandle = hitTestHandles(currentSelected, canvasX, canvasY, currentFrame, compSettings.width, compSettings.height);
+        if (hitHandle) {
+          e.stopPropagation();
+          const { width: lw, height: lh } = getLayerDimensions(currentSelected, compSettings.width, compSettings.height);
+          const currentPos = evaluateLayerAtFrame(currentSelected, currentFrame).pos;
+          dragInfoRef.current = {
+            layerId: currentSelected.id,
+            startCanvasX: canvasX,
+            startCanvasY: canvasY,
+            startLayerPos: { ...currentPos },
+            resizeHandle: hitHandle,
+            startWidth: lw,
+            startHeight: lh,
+            startScale: currentSelected.scale || 100
+          };
+          setIsDraggingLayer(true);
+          return;
+        }
+      }
+    }
+
     // 1. Check if the currently selected layer was clicked first, or if a child layer of it was clicked
     let hitLayer: AELayer | null = null;
     if (selectedLayerId) {
@@ -1537,7 +1730,7 @@ export const AfterEffectsStudio: React.FC<AfterEffectsStudioProps> = ({
 
     const handleWindowMouseMove = (e: MouseEvent) => {
       if (!dragInfoRef.current || !canvasRef.current) return;
-      const { layerId, startCanvasX, startCanvasY, startLayerPos } = dragInfoRef.current;
+      const { layerId, startCanvasX, startCanvasY, startLayerPos, resizeHandle, startWidth, startHeight, startScale } = dragInfoRef.current;
 
       const canvas = canvasRef.current;
       const rect = canvas.getBoundingClientRect();
@@ -1548,6 +1741,57 @@ export const AfterEffectsStudio: React.FC<AfterEffectsStudioProps> = ({
 
       const deltaX = currentCanvasX - startCanvasX;
       const deltaY = currentCanvasY - startCanvasY;
+
+      // Handle direct handle resizing/stretching
+      if (resizeHandle) {
+        setLayers(prev => prev.map(l => {
+          if (l.id !== layerId) return l;
+          if (l.locked) return l;
+
+          // Project delta into local rotated coordinate space
+          const rad = (-l.rotation * Math.PI) / 180;
+          const cos = Math.cos(rad);
+          const sin = Math.sin(rad);
+          const localDeltaX = deltaX * cos - deltaY * sin;
+          const localDeltaY = deltaX * sin + deltaY * cos;
+
+          const s = (startScale || 100) / 100;
+          const scaledDeltaX = localDeltaX / Math.max(0.01, s);
+          const scaledDeltaY = localDeltaY / Math.max(0.01, s);
+
+          let nextWidth = startWidth || 200;
+          let nextHeight = startHeight || 200;
+
+          if (resizeHandle === 'mr') {
+            nextWidth = Math.max(10, nextWidth + scaledDeltaX * 2);
+          } else if (resizeHandle === 'ml') {
+            nextWidth = Math.max(10, nextWidth - scaledDeltaX * 2);
+          } else if (resizeHandle === 'bc') {
+            nextHeight = Math.max(10, nextHeight + scaledDeltaY * 2);
+          } else if (resizeHandle === 'tc') {
+            nextHeight = Math.max(10, nextHeight - scaledDeltaY * 2);
+          } else if (resizeHandle === 'br') {
+            nextWidth = Math.max(10, nextWidth + scaledDeltaX * 2);
+            nextHeight = Math.max(10, nextHeight + scaledDeltaY * 2);
+          } else if (resizeHandle === 'tl') {
+            nextWidth = Math.max(10, nextWidth - scaledDeltaX * 2);
+            nextHeight = Math.max(10, nextHeight - scaledDeltaY * 2);
+          } else if (resizeHandle === 'tr') {
+            nextWidth = Math.max(10, nextWidth + scaledDeltaX * 2);
+            nextHeight = Math.max(10, nextHeight - scaledDeltaY * 2);
+          } else if (resizeHandle === 'bl') {
+            nextWidth = Math.max(10, nextWidth - scaledDeltaX * 2);
+            nextHeight = Math.max(10, nextHeight + scaledDeltaY * 2);
+          }
+
+          return {
+            ...l,
+            width: Math.round(nextWidth),
+            height: Math.round(nextHeight)
+          };
+        }));
+        return;
+      }
 
       setLayers(prev => prev.map(l => {
         if (l.id !== layerId) return l;
@@ -1896,38 +2140,59 @@ export const AfterEffectsStudio: React.FC<AfterEffectsStudioProps> = ({
   const handleUploadAsset = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
+      const fileNameLower = file.name.toLowerCase();
+      const isVideo = fileNameLower.endsWith('.avi') || fileNameLower.endsWith('.mp4') || fileNameLower.endsWith('.mov') || fileNameLower.endsWith('.webm') || file.type.startsWith('video/') || file.type === 'video/x-msvideo';
+
+      if (isVideo) {
+        import('./SvgaLayerEditor/mp4SvgaEngine').then(async ({ probeMp4Video }) => {
+          try {
+            const probe = await probeMp4Video(file);
+            const activeFile = probe.transcodedFile || file;
+            const videoUrl = probe.transcodedUrl || URL.createObjectURL(activeFile);
+            const v = document.createElement('video');
+            v.src = videoUrl;
+            v.muted = true;
+            v.playsInline = true;
+            v.onloadeddata = () => {
+              const cvs = document.createElement('canvas');
+              cvs.width = probe.width || 720;
+              cvs.height = probe.height || 1280;
+              cvs.getContext('2d')?.drawImage(v, 0, 0);
+              const poster = cvs.toDataURL('image/png');
+              const img = new Image();
+              img.src = poster;
+              img.onload = () => {
+                setImageImportPending({
+                  file: activeFile,
+                  url: poster,
+                  naturalWidth: img.naturalWidth || img.width,
+                  naturalHeight: img.naturalHeight || img.height,
+                  img
+                });
+                setImageImportWidth(String(img.naturalWidth || img.width));
+                setImageImportHeight(String(img.naturalHeight || img.height));
+              };
+            };
+          } catch (err) {
+            console.error('Failed loading video asset in AE Studio:', err);
+          }
+        });
+        return;
+      }
+
       const url = URL.createObjectURL(file);
       const img = new Image();
       img.src = url;
       img.onload = () => {
-        const newId = `layer-${Date.now()}`;
-        const newLayer: AELayer = {
-          id: newId,
-          name: file.name.replace(/\.[^/.]+$/, ''),
-          kind: 'image',
-          visible: true,
-          locked: false,
-          colorLabel: 'orange',
-          expanded: false,
-          position: { x: 0, y: 0 },
-          scale: 100,
-          rotation: 0,
-          opacity: 100,
-          animatingPosition: false,
-          positionKeyframes: [],
-          animatingScale: false,
-          scaleKeyframes: [],
-          animatingRotation: false,
-          rotationKeyframes: [],
-          animatingOpacity: false,
-          opacityKeyframes: [],
-          width: img.width,
-          height: img.height,
-          imageSrc: url,
-          imageElement: img
-        };
-        setLayers(prev => [newLayer, ...prev]);
-        setSelectedLayerId(newId);
+        setImageImportPending({
+          file,
+          url,
+          naturalWidth: img.naturalWidth || img.width,
+          naturalHeight: img.naturalHeight || img.height,
+          img
+        });
+        setImageImportWidth(String(img.naturalWidth || img.width));
+        setImageImportHeight(String(img.naturalHeight || img.height));
       };
     }
   };
@@ -2516,6 +2781,15 @@ export const AfterEffectsStudio: React.FC<AfterEffectsStudioProps> = ({
           const iw = layer.width || layer.imageElement.width;
           const ih = layer.height || layer.imageElement.height;
           ctx.drawImage(layer.imageElement, -iw / 2, -ih / 2, iw, ih);
+
+          if (layer.tintColor) {
+            ctx.save();
+            ctx.globalCompositeOperation = 'source-atop';
+            ctx.fillStyle = layer.tintColor;
+            ctx.globalAlpha = layer.tintOpacity !== undefined ? layer.tintOpacity / 100 : 0.5;
+            ctx.fillRect(-iw / 2, -ih / 2, iw, ih);
+            ctx.restore();
+          }
         }
         break;
       }
@@ -2752,7 +3026,7 @@ export const AfterEffectsStudio: React.FC<AfterEffectsStudioProps> = ({
 
       const message = MovieEntity.create(movie);
       const encoded = MovieEntity.encode(message).finish();
-      const compressed = pako.deflate(encoded);
+      const compressed = pako.deflate(encoded, { level: 9 });
 
       const blob = new Blob([compressed], { type: 'application/octet-stream' });
       const filename = `${compSettings.name.replace(/\s+/g, '_')}_${Date.now()}.svga`;
@@ -2784,6 +3058,57 @@ export const AfterEffectsStudio: React.FC<AfterEffectsStudioProps> = ({
     } catch (err: any) {
       console.error(err);
       alert('خطأ أثناء تصدير SVGA: ' + err.message);
+      setExporting(false);
+    }
+  };
+
+  // 1.5. Export as Tencent VAP1.0 (True MP4 with Alpha mask & vapc box)
+  const exportAsVAP10 = async () => {
+    try {
+      setExporting(true);
+      setExportProgress(10);
+      setExportStatusText('جاري رندرة إطارات المشروع لتصدير VAP1.0...');
+
+      const { canvases } = await captureAllFrames((p, msg) => {
+        setExportProgress(Math.round(p * 0.7));
+        setExportStatusText(msg);
+      });
+
+      setExportProgress(75);
+      setExportStatusText('جاري ترميز فيديو Tencent VAP1.0 مع قناع الشفافية وصندوق vapc...');
+
+      const delays = new Array(canvases.length).fill(Math.round(1000 / compSettings.fps));
+      const vapBlob = await exportAsVap(
+        canvases,
+        delays,
+        compSettings.width,
+        compSettings.height,
+        compSettings.fps,
+        '1.0',
+        null,
+        (p, msg) => {
+          setExportProgress(75 + Math.round(p * 20));
+          if (msg) setExportStatusText(msg);
+        },
+        100,
+        'left-right' // Matches user screenshot: Left is full color RGB, Right is Alpha mask ("الحته البيضاء باليمين بجانب الهدية")
+      );
+
+      const filename = `${compSettings.name.replace(/\s+/g, '_')}_VAP1.0_${Date.now()}.mp4`;
+      downloadBlob(vapBlob, filename);
+
+      backgroundExportManager.registerCompletedJob({
+        title: `تصدير VAP1.0 (${compSettings.name})`,
+        fileName: filename,
+        blob: vapBlob
+      });
+
+      setExportProgress(100);
+      setExportStatusText('تم تصدير ملف VAP1.0 بنجاح!');
+      setTimeout(() => setExporting(false), 1200);
+    } catch (err: any) {
+      console.error(err);
+      alert('خطأ أثناء تصدير VAP1.0: ' + err.message);
       setExporting(false);
     }
   };
@@ -3047,7 +3372,7 @@ export const AfterEffectsStudio: React.FC<AfterEffectsStudioProps> = ({
         <div className="p-4 bg-purple-950/20 hover:bg-purple-950/30 border-2 border-dashed border-purple-500/40 hover:border-purple-400 rounded-2xl flex flex-col items-center justify-center text-center gap-2 transition-all group relative cursor-pointer min-h-[90px]">
           <input
             type="file"
-            accept=".svga,image/*"
+            accept=".svga,.avi,.AVI,.mp4,.mov,.webm,image/*,video/*"
             onChange={handleFileImport}
             className="absolute inset-0 opacity-0 cursor-pointer z-10"
             title=""
@@ -3309,38 +3634,77 @@ export const AfterEffectsStudio: React.FC<AfterEffectsStudioProps> = ({
       initial={{ opacity: 0, scale: 0.98 }}
       animate={{ opacity: 1, scale: 1 }}
       transition={{ duration: 0.25 }}
-      className="w-full max-w-[1360px] mx-auto flex flex-col h-[calc(100vh-84px)] min-h-[720px] max-h-[860px] bg-slate-900/50 border border-slate-800/50 rounded-lg overflow-hidden shadow-2xl text-slate-200 select-none"
+      className="w-full max-w-[1360px] mx-auto flex flex-col min-h-[85vh] lg:h-[calc(100vh-84px)] lg:min-h-[720px] lg:max-h-[860px] bg-slate-900/50 border border-slate-800/50 rounded-xl overflow-hidden shadow-2xl text-slate-200 select-none pb-14 lg:pb-0 relative"
     >
       
       {/* ----------------- TOP AE MENU BAR & TOOLBAR ----------------- */}
-      <div className="h-11 border-b border-slate-800/50 bg-slate-900/50 px-4 flex items-center justify-between gap-3 text-xs">
+      <div className="h-11 border-b border-slate-800/50 bg-slate-900/50 px-2 sm:px-4 flex items-center justify-between gap-2 sm:gap-3 text-xs overflow-x-auto no-scrollbar">
         {/* Left Side: Logo & AE Menu */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
           {(onCancel || onClose) && (
             <button
               onClick={onCancel || onClose}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 text-slate-300 hover:text-white border border-slate-700/60 text-xs font-bold transition-all cursor-pointer shadow-sm active:scale-95"
+              className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 text-slate-300 hover:text-white border border-slate-700/60 text-xs font-bold transition-all cursor-pointer shadow-sm active:scale-95 shrink-0"
               title="الرجوع إلى الصفحة الرئيسية للموقع"
             >
               <ArrowLeft size={13} className="text-violet-400" />
-              <span>الرئيسية</span>
+              <span className="hidden sm:inline">الرئيسية</span>
             </button>
           )}
-          <div className="flex items-center gap-2 font-bold text-violet-400">
+          <div className="flex items-center gap-1.5 sm:gap-2 font-bold text-violet-400 shrink-0">
             <span className="bg-violet-600/30 text-violet-300 px-1.5 py-0.5 rounded font-mono text-[11px] border border-violet-500/40">Ae</span>
-            <span className="font-semibold tracking-wide text-slate-200">AFTER EFFECTS STUDIO</span>
+            <span className="font-semibold tracking-wide text-slate-200 text-[11px] sm:text-xs">AFTER EFFECTS STUDIO</span>
           </div>
         </div>
 
-        {/* Right Side: Export Action */}
-        <div className="flex items-center gap-2">
+        {/* Right Side: Export Action & Layers Buttons */}
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+          {/* Hidden general layer import input */}
+          <input 
+            ref={importGeneralLayerInputRef}
+            type="file" 
+            accept="image/*,.svga,.avi,.AVI,.mp4,.mov,.webm,video/*" 
+            onChange={handleUploadAsset} 
+            className="hidden" 
+          />
+
+          {/* زر استدعاء طبقات */}
+          <button
+            type="button"
+            onClick={() => importGeneralLayerInputRef.current?.click()}
+            className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 rounded-xl bg-violet-600/30 hover:bg-violet-600/50 text-violet-200 hover:text-white border border-violet-500/40 text-xs font-bold transition-all shadow-sm active:scale-[0.98] cursor-pointer shrink-0"
+            title="استدعاء واستيراد طبقات إضافية إلى المشروع"
+          >
+            <Upload size={13} className="text-violet-300" />
+            <span className="hidden sm:inline">استدعاء طبقات</span>
+          </button>
+
+          {/* زر الطبقات */}
+          <button
+            type="button"
+            onClick={() => {
+              if (isMobile) {
+                setAeMobileTab('layers');
+              } else {
+                const el = document.querySelector('.layers-panel-container');
+                if (el) el.scrollIntoView({ behavior: 'smooth' });
+              }
+            }}
+            className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-bold transition-all shadow-sm active:scale-[0.98] cursor-pointer shrink-0"
+            title="إدارة وقائمة الطبقات"
+          >
+            <Layers size={13} className="text-amber-400" />
+            <span>طبقات ({layers.length})</span>
+          </button>
+
           <button
             onClick={() => setExportModalOpen(true)}
             disabled={!hasProject}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-violet-600/20 hover:bg-violet-600/30 text-violet-300 border border-violet-500/40 text-xs font-bold transition-all disabled:opacity-40 active:scale-[0.98]"
+            className="flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-violet-600/20 hover:bg-violet-600/30 text-violet-300 border border-violet-500/40 text-xs font-bold transition-all disabled:opacity-40 active:scale-[0.98] shrink-0"
           >
             <Download size={13} />
-            <span>تصدير (Export)</span>
+            <span className="hidden sm:inline">تصدير (Export)</span>
+            <span className="sm:hidden">تصدير</span>
           </button>
         </div>
       </div>
@@ -3349,7 +3713,7 @@ export const AfterEffectsStudio: React.FC<AfterEffectsStudioProps> = ({
       <div className="flex-1 flex overflow-hidden">
         
         {/* LEFT PANEL: Project & Layer Controls */}
-        <div className="w-64 border-r border-slate-800/50 bg-slate-900/20 flex flex-col text-xs">
+        <div className={`border-r border-slate-800/50 bg-slate-900/20 flex-col text-xs ${isMobile ? (aeMobileTab === 'layers' ? 'flex w-full flex-1 overflow-y-auto' : 'hidden') : 'flex w-64'}`}>
           {/* Panel Header */}
           <div className="p-2.5 border-b border-slate-800/60 flex items-center justify-between text-slate-400 font-bold">
             <div className="flex items-center gap-1.5">
@@ -3390,19 +3754,27 @@ export const AfterEffectsStudio: React.FC<AfterEffectsStudioProps> = ({
             <span className="text-slate-400 font-bold text-[11px]">إضافة طبقة:</span>
             <div className="flex items-center gap-1.5">
               <label
-                title="استيراد صورة كطبقة"
-                className="p-1 px-2.5 rounded bg-slate-800/60 hover:bg-violet-600/30 text-slate-300 hover:text-white cursor-pointer flex items-center gap-1.5 text-[10px]"
+                title="استدعاء واستيراد طبقات جديدة"
+                className="p-1 px-2.5 rounded bg-violet-600/30 hover:bg-violet-600/50 text-violet-200 hover:text-white border border-violet-500/40 cursor-pointer flex items-center gap-1 text-[10px] font-bold transition-all shadow-sm"
+              >
+                <Upload size={11} className="text-violet-300" />
+                <span>استدعاء طبقات</span>
+                <input type="file" accept="image/*,.svga,.avi,.AVI,.mp4,.mov,.webm,video/*" onChange={handleUploadAsset} className="hidden" />
+              </label>
+              <label
+                title="استيراد صورة أو فيديو كطبقة"
+                className="p-1 px-2 rounded bg-slate-800/60 hover:bg-slate-700/60 text-slate-300 hover:text-white cursor-pointer flex items-center gap-1 text-[10px]"
               >
                 <Upload size={11} className="text-emerald-400" />
-                <span>صورة</span>
-                <input type="file" accept="image/*" onChange={handleUploadAsset} className="hidden" />
+                <span>أصل / ميديا</span>
+                <input type="file" accept="image/*,.svga,.avi,.AVI,.mp4,.mov,.webm,video/*" onChange={handleUploadAsset} className="hidden" />
               </label>
             </div>
           </div>
 
           {/* Layer List (Quick Selection & Drag Reorder) */}
           <div 
-            className="flex-1 overflow-y-auto p-1.5 flex flex-col gap-1"
+            className="flex-1 overflow-y-auto p-1.5 flex flex-col gap-1 layers-panel-container"
             onDragOver={(e) => {
               e.preventDefault();
               e.dataTransfer.dropEffect = 'move';
@@ -3582,7 +3954,7 @@ export const AfterEffectsStudio: React.FC<AfterEffectsStudioProps> = ({
         </div>
 
         {/* CENTER VIEWPORT (Composition Monitor) */}
-        <div className="flex-1 flex flex-col bg-transparent relative overflow-hidden">
+        <div className={`bg-transparent relative overflow-hidden ${isMobile ? (aeMobileTab === 'viewport' ? 'flex flex-col flex-1 w-full min-h-[50vh]' : 'hidden') : 'flex flex-col flex-1'}`}>
           {/* Monitor Header Toolbar */}
           <div className="h-9 border-b border-slate-800/50 bg-slate-900/30 px-3 flex items-center justify-between text-xs">
             <div className="flex items-center gap-3">
@@ -3732,7 +4104,7 @@ export const AfterEffectsStudio: React.FC<AfterEffectsStudioProps> = ({
         </div>
 
         {/* RIGHT PANEL: Properties / Transform Inspector */}
-        <div data-interactive="true" className="properties-inspector w-72 border-l border-slate-800/50 bg-slate-900/20 flex flex-col text-xs">
+        <div data-interactive="true" className={`properties-inspector border-l border-slate-800/50 bg-slate-900/20 text-xs overflow-y-auto ${isMobile ? (aeMobileTab === 'properties' ? 'flex flex-col flex-1 w-full' : 'hidden') : 'flex flex-col w-72'}`}>
           <div className="p-2.5 border-b border-slate-800/60 flex items-center justify-between text-slate-400 font-bold">
             <div className="flex items-center gap-1.5">
               <Sliders size={13} className="text-violet-400" />
@@ -4093,6 +4465,125 @@ export const AfterEffectsStudio: React.FC<AfterEffectsStudioProps> = ({
                     </div>
                   </div>
                 )}
+
+                {selectedLayer.kind === 'image' && (
+                  <div className="flex flex-col gap-2.5 pt-3 border-t border-slate-800/60">
+                    <span className="text-slate-300 font-bold">تلوين وتظليل الطبقة (Image Tint)</span>
+                    
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400">تفعيل التلوين (Tint Color)</span>
+                      <input
+                        type="color"
+                        value={selectedLayer.tintColor || '#ffd700'}
+                        onChange={(e) => updateSelectedLayer({ tintColor: e.target.value, tintOpacity: selectedLayer.tintOpacity !== undefined ? selectedLayer.tintOpacity : 60 })}
+                        className="w-8 h-7 rounded border border-slate-700 bg-transparent cursor-pointer"
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400">قوة اللون (Opacity %)</span>
+                      <NumericInput
+                        min={0}
+                        max={100}
+                        defaultValue={60}
+                        value={selectedLayer.tintOpacity !== undefined ? selectedLayer.tintOpacity : 60}
+                        onChange={(val) => updateSelectedLayer({ tintOpacity: val })}
+                        className="w-16 bg-slate-800/40 border border-slate-700/50 px-1.5 py-1 rounded text-right text-[11px] font-mono focus:border-cyan-500 focus:outline-none"
+                      />
+                    </div>
+
+                    {/* Quick color preset chips */}
+                    <div className="flex flex-col gap-1.5 mt-1">
+                      <span className="text-[10px] text-slate-500">ألوان وتوهجات سريعة:</span>
+                      <div className="flex flex-wrap gap-1">
+                        {[
+                          { name: 'ذهب 👑', hex: '#ffd700' },
+                          { name: 'ياقوت 🔴', hex: '#ef4444' },
+                          { name: 'زمرد 🟢', hex: '#10b981' },
+                          { name: 'ياقوت أزرق 🔵', hex: '#3b82f6' },
+                          { name: 'بنفسجي 🟣', hex: '#a855f7' },
+                          { name: 'وردي 💖', hex: '#ec4899' },
+                          { name: 'برتقالي 🟧', hex: '#f97316' }
+                        ].map((preset, idx) => (
+                          <button
+                            key={idx}
+                            type="button"
+                            onClick={() => updateSelectedLayer({ tintColor: preset.hex, tintOpacity: 60 })}
+                            className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-[10px] text-slate-300 border border-white/5 transition-colors whitespace-nowrap shrink-0 flex items-center gap-1 cursor-pointer"
+                          >
+                            <span className="w-2 h-2 rounded-full" style={{ backgroundColor: preset.hex }} />
+                            <span>{preset.name}</span>
+                          </button>
+                        ))}
+                        <button
+                          type="button"
+                          onClick={() => updateSelectedLayer({ tintColor: undefined, tintOpacity: undefined })}
+                          className="px-2 py-1 rounded bg-red-950/20 hover:bg-red-900/30 text-[10px] text-red-300 border border-red-500/20 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                        >
+                          إلغاء التلوين ❌
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* ⭐️ كارت طبقة إضافية مدمجة (Alpha Matte) ⭐️ */}
+                <div className="flex flex-col gap-2.5 p-3.5 bg-gradient-to-b from-[#1e1338]/90 to-[#120b24]/95 rounded-2xl border border-violet-500/40 shadow-lg shadow-violet-950/40 mt-1">
+                  <input
+                    ref={additionalLayerFileInputRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={handleUploadMaskedChildLayer}
+                    className="hidden"
+                  />
+
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-violet-300">
+                      <Layers size={13} className="text-violet-400" />
+                      <span>طبقة إضافية مدمجة (Alpha Matte)</span>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => additionalLayerFileInputRef.current?.click()}
+                    className="w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 active:from-violet-700 active:to-indigo-700 text-white text-xs font-black flex items-center justify-center gap-2 transition-all shadow-lg shadow-violet-600/30 cursor-pointer"
+                  >
+                    <span>إضافة قطعة مدمجة</span>
+                    <Upload size={14} />
+                  </button>
+
+                  {/* قائمة بالقطع المدمجة داخل هذه الطبقة إن وجدت */}
+                  {layers.filter(l => l.clipToLayerId === selectedLayer.id).length > 0 && (
+                    <div className="flex flex-col gap-1.5 mt-1 pt-2 border-t border-violet-500/20">
+                      <span className="text-[10px] text-violet-300 font-bold">القطع المدمجة بالداخل:</span>
+                      {layers.filter(l => l.clipToLayerId === selectedLayer.id).map(child => (
+                        <div
+                          key={child.id}
+                          className="flex items-center justify-between p-2 rounded-lg bg-slate-900/90 border border-violet-500/20 text-xs"
+                        >
+                          <span className="truncate text-slate-200 text-[11px] max-w-[140px]">{child.name}</span>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedLayerId(child.id)}
+                              className="text-violet-400 hover:text-violet-300 text-[10px] font-bold px-1.5 py-0.5 rounded hover:bg-violet-500/10 cursor-pointer"
+                            >
+                              تحديد
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setLayers(prev => prev.filter(l => l.id !== child.id))}
+                              className="text-rose-400 hover:text-rose-300 text-[10px] font-bold px-1 py-0.5 rounded hover:bg-rose-500/10 cursor-pointer"
+                            >
+                              حذف
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </>
             ) : (
               <div className="flex flex-col items-center justify-center p-8 text-center text-slate-500 gap-2">
@@ -4105,7 +4596,7 @@ export const AfterEffectsStudio: React.FC<AfterEffectsStudioProps> = ({
       </div>
 
       {/* ----------------- BOTTOM AE TIMELINE & KEYFRAME SEQUENCER ----------------- */}
-      <div className="h-56 border-t border-slate-800/50 bg-slate-900/30 flex flex-col text-xs">
+      <div className={`border-t border-slate-800/50 bg-slate-900/30 text-xs ${isMobile ? (aeMobileTab === 'timeline' ? 'flex flex-col flex-1 w-full min-h-[55vh]' : 'hidden') : 'flex flex-col h-56'}`}>
         {/* Timeline Header & Transport Controls */}
         <div className="h-9 border-b border-slate-800/60 bg-slate-800/25 px-4 flex items-center justify-between">
           {/* Timecode & Frame counter */}
@@ -4546,10 +5037,31 @@ export const AfterEffectsStudio: React.FC<AfterEffectsStudioProps> = ({
 
                 {exportCategory === 'primary' ? (
                   <div className="flex flex-col gap-2.5">
+                    {/* VAP1.0 Option */}
+                    <button
+                      onClick={exportAsVAP10}
+                      className="p-3 rounded-xl bg-slate-800/40 hover:bg-cyan-600/20 border border-cyan-500/40 hover:border-cyan-500/70 flex items-center justify-between text-left transition-all group cursor-pointer"
+                    >
+                      <div className="flex flex-col">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-bold text-xs text-white">فيديو VAP1.0</span>
+                          <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-cyan-600/40 text-cyan-300 border border-cyan-500/50">
+                            Alpha Mask + vapc
+                          </span>
+                        </div>
+                        <span className="text-[10px] text-slate-400 mt-0.5">
+                          تصدير فيديو MP4 مع قناع الشفافية وصندوق VAP1.0 المتوافق
+                        </span>
+                      </div>
+                      <span className="px-2 py-0.5 rounded bg-cyan-600/30 text-cyan-300 text-[10px] font-mono font-bold border border-cyan-500/40 group-hover:bg-cyan-600 group-hover:text-white transition-all">
+                        VAP1.0
+                      </span>
+                    </button>
+
                     {/* SVGA Option */}
                     <button
                       onClick={exportAsSVGA}
-                      className="p-3 rounded-xl bg-slate-800/40 hover:bg-violet-600/20 border border-violet-500/40 hover:border-violet-500/70 flex items-center justify-between text-left transition-all group"
+                      className="p-3 rounded-xl bg-slate-800/40 hover:bg-violet-600/20 border border-violet-500/40 hover:border-violet-500/70 flex items-center justify-between text-left transition-all group cursor-pointer"
                     >
                       <div className="flex flex-col">
                         <div className="flex items-center gap-1.5">
@@ -4612,12 +5124,192 @@ export const AfterEffectsStudio: React.FC<AfterEffectsStudioProps> = ({
                       </span>
                     </button>
 
+                    {/* VAP 1.0 Option */}
+                    <button
+                      onClick={exportAsVAP10}
+                      className="p-3 rounded-xl bg-cyan-950/40 hover:bg-cyan-600/20 border border-cyan-500/40 hover:border-cyan-400 flex items-center justify-between text-left transition-all group shadow-[0_0_12px_rgba(6,182,212,0.15)]"
+                    >
+                      <div className="flex flex-col">
+                        <span className="font-bold text-xs text-white flex items-center gap-1.5">
+                          <span>فيديو Tencent VAP1.0 شفاف</span>
+                          <span className="px-1.5 py-0.2 rounded text-[8px] bg-cyan-500 text-black font-black">VAP1.0</span>
+                        </span>
+                        <span className="text-[10px] text-cyan-300/80">فيديو MP4 شفاف مع قناع ألفا بالأعلى وصندوق vapc القياسي</span>
+                      </div>
+                      <span className="px-2 py-0.5 rounded bg-cyan-600/30 text-cyan-300 text-[10px] font-mono font-bold border border-cyan-500/40 group-hover:bg-cyan-600 group-hover:text-white transition-all">
+                        .MP4
+                      </span>
+                    </button>
+
 
                   </div>
                 )}
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {/* 🔴 Image Custom Dimensions Import Selector Modal */}
+      {imageImportPending && (
+        <div className="fixed inset-0 z-[3000] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-[#020617]/90 backdrop-blur-md" onClick={() => setImageImportPending(null)} />
+          <div className="relative w-full max-w-md bg-[#090e1c] border border-white/10 rounded-3xl shadow-2xl overflow-hidden p-6 text-right" dir="rtl">
+            <h3 className="text-base sm:text-lg font-black text-white flex items-center gap-2 mb-2">
+              <Sparkles className="w-5 h-5 text-amber-400" />
+              <span>تهيئة أبعاد الصورة المستوردة</span>
+            </h3>
+            <p className="text-xs text-slate-300 mb-4">
+              يمكنك استيراد الصورة بمقاساتها الأساسية الأصلية مباشرة أو تحديد المقاس الذي تريده.
+            </p>
+
+            <div className="flex justify-center mb-4 p-2 bg-slate-900/40 rounded-2xl border border-white/5">
+              <img src={imageImportPending.url} alt="Preview" className="max-h-36 object-contain rounded-lg shadow-inner" />
+            </div>
+
+            <div className="space-y-4">
+              <div className="p-3 bg-violet-600/10 border border-violet-500/20 rounded-2xl flex items-center justify-between">
+                <span className="text-slate-300 font-bold text-xs">الأبعاد الأصلية الأساسية:</span>
+                <span className="font-mono text-emerald-400 font-black text-sm">
+                  {imageImportPending.naturalWidth} × {imageImportPending.naturalHeight} px
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-slate-400 block text-xs mb-1 font-bold">العرض (px):</label>
+                  <input
+                    type="number"
+                    value={imageImportWidth}
+                    onChange={(e) => setImageImportWidth(e.target.value)}
+                    className="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white font-mono font-bold text-xs focus:outline-none focus:border-violet-500 text-center"
+                  />
+                </div>
+                <div>
+                  <label className="text-slate-400 block text-xs mb-1 font-bold">الارتفاع (px):</label>
+                  <input
+                    type="number"
+                    value={imageImportHeight}
+                    onChange={(e) => setImageImportHeight(e.target.value)}
+                    className="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white font-mono font-bold text-xs focus:outline-none focus:border-violet-500 text-center"
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-2 justify-center">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setImageImportWidth(String(imageImportPending.naturalWidth));
+                    setImageImportHeight(String(imageImportPending.naturalHeight));
+                  }}
+                  className="px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 text-xs font-bold transition-all"
+                >
+                  استعادة المقاس الأصلي
+                </button>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-4 border-t border-white/10 mt-6">
+              <button
+                type="button"
+                onClick={() => setImageImportPending(null)}
+                className="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 text-xs font-bold transition-all"
+              >
+                إلغاء
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const finalWidth = Number(imageImportWidth) || imageImportPending.naturalWidth;
+                  const finalHeight = Number(imageImportHeight) || imageImportPending.naturalHeight;
+                  
+                  const newId = `layer-${Date.now()}`;
+                  const newLayer: AELayer = {
+                    id: newId,
+                    name: imageImportPending.file.name.replace(/\.[^/.]+$/, ''),
+                    kind: 'image',
+                    visible: true,
+                    locked: false,
+                    colorLabel: 'orange',
+                    expanded: false,
+                    position: { x: 0, y: 0 },
+                    scale: 100,
+                    rotation: 0,
+                    opacity: 100,
+                    animatingPosition: false,
+                    positionKeyframes: [],
+                    animatingScale: false,
+                    scaleKeyframes: [],
+                    animatingRotation: false,
+                    rotationKeyframes: [],
+                    animatingOpacity: false,
+                    opacityKeyframes: [],
+                    width: finalWidth,
+                    height: finalHeight,
+                    imageSrc: imageImportPending.url,
+                    imageElement: imageImportPending.img
+                  };
+                  setLayers(prev => [newLayer, ...prev]);
+                  setSelectedLayerId(newId);
+                  setImageImportPending(null);
+                }}
+                className="px-5 py-2 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white text-xs font-black transition-all shadow-lg active:scale-95 flex items-center gap-1.5"
+              >
+                <Check size={14} className="text-emerald-300" />
+                <span>إتمام الاستدعاء وإدراج الطبقة</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Mobile Bottom Dock Bar for Android & Small Screens */}
+      {isMobile && (
+        <div className="lg:hidden fixed bottom-0 left-0 right-0 h-16 bg-[#0a0f1d]/95 backdrop-blur-md border-t border-slate-700/60 grid grid-cols-4 z-[45] select-none pb-safe">
+          <button
+            type="button"
+            onClick={() => setAeMobileTab('viewport')}
+            className={`flex flex-col items-center justify-center gap-1 cursor-pointer transition-colors ${
+              aeMobileTab === 'viewport' ? 'text-violet-400 font-black' : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Film size={18} />
+            <span className="text-[10px]">الكانفاس</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setAeMobileTab('layers')}
+            className={`flex flex-col items-center justify-center gap-1 cursor-pointer transition-colors ${
+              aeMobileTab === 'layers' ? 'text-violet-400 font-black' : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Layers size={18} />
+            <span className="text-[10px]">الطبقات ({layers.length})</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setAeMobileTab('properties')}
+            className={`flex flex-col items-center justify-center gap-1 cursor-pointer transition-colors ${
+              aeMobileTab === 'properties' ? 'text-violet-400 font-black' : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Sliders size={18} />
+            <span className="text-[10px]">الخصائص {selectedLayerId ? '✓' : ''}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setAeMobileTab('timeline')}
+            className={`flex flex-col items-center justify-center gap-1 cursor-pointer transition-colors ${
+              aeMobileTab === 'timeline' ? 'text-violet-400 font-black' : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Clock size={18} />
+            <span className="text-[10px]">التايم لاين</span>
+          </button>
         </div>
       )}
 

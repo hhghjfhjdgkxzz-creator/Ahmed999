@@ -1,380 +1,56 @@
-export type Language = 'zh' | 'ar' | 'en';
 
-export interface GiftFormat {
-  name: string; // e.g., 'MP4带声音', 'SVGA动效', 'VAP透明通道', 'PAG', 'JSON', 'GIF', 'WEBP', 'MOV'
-  size: string; // e.g., '5.08MB', '10.2MB'
-  url?: string;
-  notes?: string;
+export interface Feature {
+  id: number;
+  name: string;
+  description: string;
+  icon: string;
 }
 
-export interface GiftItem {
-  id: string; // e.g. 'NO.243751'
-  title: string;
-  titleAr?: string;
-  titleEn?: string;
-  price: number; // in CNY
-  vipPrice: number; // in CNY
-  exclusivePrice: number; // 全网排他
-  videoUrl: string; // Direct external video link (0 server bandwidth)
-  posterUrl?: string; // Thumbnail / poster image (optional - if omitted, video acts as main showcase face)
-  previewStartTime?: number; // Second offset in video to start preview / capture cover from (e.g., 1.5s, 3s)
-  formats: GiftFormat[];
-  tags: string[]; // e.g. ['AI原创', '浪漫', '礼物', '2D', '热销']
-  category: string; // 'general' (القسم العام) or custom category created by admin
-  theme: string;
-  effectType: '2D' | '3D';
-  author: {
-    id?: string;
-    name: string;
-    avatar: string;
-    whatsapp?: string; // Direct WhatsApp contact for clients and buyers
-    verified?: boolean;
-    sales?: number;
-  };
-  duration: number; // in seconds, e.g. 14
-  resolution: string; // e.g. '1080x1920'
-  fps?: number;
-  deliveryUrl?: string; // Instant delivery link after purchase
-  cloudDiskCode?: string; // 网盘提取码
-  licenseCode?: string;
-  externalVideoUrl?: string; // Direct Top4toP or external CDN streaming link
-  downloadUrl?: string; // Direct download link
-  externalVideoId?: string; // ID referencing ExternalVideo record
-  uploadProvider?: 'top4top' | 'local' | 'cloud';
-  downloadsCount?: number;
-  favoritesCount?: number;
-  isNew?: boolean;
-  isFeatured?: boolean;
-  isVip?: boolean;
-  pinnedTop?: boolean; // Pinned to the first page and top rows
-  pinnedAt?: string; // Timestamp when pinned to maintain pin order
-  createdAt: string;
+export enum AppState {
+  LOGIN = 'LOGIN',
+  IDLE = 'IDLE',
+  PROCESSING = 'PROCESSING',
+  EXPORTING = 'EXPORTING',
+  ADMIN_PANEL = 'ADMIN_PANEL',
+  BATCH_COMPRESSOR = 'BATCH_COMPRESSOR',
+  BATCH_CROPPER = 'BATCH_CROPPER',
+  BATCH_IMAGE_PROCESSOR = 'BATCH_IMAGE_PROCESSOR',
+  STORE = 'STORE',
+  VIDEO_CONVERTER = 'VIDEO_CONVERTER',
+  UNIVERSAL_CONVERTER = 'UNIVERSAL_CONVERTER',
+  IMAGE_CONVERTER = 'IMAGE_CONVERTER',
+  IMAGE_EDITOR = 'IMAGE_EDITOR',
+  IMAGE_MATCHER = 'IMAGE_MATCHER',
+  SVGA_EDITOR_EX = 'SVGA_EDITOR_EX',
+  IMAGE_PROCESSOR = 'IMAGE_PROCESSOR',
+  IMAGE_ENHANCER = 'IMAGE_ENHANCER',
+  MULTI_SVGA_VIEWER = 'MULTI_SVGA_VIEWER',
+  NAME_3D_EDITOR = 'NAME_3D_EDITOR',
+  VAP_HUB = 'VAP_HUB',
+  AUDIO_EXTRACTOR = 'AUDIO_EXTRACTOR',
+  AI_VIDEO_MATTING = 'AI_VIDEO_MATTING',
+  SVGA_BATCH_COMPRESSOR = 'SVGA_BATCH_COMPRESSOR',
+  BATCH_SVGA_CONVERTER = 'BATCH_SVGA_CONVERTER',
+  SVGA_LAYER_EDITOR = 'SVGA_LAYER_EDITOR',
+  ANIMATION_MANAGER = 'ANIMATION_MANAGER',
+  IMAGE_COLLAGE_STUDIO = 'IMAGE_COLLAGE_STUDIO',
+  EMBEDDED_PORTAL = 'EMBEDDED_PORTAL',
+  AFTER_EFFECTS_STUDIO = 'AFTER_EFFECTS_STUDIO',
+  APK_EXTRACTOR = 'APK_EXTRACTOR',
+  PAG_TO_SVGA = 'PAG_TO_SVGA',
+  VIDEO_DURATION_SPEED = 'VIDEO_DURATION_SPEED',
+  SMART_MP4_STUDIO = 'SMART_MP4_STUDIO',
+  HOME = 'HOME'
 }
 
-export interface CartItem {
-  gift: GiftItem;
-  format: string;
-  licenseType: 'standard' | 'exclusive';
-  price: number;
-}
+export type SubscriptionType = 'day' | 'week' | 'month' | 'year' | 'none';
 
-export interface DeliveryItem {
-  id: string;
-  orderId: string;
-  giftId: string;
-  giftTitle: string;
-  posterUrl: string;
-  videoUrl: string;
-  format: string;
-  licenseType: 'standard' | 'exclusive';
-  licenseKey: string;
-  downloadUrl: string;
-  fileSize: string;
-  cloudDiskCode?: string;
-  purchaseDate: string;
-  price: number;
-  buyerName?: string;
-  buyerContact?: string;
-  paymentMethod?: 'wechat' | 'alipay' | 'card' | 'bank' | 'cash';
-  notes?: string;
-  status?: 'completed' | 'processing' | 'shipped';
-}
+export const PRODUCT_CATEGORIES = ['القسم الرئيسي', 'إطارات', 'دخوليات', 'هدايا', 'VIP', 'إيموشنات'];
 
-export interface OrderRecord {
-  orderId: string;
-  date: string;
-  buyerName: string;
-  buyerEmail: string;
-  items: DeliveryItem[];
-  totalPrice: number;
-  paymentMethod: 'wechat' | 'alipay' | 'card' | 'balance';
-  status: 'completed';
-}
-
-export type AccountStatus = 'active' | 'inactive';
-
-export interface UserPermissions {
-  giftUploadAndPublish: boolean; // Gift Upload & Publishing Permission (صلاحية رفع ونشر الهدايا)
-  manageAccounts?: boolean;       // إدارة وتفعيل الحسابات
-  manageBanners?: boolean;        // إدارة البنرات الإعلانية
-  viewOrders?: boolean;           // عرض سجل الطلبات والمبيعات
-  manageSettings?: boolean;       // إدارة إعدادات الموقع والأقسام
-}
-
-export type UserRole = 'buyer' | 'designer' | 'employee' | 'admin';
-
-export interface EmployeeUser {
+export interface StoreCategory {
   id: string;
   name: string;
-  email: string;
-  password?: string; // Login password assigned by admin
-  whatsapp: string; // e.g. +966501234567
-  role: UserRole;
-  status: AccountStatus; // Active / Inactive (مفعل / غير مفعل)
-  permissions: UserPermissions; // Fine-grained permissions
-  avatar: string;
-  joinedDate: string;
-  bio?: string;
-  giftsCount?: number;
-  totalSales?: number;
-  isProfileCompleted: boolean;
-  lastLogin?: string;
-}
-
-export interface HeroBannerItem {
-  id: string;
-  badge?: string;
-  title?: string;
-  subtitle?: string;
-  imageUrl?: string;
-  bgGradient?: string;
-  btnText?: string;
-  btnLink?: string; // Target URL or link (e.g. https://... or internal category/action)
-  dimensionsNote?: string;
-  isActive?: boolean;
-  createdAt?: string;
-  updatedAt?: string;
-}
-
-export interface CustomCategory {
-  id: string;
-  name: string; // e.g. "القسم العام", "سيارات فارهة", "شخصيات ثلاثية الأبعاد"
-  nameAr?: string;
-  isDefault?: boolean;
-  createdAt?: string;
-}
-
-export interface SiteSettings {
-  siteName: string;
-  siteSlogan?: string;
-  siteSubTitle?: string;
-  logoUrl?: string; // Custom uploaded site logo (base64 data URL or external URL)
-  primaryPhone?: string; // Primary phone / WhatsApp number displayed on top
-  primaryPhoneLabel?: string; // Label e.g. "WhatsApp", "Customer Service"
-  secondaryPhone?: string; // Additional secondary phone / WhatsApp number
-  secondaryPhoneLabel?: string; // Label e.g. "WhatsApp 2", "Technical Support"
-  whatsapp?: string; // Legacy/fallback alias for primaryPhone
-  secondaryWhatsapp?: string; // Legacy/fallback alias for secondaryPhone
-  phone?: string;
-  email?: string;
-  wechat?: string;
-  wechatQrUrl?: string; // Custom uploaded WeChat QR code / Barcode image
-  deletePasscode?: string; // Security passcode to confirm deleting all products (e.g. 150150)
-  giftsPerPage?: number; // Number of gifts per page in storefront (configurable from Dashboard)
-  updatedAt?: string;
-}
-
-export interface AuthUser {
-  id: string;
-  name: string;
-  email: string;
-  role: UserRole;
-  status: AccountStatus; // Active / Inactive
-  permissions: UserPermissions;
-  avatar: string;
-  whatsapp?: string;
-  isTrial?: boolean; // Trial / Demo account
-  employeeId?: string; // If logged in as staff
-  lastLogin?: string;
-}
-
-export interface SavedGiftName {
-  id: string;
-  title: string;       // Primary title (Chinese / English / Custom)
-  titleAr?: string;     // Arabic title
-  createdAt?: string;
-}
-
-export type AssetMediaType = 'svga' | 'svga2' | 'mp4' | 'webp' | 'png' | 'jpeg' | 'gif' | 'audio' | 'shared';
-
-export interface SvgaStructureInfo {
-  version: '1.0' | '2.0';
-  fps: number;
-  frames: number;
-  duration: number; // in seconds
-  width: number;
-  height: number;
-  layersCount: number;
-  spritesCount: number;
-  uniqueSpritesCount: number;
-  audioTracksCount: number;
-  hasMasks: boolean;
-  hasTransforms: boolean;
-  hasAlpha: boolean;
-  layersList?: { id: string; name: string; type: string; opacity: number }[];
-}
-
-export interface MediaAssetItem {
-  id: string;
-  name: string;
-  hash: string; // SHA-256
-  type: AssetMediaType;
-  mimeType: string;
-  originalSize: number; // bytes
-  optimizedSize: number; // bytes
-  savedBytes: number;
-  savingsPercent: number;
-  resolution?: string; // '1080x1920'
-  duration?: number;
-  fps?: number;
-  svgaInfo?: SvgaStructureInfo;
-  dataUrl: string; // Base64 or Blob storage URL
-  posterUrl?: string; // Cover thumbnail
-  storagePath?: string;
-  category?: string; // e.g. 'frames', 'gifts', 'cars', 'badges', 'general'
-  usageCount: number;
-  usedInGiftIds: string[];
-  keepOriginalBackup: boolean;
-  createdAt: string;
-  lastUsed: string;
-}
-
-export interface OptimizationOptions {
-  keepOriginalBackup: boolean;
-  compressionMode: 'lossless' | 'balanced' | 'max';
-  deduplicateSprites: boolean;
-  removeUnusedData: boolean;
-  targetResolution?: 'original' | '1080p' | '720p' | '540p';
-  preserveTransparency: boolean;
-}
-
-export interface OptimizationTask {
-  id: string;
-  file: File;
-  name: string;
-  originalSize: number;
-  type: string;
-  progress: number; // 0 - 100
-  speedMBs: number;
-  status: 'pending' | 'uploading' | 'analyzing' | 'optimizing' | 'validating' | 'completed' | 'error' | 'deduplicated';
-  statusText: string;
-  resultAsset?: MediaAssetItem;
-  error?: string;
-  isDeduplicated?: boolean;
-  startedAt: number;
-}
-
-export type UploadStatus = 'PENDING' | 'UPLOADING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
-
-export interface ExternalVideoRecord {
-  id: string;
-  operationId: string;
-  fileName: string;
-  fileSize: number;
-  fileType: string;
-  externalVideoUrl: string;
-  downloadUrl: string;
-  uploadStatus: UploadStatus;
-  uploadedAt: string;
-  lastAttemptAt?: string;
-  errorMessage?: string;
-  sha256Hash: string;
-  provider: 'top4top' | 'local' | 'cloud';
-  giftId?: string;
-  giftTitle?: string;
-  verified: boolean;
-  duration?: number;
-  resolution?: string;
-  posterUrl?: string;
-  retryCount?: number;
-}
-
-export type CacheCategory = 'all' | 'svga' | 'vap' | 'pag' | 'json' | 'video' | 'image' | 'models' | 'animations' | 'textures' | 'audio' | 'vfx' | 'other' | string;
-
-export interface CacheFileRecord {
-  id: string;
-  name: string;
-  fileName?: string;
-  size: number;
-  type: string;
-  hash: string;
-  url: string;
-  category: CacheCategory;
-  userId?: string;
-  userName?: string;
-  userEmail?: string;
-  sourceFeature?: string;
-  dimensions?: any;
-  duration?: number;
-  storagePath?: string;
-  downloadCount?: number;
-  accessCount?: number;
-  createdAt: string | any;
-  lastAccessedAt?: string | any;
-  tags?: string[];
-  metadata?: Record<string, any>;
-  [key: string]: any;
-}
-
-export interface CacheActivityLog {
-  id: string;
-  userId?: string;
-  userName?: string;
-  userEmail?: string;
-  action: string;
-  details?: string;
-  fileId?: string;
-  fileName?: string;
-  timestamp: string | any;
-  [key: string]: any;
-}
-
-export interface ActivityLog {
-  id: string;
-  userId?: string;
-  userName?: string;
-  userEmail?: string;
-  action: string;
-  details?: string;
-  fileId?: string;
-  fileName?: string;
-  timestamp: string | any;
-  [key: string]: any;
-}
-
-export interface UserRecord {
-  id: string;
-  uid?: string;
-  name?: string;
-  displayName?: string;
-  email?: string;
-  role?: string;
-  isAdmin?: boolean;
-  isSuperAdmin?: boolean;
-  isApproved?: boolean;
-  status?: string;
-  numericId?: number | string;
-  avatar?: string;
-  telegramChatId?: string;
-  phoneNumber?: string;
-  whatsapp?: string;
-  isOnline?: boolean;
-  lastActive?: string;
-  password?: string;
-  plainPassword?: string;
-  oldPassword?: string;
-  subscriptionExpiry?: any;
-  freeAttempts?: number;
-  hasCacheAccess?: boolean;
-  [key: string]: any;
-}
-
-export interface CacheStats {
-  totalFiles: number;
-  totalSizeBytes: number;
-  categories?: Record<string, number>;
-  categoryCounts?: Record<string, number>;
-  activeCacheUsersCount?: number;
-  [key: string]: any;
-}
-
-export interface CachePermissions {
-  canUpload?: boolean;
-  canDelete?: boolean;
-  canDownload?: boolean;
-  canViewLogs?: boolean;
-  view?: boolean;
-  [key: string]: any;
+  order: number;
 }
 
 export interface StoreProduct {
@@ -382,179 +58,330 @@ export interface StoreProduct {
   name: string;
   description: string;
   price: number;
-  category: string;
+  category: string; // ID of the category
+  videoUrl: string;
   imageUrl: string;
-  videoUrl?: string;
-  supportedFormats?: string[];
-  createdAt?: any;
+  supportedFormats: string[];
+  createdAt: any;
   updatedAt?: any;
-  [key: string]: any;
 }
 
-export interface AppSettings {
-  siteName?: string;
-  siteSlogan?: string;
-  primaryPhone?: string;
-  whatsapp?: string;
-  externalLinks?: DashboardExternalLinks;
-  [key: string]: any;
+export interface StoreOrder {
+  id: string;
+  productId: string;
+  productName: string;
+  userId: string;
+  username: string;
+  userWhatsapp?: string;
+  status: 'pending' | 'processing' | 'completed' | 'cancelled';
+  giftUrl?: string;
+  price: number;
+  quantity: number;
+  contactMethod: 'whatsapp' | 'platform';
+  selectedFormat: string;
+  createdAt: any;
 }
 
-export interface CustomExternalLink {
-  id?: string;
+export type UserRole = 'admin' | 'moderator' | 'user' | 'employee' | 'designer';
+
+export interface UserRecord {
+  id: string;
+  uid?: string;
   name: string;
-  url: string;
-  icon?: string;
-  category?: string;
-  description?: string;
-  enabled?: boolean;
-  [key: string]: any;
-}
+  displayName?: string;
+  photoURL?: string;
+  avatarUrl?: string;
+  email?: string;
+  password?: string;
+  plainPassword?: string;
+  passwordUpdatedAt?: any;
+  role: UserRole;
+  isApproved: boolean;
+  isVIP: boolean;
+  isSuperAdmin?: boolean; // Main admin who cannot be managed by moderators
+  permissions?: string[]; // List of tabs or features allowed for moderators
+  
+  // Feature Access Control fields
+  allowedFeatures?: string[];
+  allFeaturesEnabled?: boolean;
+  defaultFeature?: string;
 
-export interface DashboardExternalLinks {
-  firstLink?: CustomExternalLink;
-  secondLink?: CustomExternalLink;
-  links?: CustomExternalLink[];
+  subscriptionExpiry: any; // Firebase Timestamp or null
+  subscriptionType: SubscriptionType;
+  activatedKey?: string;
+  status: 'active' | 'banned' | 'pending';
+  coins: number;
+  freeAttempts: number;
+  createdAt: any;
+  lastLogin: any;
+  lastIp?: string;
+  deviceId?: string;
+  allowedExportFormat?: string | string[]; // Restrict user to specific format(s)
+  hasSvgaExAccess?: boolean; // Per-user access to SVGA 2.0 EX
+  allowedVersion?: string; // Specific allowed version for this account (e.g., 'v3.0.0')
+  lastUsedVersion?: string; // Version from which user last connected
+  versionLastUpdated?: any; // Timestamp when version was last changed
+  versionUpdatedBy?: string; // Admin who modified allowed version
+  canBypassMaintenance?: boolean; // إمكانية فتح التطبيق واستخدامه بشكل طبيعي أثناء تعطيل السيرفر
   [key: string]: any;
 }
 
 export interface PresetBackground {
   id: string;
-  name: string;
-  url?: string;
-  color?: string;
-  type?: string;
-  [key: string]: any;
+  label: string;
+  url: string;
+  createdAt: any;
+  expiresAt?: any;
 }
-
-export interface SVGAFileInfo {
-  name: string;
-  size: number;
-  data: ArrayBuffer;
-  version?: string;
-  fps?: number;
-  frames?: number;
-  videoSize?: { width: number; height: number };
-  [key: string]: any;
-}
-
-export const PlayerStatus = {
-  IDLE: 'idle',
-  LOADING: 'loading',
-  PLAYING: 'playing',
-  PAUSED: 'paused',
-  STOPPED: 'stopped',
-  ERROR: 'error'
-} as const;
-
-export type PlayerStatus = typeof PlayerStatus[keyof typeof PlayerStatus];
-
-export type SubscriptionType = 'none' | 'day' | 'week' | 'month' | '3months' | 'year' | 'lifetime' | string;
-
-export const PRODUCT_CATEGORIES = ['All', 'Intros', 'Alerts', 'Overlays', 'Emotes', 'Badges', 'Audio', 'Transitions'] as const;
 
 export interface LicenseKey {
-  id?: string;
+  id: string;
   key: string;
-  plan?: string;
-  type?: string;
-  status?: string;
-  expiryDate?: any;
-  activatedAt?: any;
-  [key: string]: any;
+  duration: SubscriptionType; // 'day', 'week', 'month', 'year'
+  isUsed: boolean;
+  usedBy?: string; // User ID
+  usedAt?: any;
+  createdAt: any;
+  createdBy: string; // Admin ID
+}
+
+export interface CustomExternalLink {
+  id: string;
+  title: string;
+  url: string;
+  enabled: boolean;
+  desc?: string;
+  openInNewTab?: boolean;
+  badge?: string;
+}
+
+export interface DashboardExternalLinks {
+  storeLink?: CustomExternalLink; // القائمة الأولى (مثلاً: المتجر أو الواجهة الرئيسية)
+  svgaEditorLink?: CustomExternalLink; // القائمة الثانية (مثلاً: ملفات ومحرر SVGA)
+  customLinks?: CustomExternalLink[];
+  linkHeroUploadToExternal?: boolean; // ربط أيقونة رفع الواجهة الرئيسية لفتح الموقع مباشرة
+  heroUploadTarget?: 'first' | 'second'; // وجهة أيقونة رفع الواجهة الرئيسية (القائمة الأولى أم الثانية)
+  defaultActiveList?: 'first' | 'second'; // القائمة الافتراضية عند الفتح
+  openInsideApp?: boolean; // فتح الموقع داخل الصفحة (مفعل افتراضياً بدون إظهار الرابط)
+}
+
+export interface AppSettings {
+  appName: string;
+  logoUrl: string;
+  backgroundUrl: string;
+  whatsappNumber: string;
+  isRegistrationOpen: boolean;
+  defaultFreeAttempts: number;
+  isSvgaExEnabled: boolean; // Global toggle for SVGA 2.0 EX
+  isMaintenanceMode?: boolean; // وضع التحديث والتطوير
+  maintenanceMessage?: string; // رسالة التحديث المخصصة
+  maintenanceTitle?: string; // عنوان شاشة التحديث
+  maintenanceMessageEn?: string; // رسالة التحديث بالإنجليزية
+  maintenanceTitleEn?: string; // عنوان شاشة التحديث بالإنجليزية
+  maintenanceEstimatedTime?: string; // الوقت المقدر للانتهاء
+  maintenanceAllowedUserIds?: string[]; // معرّفات الحسابات المسموح لها بفتح التطبيق أثناء تعطيل السيرفر
+  maintenanceAllowedEmails?: string[]; // إيميلات الحسابات المسموح لها بفتح التطبيق أثناء تعطيل السيرفر
+  defaultAllowedVersion?: string; // الإصدار الافتراضي للحسابات الجديدة (e.g. 'v3.0.0')
+  isDesignerInfoDownloadEnabled?: boolean; // تفعيل إمكانية تنزيل ملف التعريف في لوحة التحكم
+  designerInfoName?: string;
+  designerInfoPhone?: string;
+  designerInfoType?: string;
+  designerInfoDesc?: string;
+  externalLinks?: DashboardExternalLinks; // نظام الروابط الخارجية للداشبورد (المتجر، محرر svga، وغيرها)
+  vibFeatures?: string[]; // قائمة معرّفات الميزات الحصرية للـ VIP
+  screenshotProtectionEnabled?: boolean; // حماية لقطات الشاشة
+  screenRecordingProtectionEnabled?: boolean; // حماية تسجيل الشاشة
+  costs: {
+    svgaProcess: number;
+    batchCompress: number;
+    vipPrice: number;
+  }
+}
+
+export interface AccountVersionHistory {
+  id: string;
+  userId: string;
+  userEmail?: string;
+  oldVersion: string;
+  newVersion: string;
+  updatedBy: string;
+  reason?: string;
+  timestamp: any;
+}
+
+export interface ActivityLog {
+  id: string;
+  userId: string;
+  userName: string;
+  action: 'login' | 'upload' | 'feature_usage' | 'subscription_activated';
+  details: string; // e.g., "Uploaded file.mp4", "Used Video Converter"
+  exportFormat?: string; // e.g., "VAP", "GIF", "MP4"
+  ip?: string;
+  timestamp: any;
+}
+
+export interface MaterialAsset {
+  id: string;
+  type: 'image' | 'audio';
+  name: string;
+  size: string;
+  dimensions?: string;
 }
 
 export interface FileMetadata {
   name: string;
   size: number;
   type: string;
-  width?: number;
-  height?: number;
-  duration?: number;
+  dimensions?: { width: number; height: number };
   fps?: number;
   frames?: number;
-  [key: string]: any;
+  assets?: MaterialAsset[];
+  videoItem?: any;
+  fileUrl?: string;
+  originalFile?: File;
 }
 
-export interface MaterialAsset {
-  id: string;
-  name: string;
+export interface SVGAFileInfo {
   url: string;
-  type?: string;
-  [key: string]: any;
+  name: string;
 }
 
-export interface AccountVersionHistory {
+export enum PlayerStatus {
+  LOADING = 'LOADING',
+  PLAYING = 'PLAYING',
+  PAUSED = 'PAUSED',
+  ERROR = 'ERROR'
+}
+
+export type Language = 'ar' | 'en' | 'zh';
+
+export type CacheCategory = 'svga' | 'vap' | 'lottie' | 'pag' | 'mp4' | 'gif' | 'image' | 'audio' | 'video' | 'json' | 'animation' | 'other';
+
+export interface CacheFileRecord {
   id: string;
-  userId: string;
-  action: string;
-  timestamp: string;
-  details?: string;
+  name?: string;
+  fileName?: string;
+  originalName?: string;
+  category: CacheCategory;
+  size: number;
+  url?: string;
+  type?: string;
+  uploadedAt?: any;
+  createdAt?: any;
+  userId?: string;
+  userNumericId?: number | string;
+  userName?: string;
+  userEmail?: string;
+  tags?: string[];
+  thumbnailUrl?: string;
+  duration?: number;
+  width?: number;
+  height?: number;
+  dimensions?: { width: number; height: number };
+  sourceFeature?: string;
+  storagePath?: string;
+  downloadCount?: number;
   [key: string]: any;
 }
 
-export type MegaFileCategory = 'videos' | 'images' | 'audio' | 'exports' | 'svga' | 'vap' | 'animation' | 'video' | 'image' | 'backups' | 'other' | string;
+export interface CacheActivityLog {
+  id: string;
+  action: string;
+  details: string;
+  timestamp: any;
+  userId?: string;
+  userName?: string;
+  userEmail?: string;
+  fileName?: string;
+  fileId?: string;
+  fileSize?: number;
+  adminId?: string;
+  adminName?: string;
+  adminEmail?: string;
+  [key: string]: any;
+}
+
+export interface CacheStats {
+  totalFiles: number;
+  totalSize?: number;
+  totalSizeBytes?: number;
+  categoriesCount?: Record<string, number>;
+  categoryCounts?: Record<string, number>;
+  activeCacheUsersCount?: number;
+  disabledCacheUsersCount?: number;
+  recentUploadsCount?: number;
+  recentDownloadsCount?: number;
+  [key: string]: any;
+}
+
+export interface CachePermissions {
+  canUpload?: boolean;
+  canDelete?: boolean;
+  canDownload?: boolean;
+  view?: boolean;
+  upload?: boolean;
+  delete?: boolean;
+  download?: boolean;
+  copyLink?: boolean;
+  manage?: boolean;
+  [key: string]: any;
+}
+
+export type MegaFileCategory = 'svga' | 'vap' | 'yyeva' | 'lottie' | 'pag' | 'mp4' | 'images' | 'image' | 'video' | 'animation' | 'audio' | 'backup' | 'other';
 
 export interface MegaStorageRecord {
   id: string;
   fileId?: string;
-  fileName: string;
-  originalName?: string;
-  fileSize: number;
-  mimeType: string;
-  category: MegaFileCategory;
-  hash: string;
-  megaUrl: string;
-  megaHandle?: string;
   nodeId?: string;
-  localPath?: string;
-  downloadUrl: string;
-  uploadedAt: string;
-  lastAccessedAt: string;
-  accessCount: number;
-  isDuplicate?: boolean;
-  uploadedBy?: {
-    userId?: string;
-    userName?: string;
-    userEmail?: string;
-    sourceFeature?: string;
-    [key: string]: any;
-  };
+  name?: string;
+  fileName?: string;
+  originalName?: string;
+  size?: number;
+  fileSize?: number;
+  mimeType?: string;
+  category?: MegaFileCategory;
+  url?: string;
+  megaUrl?: string;
+  downloadUrl?: string;
+  type?: string;
+  uploadedAt?: any;
+  uploadedBy?: any;
+  lastDownloadedAt?: any;
+  downloadCount?: number;
   userId?: string;
   userName?: string;
-  userEmail?: string;
-  sourceFeature?: string;
+  handle?: string;
+  path?: string;
+  hash?: string;
+  isDuplicate?: boolean;
   [key: string]: any;
 }
 
 export interface MegaStorageStats {
   totalFiles: number;
-  totalSizeBytes: number;
-  todayUploads: number;
-  totalUploads: number;
-  totalDownloads: number;
-  failedUploads: number;
-  duplicatesPrevented: number;
-  categoryCounts: Record<string, number>;
+  totalSize?: number;
+  totalSizeBytes?: number;
+  usedStorageBytes?: number;
+  totalStorageBytes?: number;
+  lastSuccessfulUpload?: any;
+  todayUploads?: number;
+  totalUploads?: number;
+  totalDownloads?: number;
+  failedUploads?: number;
+  duplicatesPrevented?: number;
+  categoryCounts?: Record<string, number>;
   categorySizes?: Record<string, number>;
-  lastSyncedAt?: string;
-  lastSuccessfulUpload?: string;
   [key: string]: any;
 }
 
 export interface MegaSettings {
-  provider?: string;
-  folderUrl: string;
+  email?: string;
+  password?: string;
   folderName?: string;
+  folderUrl?: string;
+  enabled?: boolean;
+  provider?: string;
   status?: string;
-  accountEmail?: string;
-  totalFiles?: number;
-  totalStorageBytes?: number;
-  lastSuccessfulUpload?: string;
-  autoDeduplication?: boolean;
-  subfolders?: string[];
-  autoSyncEnabled?: boolean;
-  maxCacheSizeMB?: number;
   [key: string]: any;
 }
 
@@ -562,47 +389,360 @@ export interface MegaConnectionTestResult {
   success: boolean;
   message: string;
   provider?: string;
-  accountEmail?: string;
-  folderUrl?: string;
   folderName?: string;
-  totalStorageBytes?: number;
-  usedStorageBytes?: number;
-  testFileUploaded?: boolean;
-  testLinkGenerated?: boolean;
-  testFileDeleted?: boolean;
-  timestamp?: string;
-  errorDetails?: string;
-  itemCount?: number;
-  latencyMs?: number;
+  folderUrl?: string;
+  accountEmail?: string;
+  quota?: {
+    used: number;
+    total: number;
+  };
   [key: string]: any;
 }
 
 export interface MegaUploadProgress {
   percentage: number;
-  stage: 'preparing' | 'hashing' | 'uploading' | 'processing' | 'cloud_upload' | 'verifying' | 'completed' | 'failed' | string;
-  loadedBytes?: number;
-  totalBytes?: number;
-  speedBps?: number;
-  etaSeconds?: number;
-  message: string;
+  loaded?: number;
+  total?: number;
   fileName?: string;
+  statusText?: string;
+  stage?: string;
+  message?: string;
+  [key: string]: any;
+}
+
+export interface EmployeeUser {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  permissions?: string[];
+  status?: 'active' | 'inactive';
+  createdAt?: any;
+  [key: string]: any;
+}
+
+export interface GiftItem {
+  id: string;
+  name?: string;
+  title?: string;
+  titleAr?: string;
+  description?: string;
+  category?: string;
+  price?: number;
+  vipPrice?: number;
+  imageUrl?: string;
+  fileUrl?: string;
+  videoUrl?: string;
+  posterUrl?: string;
+  type?: string;
+  theme?: string;
+  isNew?: boolean;
+  downloadsCount?: number;
+  deliveryUrl?: string;
+  effectType?: string;
+  resolution?: string;
+  cloudDiskCode?: string;
+  author?: any;
+  [key: string]: any;
+}
+
+export interface CartItem {
+  gift: GiftItem;
+  licenseType: 'exclusive' | 'commercial' | string;
+  price: number;
+  [key: string]: any;
+}
+
+export interface DeliveryItem {
+  id: string;
+  orderId: string;
+  giftId?: string;
+  giftTitle?: string;
+  posterUrl?: string;
+  videoUrl?: string;
+  format?: string;
+  licenseType?: string;
+  licenseKey?: string;
+  downloadUrl?: string;
+  fileSize?: string;
+  cloudDiskCode?: string;
+  purchaseDate?: string;
+  price?: number;
+  buyerName?: string;
+  buyerContact?: string;
+  paymentMethod?: string;
+  status?: string;
+  [key: string]: any;
+}
+
+export interface HeroBannerItem {
+  id: string;
+  badge?: string;
+  title: string;
+  subtitle?: string;
+  imageUrl?: string;
+  bgGradient?: string;
+  btnText?: string;
+  btnLink?: string;
+  dimensionsNote?: string;
+  isActive?: boolean;
+  createdAt?: any;
+  [key: string]: any;
+}
+
+export interface CustomCategory {
+  id: string;
+  name: string;
+  nameAr?: string;
+  isDefault?: boolean;
+  order?: number;
+  createdAt?: any;
+  [key: string]: any;
+}
+
+export interface SiteSettings {
+  siteName?: string;
+  siteSlogan?: string;
+  siteSubTitle?: string;
+  logoUrl?: string;
+  primaryPhone?: string;
+  primaryPhoneLabel?: string;
+  secondaryPhone?: string;
+  secondaryPhoneLabel?: string;
+  whatsapp?: string;
+  secondaryWhatsapp?: string;
+  phone?: string;
+  email?: string;
+  wechat?: string;
+  wechatQrUrl?: string;
+  deletePasscode?: string;
+  giftsPerPage?: number;
+  [key: string]: any;
+}
+
+export interface UserPermissions {
+  [key: string]: boolean | any;
+}
+
+export interface SavedGiftName {
+  id: string;
+  title: string;
+  titleAr?: string;
+  [key: string]: any;
+}
+
+export interface SVGAFileExtended {
+  name: string;
+  size: number;
+  type: string;
+  lastModified: number;
+  url: string;
+  rawFile: File;
+}
+
+export interface StoredFileRecord {
+  fileId: string;
+  userId: string;
+  userName?: string;
+  userEmail?: string;
+  originalName: string;
+  storedName: string;
+  extension: string;
+  mimeType: string;
+  size: number;
+  storageKey: string;
+  storageProvider: 'firebase_storage' | 'private_storage' | 'r2_storage';
+  uploadContext?: string;
+  projectId?: string;
+  status: 'active' | 'trash' | 'permanent_deleted';
+  createdAt: any;
+  updatedAt: any;
+  deletedAt?: any;
+  downloadUrl?: string;
+  downloadCount?: number;
+  lastDownloadedAt?: any;
+}
+
+export interface StorageCenterStats {
+  totalFiles: number;
+  activeCount?: number;
+  totalSize: number;
+  filesToday: number;
+  filesThisWeek: number;
+  filesThisMonth: number;
+  trashCount?: number;
+  trashedFilesCount: number;
+  trashedFilesSize: number;
+  storageUsedBytes: number;
+  storageTotalBytes: number;
+  storagePercentUsed: number;
+  categoryBreakdown: Record<string, { count: number; size: number }>;
+}
+
+export interface StorageActivityLog {
+  id?: string;
+  action: 'upload' | 'download' | 'trash' | 'restore' | 'permanent_delete' | 'cleanup' | 'delete' | 'create_secure_link';
+  fileId?: string;
+  fileName?: string;
+  userId?: string;
+  userName?: string;
+  adminId?: string;
+  adminName?: string;
+  adminEmail?: string;
+  details?: string;
+  timestamp: any;
+  bytesAffected?: number;
+}
+
+export type LayoutType = 'grid' | 'full-width';
+
+export interface ImageItem {
+  id: string;
+  url: string;
+  file?: File;
+  name?: string;
+}
+
+export interface MediaAssetItem {
+  id: string;
+  name: string;
+  type: string;
+  originalSize: number;
+  optimizedSize: number;
+  savingsPercent: number;
+  dataUrl: string;
+  dimensions?: { width: number; height: number };
+  duration?: number;
+  fps?: number;
+  hash: string;
+  mimeType?: string;
+  svgaInfo?: any;
+  [key: string]: any;
+}
+
+export type AssetMediaType = 'svga' | 'mp4' | 'webp' | 'gif' | 'png' | 'vap' | 'pag';
+
+export interface OptimizationOptions {
+  svgaDeduplicateImages?: boolean;
+  svgaCompressPngs?: boolean;
+  svgaPngQuality?: number;
+  downscaleLargeImages?: boolean;
+  maxDimension?: number;
+  cleanUnusedLayers?: boolean;
+  removeAudio?: boolean;
+  videoQualityPreset?: 'high' | 'medium' | 'low';
+  videoFps?: number;
+  keepOriginalBackup?: boolean;
+  compressionMode?: string;
+  [key: string]: any;
+}
+
+export interface OptimizationTask {
+  id: string;
+  fileName?: string;
+  fileSize?: number;
+  progress: number;
+  status: 'pending' | 'processing' | 'done' | 'completed' | 'deduplicated' | 'error' | 'analyzing';
+  originalUrl?: string;
+  resultUrl?: string;
+  resultSize?: number;
+  errorMessage?: string;
+  type?: string;
+  name?: string;
+  isDeduplicated?: boolean;
+  originalSize?: number;
+  speedMBs?: number;
+  resultAsset?: any;
+  statusText?: string;
+  [key: string]: any;
+}
+
+export interface ProFeature {
+  id: string;
+  name: string;
+  nameAr: string;
+  description: string;
+  descriptionAr: string;
+  icon: string;
+  enabled: boolean;
+  category: 'identity' | 'tools' | 'limits' | 'resources' | string;
+  [key: string]: any;
+}
+
+export interface ProPlan {
+  id: string;
+  name: string;
+  nameAr: string;
+  description: string;
+  descriptionAr: string;
+  price: number;
+  currency: string;
+  durationDays: number;
+  durationLabel: string;
+  features: string[];
+  badgeColor?: string;
+  isPopular?: boolean;
+  isActive?: boolean;
+  order?: number;
+  [key: string]: any;
+}
+
+export interface ProSettings {
+  isEnabled: boolean;
+  defaultBadgeColor: string;
+  defaultBadgeText: string;
+  avatarPolicyOnExpire: 'freeze_changes' | 'revert_default' | 'allow_keep' | 'reset_to_default' | string;
+  maxAvatarSizeBytes: number;
+  maxUploadLimitMB: number;
+  whatsappContact: string;
+  customPerksNote: string;
+  [key: string]: any;
+}
+
+export interface ProOrder {
+  id: string;
+  userId: string;
+  userName: string;
+  userEmail?: string;
+  planId: string;
+  planName: string;
+  price: number;
+  currency: string;
+  durationDays: number;
+  status: 'pending' | 'completed' | 'cancelled';
+  paymentMethod?: string;
+  createdAt: any;
+  approvedAt?: any;
+  approvedBy?: string;
+  notes?: string;
+  [key: string]: any;
+}
+
+export interface ProMembershipLog {
+  id: string;
+  userId: string;
+  userName: string;
+  action: 'grant' | 'revoke' | 'renew' | 'edit_perks' | 'avatar_change' | 'plan_created' | 'plan_updated' | 'order_approved' | string;
+  adminId?: string;
+  adminName?: string;
+  details: string;
+  timestamp: any;
+  oldValue?: any;
+  newValue?: any;
   [key: string]: any;
 }
 
 export interface VipSubItem {
   id: string;
   title: string;
-  titleAr?: string;
   description: string;
-  descriptionAr?: string;
   url: string;
   badge?: string;
   icon?: string;
   priceText?: string;
   buttonText?: string;
   isHighlighted?: boolean;
-  order?: number;
-  [key: string]: any;
+  order: number;
 }
 
 export interface VipBundle {
@@ -617,25 +757,28 @@ export interface VipBundle {
   isVisible: boolean;
   order: number;
   subItems: VipSubItem[];
-  createdAt?: string;
-  updatedAt?: string;
+  imageUrl?: string;
+  createdAt?: any;
+  updatedAt?: any;
   [key: string]: any;
 }
 
-export interface SingleGameOdds {
+export interface GameItemConfig {
   id: string;
   name: string;
   nameAr: string;
-  winRate: number;
-  lossRate: number;
+  winRate: number; // 0 - 100
+  lossRate: number; // 0 - 100
   maxMultiplier: number;
   houseEdge: number;
-  status: string;
-  icon: string;
-  descriptionAr: string;
-  minBetCoins: number;
+  status: 'active' | 'maintenance' | 'disabled' | 'paused';
+  icon?: string;
+  descriptionAr?: string;
+  minBetCoins?: number;
   [key: string]: any;
 }
+
+export interface SingleGameOdds extends GameItemConfig {}
 
 export interface GameOddsConfig {
   globalWinRate: number;
@@ -644,113 +787,28 @@ export interface GameOddsConfig {
   requireAccountToPlay: boolean;
   jackpotEnabled: boolean;
   jackpotOdds: number;
-  games: SingleGameOdds[];
-  updatedAt?: string;
+  games: GameItemConfig[];
+  updatedAt?: any;
   [key: string]: any;
 }
 
-export interface SVGAFileExtended {
-  id?: string;
-  name?: string;
-  url?: string;
-  file?: File;
-  data?: any;
-  project?: any;
-  layers?: any[];
+export interface TableState {
+  id: string;
+  pot: number;
+  userBets: { chairA: number; chairB: number; chairC: number };
+  chairPots: { chairA: number; chairB: number; chairC: number };
+  currentWinnerIds?: string[];
   [key: string]: any;
 }
 
-// ================= Clan System Interfaces (نظام قبيلة المصممين) =================
-export type ClanRole = 'leader' | 'deputy' | 'master' | 'member';
-
-export interface ClanMember {
-  id: string;
-  userId: string;
-  userName: string;
-  userAvatar?: string;
-  userRole: UserRole;
-  clanRole: ClanRole;
-  joinedAt: string;
-  addedBy?: string;
-  status: 'active' | 'suspended';
-  title?: string;
-}
-
-export interface ClanJoinRequest {
-  id: string;
-  userId: string;
-  userName: string;
-  userEmail?: string;
-  userAvatar?: string;
-  userRole: UserRole;
-  whatsapp: string;
-  portfolioUrl?: string;
-  note: string;
-  status: 'pending' | 'approved' | 'rejected';
-  reviewedBy?: string;
-  reviewedAt?: string;
-  rejectionReason?: string;
-  createdAt: string;
-}
-
-export interface ClanSticker {
+export interface AuthUser {
   id: string;
   name: string;
-  url: string;
-  category: string;
-  createdBy?: string;
-  createdAt: string;
+  email?: string;
+  role?: string;
+  isVIP?: boolean;
+  coins?: number;
+  [key: string]: any;
 }
-
-export interface ClanMessageReader {
-  userId: string;
-  userName: string;
-  userAvatar?: string;
-  readAt: string;
-}
-
-export interface ClanMessage {
-  id: string;
-  senderId: string;
-  senderName: string;
-  senderAvatar?: string;
-  senderClanRole: ClanRole;
-  content: string;
-  type: 'text' | 'image' | 'audio' | 'sticker' | 'system';
-  audioDuration?: number;
-  mediaUrl?: string;
-  mediaStoragePath?: string;
-  mediaSize?: number;
-  createdAt: string;
-  readBy: ClanMessageReader[];
-}
-
-export interface ClanSettings {
-  id: string;
-  name: string;
-  description: string;
-  icon?: string;
-  bannerUrl?: string;
-  isOpenForRequests: boolean;
-  allowMemberImages: boolean;
-  allowMemberAudio?: boolean;
-  allowMemberStickers: boolean;
-  allowMemberMessages: boolean;
-  autoDeleteImagesDays: number;
-  maxImageSizeBytes: number;
-  updatedAt?: string;
-}
-
-export interface ClanAuditLog {
-  id: string;
-  action: string;
-  details: string;
-  adminId: string;
-  adminName: string;
-  timestamp: string;
-}
-
-
-
 
 

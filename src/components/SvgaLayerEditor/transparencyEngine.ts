@@ -1,8 +1,35 @@
+export type TransparencyTimelineMode = 
+  | 'full'              // كامل مدة الهدية (0% إلى 100%)
+  | 'from_point_to_end' // يبدأ من نقطة معينة حتى نهاية الفيديو/الهدية
+  | 'start_to_point'    // يبدأ من بداية الفيديو حتى نقطة معينة
+  | 'custom_range';     // جزء معين في المنتصف / نطاق مخصص [Start -> End]
+
+export interface TransparencyTimelineConfig {
+  enabled: boolean;
+  mode: TransparencyTimelineMode;
+  startFrame: number;
+  endFrame: number;
+  startTimeSec?: number;
+  endTimeSec?: number;
+  fadeInFrames?: number; // سلاسة التلاشي عند البداية (Ease In)
+  fadeOutFrames?: number; // سلاسة التلاشي عند النهاية (Ease Out)
+}
+
+export const DEFAULT_TRANSPARENCY_TIMELINE: TransparencyTimelineConfig = {
+  enabled: false,
+  mode: 'full',
+  startFrame: 0,
+  endFrame: 100,
+  fadeInFrames: 0,
+  fadeOutFrames: 0
+};
+
 export interface FadeConfig {
   top: number;
   bottom: number;
   left: number;
   right: number;
+  timeline?: TransparencyTimelineConfig;
 }
 
 export type CropShape = 
@@ -21,6 +48,7 @@ export interface CropConfig {
   right: number;
   shape?: CropShape;
   cornerRadius?: number;
+  timeline?: TransparencyTimelineConfig;
 }
 
 export interface CropFeather {
@@ -53,7 +81,46 @@ export const DEFAULT_CROP_FEATHER: CropFeather = {
   right: 0
 };
 
+/**
+ * Computes transparency timeline factor (0.0 = completely opaque/no transparency effect, 1.0 = full effect)
+ * according to project duration, current frame, start/end boundaries, and smooth fade ramps.
+ */
+export function getTransparencyTimeFactor(
+  frameIndex: number,
+  totalFrames: number,
+  timeline?: TransparencyTimelineConfig
+): number {
+  if (!timeline || !timeline.enabled || timeline.mode === 'full') {
+    return 1.0;
+  }
+
+  const tot = Math.max(1, totalFrames);
+  const startF = Math.max(0, Math.min(timeline.startFrame, tot - 1));
+  const endF = Math.max(startF, Math.min(timeline.endFrame, tot - 1));
+
+  if (frameIndex < startF || frameIndex > endF) {
+    return 0.0; // Outside the active window: 0% transparency (completely normal & opaque!)
+  }
+
+  let factor = 1.0;
+  const fadeIn = Math.max(0, timeline.fadeInFrames || 0);
+  const fadeOut = Math.max(0, timeline.fadeOutFrames || 0);
+
+  if (fadeIn > 0 && frameIndex < startF + fadeIn) {
+    factor *= Math.max(0, (frameIndex - startF) / fadeIn);
+  }
+
+  if (fadeOut > 0 && frameIndex > endF - fadeOut) {
+    factor *= Math.max(0, (endF - frameIndex) / fadeOut);
+  }
+
+  return Math.max(0, Math.min(1, factor));
+}
+
 export function isTransparencyActive(fade?: FadeConfig, crop?: CropConfig): boolean {
+  if (fade?.timeline?.enabled || crop?.timeline?.enabled) {
+    return true;
+  }
   if (fade && (fade.top > 0 || fade.bottom > 0 || fade.left > 0 || fade.right > 0)) {
     return true;
   }
@@ -61,6 +128,112 @@ export function isTransparencyActive(fade?: FadeConfig, crop?: CropConfig): bool
     return true;
   }
   return false;
+}
+
+export interface TimelineOpacityConfig {
+  enabled: boolean;
+  startFrame?: number;
+  endFrame?: number;
+  fadeInFrames?: number;
+  fadeOutFrames?: number;
+  opacity?: number;
+}
+
+export const DEFAULT_TIMELINE_OPACITY_CONFIG: TimelineOpacityConfig = {
+  enabled: false,
+  startFrame: 0,
+  endFrame: 100,
+  fadeInFrames: 0,
+  fadeOutFrames: 0,
+  opacity: 1
+};
+
+export function getTimelineAlphaMultiplier(
+  timeline?: TransparencyTimelineConfig | TimelineOpacityConfig,
+  currentFrame: number = 0,
+  totalFrames: number = 30
+): number {
+  if (!timeline || !timeline.enabled) return 1.0;
+  return getTransparencyTimeFactor(currentFrame, totalFrames, timeline as TransparencyTimelineConfig);
+}
+
+/**
+ * Returns dynamic CSS properties for real-time visual edge fade, shape crop, and feather
+ * allowing MP4 videos and SVGA canvas elements to reflect transparency changes in 60fps immediately.
+ */
+export function getCombinedCssMaskStyle(
+  fadeConfig?: FadeConfig,
+  cropConfig?: CropConfig,
+  cropFeather?: CropFeather,
+  currentFrame?: number,
+  totalFrames?: number
+): React.CSSProperties {
+  const f = fadeConfig || DEFAULT_FADE_CONFIG;
+  const c = cropConfig || DEFAULT_CROP_CONFIG;
+  const feather = cropFeather || DEFAULT_CROP_FEATHER;
+
+  const timeline = f.timeline?.enabled ? f.timeline : (c.timeline?.enabled ? c.timeline : undefined);
+  if (timeline && currentFrame !== undefined && totalFrames !== undefined) {
+    const factor = getTransparencyTimeFactor(currentFrame, totalFrames, timeline);
+    if (factor <= 0.001) {
+      // Outside active transparency duration: return empty style so video/canvas appears 100% natural and unmasked!
+      return {};
+    }
+  }
+
+  const hasFade = (f.top > 0 || f.bottom > 0 || f.left > 0 || f.right > 0);
+  const hasCrop = (c.top > 0 || c.bottom > 0 || c.left > 0 || c.right > 0 || (c.shape && c.shape !== 'rect'));
+  const hasFeather = (feather.top > 0 || feather.bottom > 0 || feather.left > 0 || feather.right > 0);
+
+  if (!hasFade && !hasCrop && !hasFeather) {
+    return {};
+  }
+
+  const shape = c.shape || 'rect';
+  const cornerRadius = c.cornerRadius ?? 25;
+
+  // 1. Build Vertical Gradient
+  const topFadeEnd = Math.min(100, Math.max(c.top, c.top + f.top + feather.top));
+  const bottomFadeStart = Math.max(0, Math.min(100 - c.bottom, 100 - (c.bottom + f.bottom + feather.bottom)));
+  const vGrad = `linear-gradient(to bottom, transparent 0%, transparent ${c.top}%, black ${topFadeEnd}%, black ${bottomFadeStart}%, transparent ${100 - c.bottom}%, transparent 100%)`;
+
+  // 2. Build Horizontal Gradient
+  const leftFadeEnd = Math.min(100, Math.max(c.left, c.left + f.left + feather.left));
+  const rightFadeStart = Math.max(0, Math.min(100 - c.right, 100 - (c.right + f.right + feather.right)));
+  const hGrad = `linear-gradient(to right, transparent 0%, transparent ${c.left}%, black ${leftFadeEnd}%, black ${rightFadeStart}%, transparent ${100 - c.right}%, transparent 100%)`;
+
+  let maskImage = `${vGrad}, ${hGrad}`;
+  let clipPath: string | undefined = undefined;
+  let borderRadius: string | undefined = undefined;
+
+  if (shape === 'circle') {
+    clipPath = 'circle(50% at 50% 50%)';
+  } else if (shape === 'ellipse') {
+    const rx = Math.max(5, 50 - Math.max(c.left, c.right));
+    const ry = Math.max(5, 50 - Math.max(c.top, c.bottom));
+    clipPath = `ellipse(${rx}% ${ry}% at 50% 50%)`;
+  } else if (shape === 'capsule') {
+    borderRadius = '9999px';
+    if (!hasFade && !hasFeather) {
+      clipPath = `inset(${c.top}% ${c.right}% ${c.bottom}% ${c.left}% round 9999px)`;
+    }
+  } else if (shape === 'rounded-rect' || (shape === 'rect' && cornerRadius > 0)) {
+    borderRadius = `${cornerRadius}px`;
+    if (!hasFade && !hasFeather && (c.top > 0 || c.bottom > 0 || c.left > 0 || c.right > 0)) {
+      clipPath = `inset(${c.top}% ${c.right}% ${c.bottom}% ${c.left}% round ${cornerRadius}px)`;
+    }
+  } else if (shape === 'rect' && !hasFade && !hasFeather && (c.top > 0 || c.bottom > 0 || c.left > 0 || c.right > 0)) {
+    clipPath = `inset(${c.top}% ${c.right}% ${c.bottom}% ${c.left}%)`;
+  }
+
+  return {
+    WebkitMaskImage: maskImage,
+    maskImage: maskImage,
+    WebkitMaskComposite: 'source-in, destination-in' as any,
+    maskComposite: 'intersect' as any,
+    clipPath,
+    borderRadius
+  };
 }
 
 function base64ToUint8(dataUrl: string): Uint8Array {
@@ -203,26 +376,62 @@ export function applyTransparencyEffects(
   height: number,
   fadeConfig: FadeConfig,
   cropConfig: CropConfig,
-  cropFeather: CropFeather
+  cropFeather: CropFeather,
+  currentFrame?: number,
+  totalFrames?: number
 ) {
-  const shape = cropConfig.shape || 'rect';
-  const hasCrop = (cropConfig.top > 0 || cropConfig.bottom > 0 || cropConfig.left > 0 || cropConfig.right > 0 || shape !== 'rect');
-  const hasFade = (fadeConfig.top > 0 || fadeConfig.bottom > 0 || fadeConfig.left > 0 || fadeConfig.right > 0);
+  const timeline = fadeConfig.timeline?.enabled ? fadeConfig.timeline : (cropConfig.timeline?.enabled ? cropConfig.timeline : undefined);
+  let effectiveFade = fadeConfig;
+  let effectiveCrop = cropConfig;
+  let effectiveFeather = cropFeather;
+
+  if (timeline && currentFrame !== undefined && totalFrames !== undefined) {
+    const factor = getTransparencyTimeFactor(currentFrame, totalFrames, timeline);
+    if (factor <= 0.001) {
+      return; // Outside active transparency timeframe: frame remains 100% natural and opaque!
+    }
+    if (factor < 0.999) {
+      effectiveFade = {
+        top: Math.round(fadeConfig.top * factor),
+        bottom: Math.round(fadeConfig.bottom * factor),
+        left: Math.round(fadeConfig.left * factor),
+        right: Math.round(fadeConfig.right * factor),
+        timeline: fadeConfig.timeline
+      };
+      effectiveCrop = {
+        ...cropConfig,
+        top: Math.round(cropConfig.top * factor),
+        bottom: Math.round(cropConfig.bottom * factor),
+        left: Math.round(cropConfig.left * factor),
+        right: Math.round(cropConfig.right * factor),
+      };
+      effectiveFeather = {
+        top: Math.round(cropFeather.top * factor),
+        bottom: Math.round(cropFeather.bottom * factor),
+        left: Math.round(cropFeather.left * factor),
+        right: Math.round(cropFeather.right * factor),
+      };
+    }
+  }
+
+  const shape = effectiveCrop.shape || 'rect';
+  const hasCrop = (effectiveCrop.top > 0 || effectiveCrop.bottom > 0 || effectiveCrop.left > 0 || effectiveCrop.right > 0 || shape !== 'rect');
+  const hasFade = (effectiveFade.top > 0 || effectiveFade.bottom > 0 || effectiveFade.left > 0 || effectiveFade.right > 0);
   
   if (!hasFade && !hasCrop) return;
 
   const imageData = ctx.getImageData(0, 0, width, height);
   const data = imageData.data;
 
-  const fadeTopLimit = (height * fadeConfig.top) / 100;
-  const fadeBottomLimit = height - (height * fadeConfig.bottom) / 100;
-  const fadeLeftLimit = (width * fadeConfig.left) / 100;
-  const fadeRightLimit = width - (width * fadeConfig.right) / 100;
+  const fadeTopLimit = (height * effectiveFade.top) / 100;
+  const fadeBottomLimit = height - (height * effectiveFade.bottom) / 100;
+  const fadeLeftLimit = (width * effectiveFade.left) / 100;
+  const fadeRightLimit = width - (width * effectiveFade.right) / 100;
 
-  const cropTopLimit = (height * cropConfig.top) / 100;
-  const cropBottomLimit = height - (height * cropConfig.bottom) / 100;
-  const cropLeftLimit = (width * cropConfig.left) / 100;
-  const cropRightLimit = width - (width * cropConfig.right) / 100;
+  const cropTopLimit = (height * effectiveCrop.top) / 100;
+  const cropBottomLimit = height - (height * effectiveCrop.bottom) / 100;
+  const cropLeftLimit = (width * effectiveCrop.left) / 100;
+  const cropRightLimit = width - (width * effectiveCrop.right) / 100;
 
   for (let i = 0; i < data.length; i += 4) {
     const x = (i / 4) % width;
@@ -415,12 +624,3 @@ export async function applyTransparencyToImage(
     img.src = src;
   });
 }
-
-export function getCombinedCssMaskStyle(
-  fadeConfig?: FadeConfig,
-  cropConfig?: CropConfig,
-  cropFeather?: CropFeather
-): React.CSSProperties {
-  return {};
-}
-

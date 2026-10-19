@@ -16,7 +16,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
   isOpen,
   onClose,
   lang,
-  cartItems = [],
+  cartItems,
   onRemoveItem,
   onCheckoutAll
 }) => {
@@ -24,8 +24,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
 
   if (!isOpen) return null;
 
-  const safeCart = Array.isArray(cartItems) ? cartItems : [];
-  const totalPrice = safeCart.reduce((acc, item) => acc + (item?.price || 0), 0);
+  const totalPrice = cartItems.reduce((acc, item) => acc + item.price, 0);
 
   return (
     <div className="fixed inset-0 z-50 overflow-hidden bg-black/75 backdrop-blur-sm">
@@ -38,7 +37,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
             <div className="flex items-center gap-2">
               <ShoppingBag className="w-5 h-5 text-cyan-400" />
               <h2 className="text-base font-bold text-white">
-                {t.cart} ({safeCart.length})
+                {t.cart} ({cartItems.length})
               </h2>
             </div>
 
@@ -52,28 +51,22 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
 
           {/* Cart Items List */}
           <div className="flex-1 overflow-y-auto p-4 space-y-3">
-            {safeCart.length === 0 ? (
+            {cartItems.length === 0 ? (
               <div className="py-20 text-center text-slate-500 space-y-3">
                 <ShoppingBag className="w-12 h-12 mx-auto opacity-30" />
                 <p className="text-xs">{lang === 'ar' ? 'سلة المشتريات فارغة حالياً' : '购物车还是空的，去挑选心仪的动效吧'}</p>
               </div>
             ) : (
-              safeCart.map((item, index) => (
+              cartItems.map((item, index) => (
                 <div
                   key={index}
                   className="flex items-center gap-3 p-3 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 transition-colors"
                 >
-                  {item.gift.posterUrl ? (
-                    <img
-                      src={item.gift.posterUrl}
-                      alt={item.gift.title}
-                      className="w-14 h-14 rounded-lg object-cover border border-slate-700 shrink-0"
-                    />
-                  ) : (
-                    <div className="w-14 h-14 rounded-lg bg-black border border-cyan-500/40 shrink-0 overflow-hidden relative flex items-center justify-center">
-                      <video src={item.gift.videoUrl ? `${item.gift.videoUrl}#t=0.001` : undefined} muted playsInline className="w-full h-full object-cover" />
-                    </div>
-                  )}
+                  <img
+                    src={item.gift.posterUrl}
+                    alt={item.gift.title}
+                    className="w-14 h-14 rounded-lg object-cover border border-slate-700 shrink-0"
+                  />
                   <div className="flex-1 min-w-0">
                     <h4 className="text-xs font-bold text-white truncate">
                       {item.gift.title}
@@ -102,7 +95,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
           </div>
 
           {/* Drawer Footer */}
-          {safeCart.length > 0 && (
+          {cartItems.length > 0 && (
             <div className="p-4 sm:p-5 border-t border-slate-800 bg-slate-900/90 space-y-3">
               <div className="flex items-center justify-between text-xs text-slate-400">
                 <span>{lang === 'ar' ? 'المجموع الإجمالي:' : '总计金额:'}</span>

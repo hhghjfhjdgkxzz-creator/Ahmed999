@@ -55,24 +55,34 @@ export async function loadUniversalProject(
     }
   }
 
-  // 2. Video / VAP / MOV / WebM / YYEVA
-  if (
+  // 2. Video / VAP / MOV / WebM / YYEVA / AVI / MKV / FLV
+  const isVideoFormat = 
     fileExt === 'mp4' || 
     fileExt === 'mov' || 
     fileExt === 'webm' || 
     fileExt === 'vap' || 
-    file.type.startsWith('video/')
-  ) {
-    onProgress?.('جاري استدعاء وتشغيل الفيديو بألوانه الطبيعية الكاملة وبأعلى دقة...', 25);
+    fileExt === 'avi' || 
+    fileExt === 'mkv' || 
+    fileExt === 'flv' || 
+    fileExt === 'wmv' || 
+    fileExt === 'm4v' || 
+    fileExt === '3gp' || 
+    fileExt === 'ts' || 
+    file.type.startsWith('video/') ||
+    file.type === 'video/x-msvideo' ||
+    file.type === 'video/avi';
+
+  if (isVideoFormat) {
+    onProgress?.('جاري استدعاء وتشغيل وتحويل فيديو AVI / MP4 وقنوات الشفافية بالكامل وبأعلى دقة...', 25);
     const fastRes = await createFastMp4Project(file, {
-      quality: 'fast',
+      quality: 'high',
       onProgress: (phase, percent) => onProgress?.(phase, percent)
     });
     return {
       project: fastRes.project,
       layers: fastRes.layers,
-      videoUrl: (fastRes as any).videoUrl || URL.createObjectURL(file),
-      videoFile: file,
+      videoUrl: fastRes.videoUrl,
+      videoFile: fastRes.videoFile || file,
       fileType: 'mp4'
     };
   }
@@ -127,7 +137,7 @@ export async function loadUniversalProject(
       // SVGA 1.0 JSON Spec
       if (parsed && (parsed.movie || parsed.sprites || parsed.viewBox || (parsed.width && parsed.frames))) {
         onProgress?.('جاري قراءة ملف SVGA 1.0 JSON...', 30);
-        const res = parseSvga1JsonToProject(parsed, file.name);
+        const res = parseSvga1JsonToProject(parsed, {}, file.name, file.size);
         return {
           project: res.project,
           layers: res.layers,
@@ -181,12 +191,7 @@ export async function loadUniversalProject(
 
   // 8. Static / Animated Image Fallback (GIF, WebP, PNG, JPG, SVG)
   onProgress?.('جاري إنشاء مشروع SVGA من ملف الصورة...', 50);
-  const dataUrl = await new Promise<string>((resolve) => {
-    const r = new FileReader();
-    r.onload = () => resolve(r.result as string);
-    r.readAsDataURL(file);
-  });
-  const conv = convertImageToSvgaProject(dataUrl, file.name);
+  const conv = await convertImageToSvgaProject(file);
   return {
     project: conv.project,
     layers: conv.layers,
@@ -264,15 +269,16 @@ async function renderLottieViaCanvas(
   if (!ctx) throw new Error('Could not get canvas 2d context');
 
   // Load Lottie with attached canvas context
-  const anim = (lottie as any).loadAnimation({
-    renderer: 'canvas',
+  const anim = (lottie.loadAnimation as any)({
+    container: canvas,
+    renderer: 'canvas' as any,
     loop: false,
     autoplay: false,
     animationData: lottieData,
     rendererSettings: {
       context: ctx,
       clearCanvas: true
-    }
+    } as any
   });
 
   await new Promise<void>((resolve) => {

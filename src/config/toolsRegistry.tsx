@@ -14,7 +14,7 @@ export interface ToolRegistryItem {
   icon: React.ReactNode;
   category: ToolCategory;
   categoryNameAr: string;
-  actionKey: string;
+  actionKey: keyof HeaderProps;
   dashboardActionKey: string;
   featureAccessKey: string;
   descAr: string;
@@ -86,6 +86,53 @@ export const CATEGORIES_CONFIG: Record<ToolCategory, CategoryInfo> = {
 
 export const TOOLS_REGISTRY: ToolRegistryItem[] = [
   {
+    id: 'smart-mp4-studio',
+    label: 'Smart MP4 Studio — AI + SVGA (استوديو فصل الفيديو الذكي)',
+    shortLabel: 'Smart MP4 Studio',
+    icon: <Sparkles className="w-4 h-4 text-emerald-400" />,
+    category: 'svga',
+    categoryNameAr: 'أنيميشن و SVGA',
+    actionKey: 'onSmartMp4StudioOpen',
+    dashboardActionKey: 'smartMp4Studio',
+    featureAccessKey: 'smartMp4Studio',
+    descAr: 'منظومة احترافية متكاملة لتحويل فيديوهات MP4 إلى عناصر منفصلة بالذكاء الاصطناعي ويدوياً، وإزالة الكروما الخضراء بدون هالة، وتصدير العناصر إلى SVGA 2.0 مع الضغط الذكي.',
+    descEn: 'Smart MP4 Studio — AI + SVGA: Multi-character/gift AI & manual video segmentation, professional chroma removal, and compressed SVGA 2.0 export.',
+    highlight: true,
+    pinnedTop: true
+  },
+  {
+    id: 'apk-extractor',
+    label: 'مُستخرِج أصول التطبيقات ومشاريع السيارات (APK Extractor)',
+    shortLabel: 'مستخرج APK',
+    icon: <Box className="w-4 h-4 text-emerald-400" />,
+    category: 'batch',
+    categoryNameAr: 'المعالجة الجماعية (Batch)',
+    actionKey: 'onApkExtractorOpen',
+    dashboardActionKey: 'apkExtractor',
+    featureAccessKey: 'apkExtractor',
+    descAr: 'استخراج وتفكيك كامل للأصول والصور وSVG والفيكتور والأنيميشن وتصميمات السيارات من حزم APK وAPKS وXAPK وAAB وZIP ومختبر SVGA 2.0 محلياً بلا سيرفر.',
+    descEn: 'Full in-browser extraction for APK, APKS, XAPK, AAB & ZIP assets: Images, SVG, SVGA 2.0, Car Importer & Inspector.',
+    highlight: true,
+    pinnedTop: true
+  },
+  {
+    id: 'after-effects-studio',
+    label: 'استوديو After Effects الاحترافي (أفتر افكت)',
+    shortLabel: 'After Effects',
+    icon: <Film className="w-4 h-4 text-red-500 fill-red-500/20" />,
+    category: 'svga',
+    categoryNameAr: 'أنيميشن و SVGA',
+    actionKey: 'onAfterEffectsStudioOpen',
+    dashboardActionKey: 'afterEffectsStudio',
+    featureAccessKey: 'afterEffectsStudio',
+    descAr: 'استوديو تحريك وتصميم كامل بنظام Adobe After Effects: كومبوزيشن احترافي، تايم لاين بمفاتيح حركة (Keyframes)، وأقنعة Alpha Matte، وتصدير SVGA وAPNG وGIF وسكربتات JSX.',
+    descEn: 'Full-featured Adobe After Effects Animation Studio: Timeline, Keyframing, Alpha Matte, and Multi-format Export.',
+    highlight: true,
+    isVip: true,
+    vipBadge: 'PRO 🎬',
+    pinnedTop: true
+  },
+  {
     id: 'video-duration-speed',
     label: 'التحكم في سرعة ومدة الفيديو',
     shortLabel: 'سرعة الفيديو VIP',
@@ -104,14 +151,15 @@ export const TOOLS_REGISTRY: ToolRegistryItem[] = [
   },
   {
     id: 'svga-layer-editor',
-    label: 'تحرير طبقات SVGA',
+    label: 'استدعاء ومحرر الطبقات',
+    shortLabel: 'استدعاء الطبقات',
     icon: <Layers className="w-4 h-4 text-amber-400" />,
     category: 'svga',
     categoryNameAr: 'أنيميشن و SVGA',
     actionKey: 'onSvgaLayerEditorOpen',
     dashboardActionKey: 'svgaLayerEditor',
     featureAccessKey: 'svgaLayerEditor',
-    descAr: 'محرر طبقات SVGA الملكي الحصري (VIP) للتحكم بالماوس في الكانفاس، وتغيير الحجم والتدوير والموضع والترتيب مع الحفاظ التام على الحركة والأصوات.',
+    descAr: 'استدعاء ومحرر طبقات SVGA الملكي الحصري (VIP) للتحكم بالماوس في الكانفاس، وتغيير الحجم والتدوير والموضع والترتيب مع الحفاظ التام على الحركة والأصوات.',
     descEn: 'Exclusive VIP SVGA Layer Editor with interactive mouse canvas manipulation, resize, rotation and audio preservation.',
     highlight: true,
     isVip: true,
@@ -143,6 +191,19 @@ export const TOOLS_REGISTRY: ToolRegistryItem[] = [
     featureAccessKey: 'svgaBatchCompressor',
     descAr: 'منظومة متقدمة لضغط دفعات ضخمة من ملفات SVGA و VAP مع الحفاظ التام على الصوت المدمج والشفافية وجودة الحركة.',
     descEn: 'Professional advanced batch engine to compress large batches of SVGA & VAP files preserving audio, animation quality and alpha.',
+    highlight: true
+  },
+  {
+    id: 'batch-svga-converter',
+    label: 'Batch SVGA Converter (MP4/VAP/YYEVA)',
+    icon: <Video className="w-4 h-4 text-pink-400" />,
+    category: 'svga',
+    categoryNameAr: 'أنيميشن و SVGA',
+    actionKey: 'onBatchSvgaConverterOpen' as any,
+    dashboardActionKey: 'batchSvgaConverter',
+    featureAccessKey: 'batchSvgaConverter',
+    descAr: 'محول دفعات SVGA الجماعي الفائق: تحويل مئات الملفات إلى فيديوهات MP4 أو VAP أو YYEVA شفافة بسرعة فائقة وبضغطة واحدة مع المحافظة على الصوت.',
+    descEn: 'High-speed batch SVGA to video converter: Convert hundreds of files to Standard MP4, Tencent VAP, or YYEVA transparent videos in one click with audio preservation.',
     highlight: true
   },
   {
@@ -185,6 +246,21 @@ export const TOOLS_REGISTRY: ToolRegistryItem[] = [
   },
 
   // --- معالجة الصور والذكاء الاصطناعي ---
+  {
+    id: 'image-collage-studio',
+    label: 'تجميع وترتيب الصور والعلامة المائية',
+    shortLabel: 'تجميع الصور وحمايتها',
+    icon: <LayoutGrid className="w-4 h-4 text-cyan-400" />,
+    category: 'image',
+    categoryNameAr: 'معالجة الصور والذكاء الاصطناعي',
+    actionKey: 'onImageCollageStudioOpen' as any,
+    dashboardActionKey: 'imageCollageStudio',
+    featureAccessKey: 'imageCollageStudio',
+    descAr: 'رفع وترتيب وتجميع عشرات الصور في شبكة أو كتالوج (Grid/Sprite Sheet) بأشكال وقوالب متعددة مع حمايتها بنمط علامة مائية ذكي وتصديرها بصورة واحدة فائقة الجودة.',
+    descEn: 'Bulk image collage, catalog grid assembler & watermark pattern studio with ultra-high resolution export.',
+    highlight: true,
+    pinnedTop: true
+  },
   {
     id: 'ai-video-matting',
     label: 'AI Video Matting Studio',
