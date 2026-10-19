@@ -13,17 +13,11 @@ service cloud.firestore {
     function isAdmin() {
       return isAuthenticated() && (
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin') ||
-        (request.auth.token.email != null && (
-          request.auth.token.email.lower() == "ceo@design-svga.com" ||
-          request.auth.token.email.lower() == "master@design-svga.com" ||
-          request.auth.token.email.lower() == "admin.pro@design-svga.com" ||
-          request.auth.token.email.lower() == "sdsdfdfddsfdd@gmail.com" ||
-          request.auth.token.email.lower() == "admin@streamgifts.com" ||
-          request.auth.token.email.lower() == "aegy238@gmail.com" ||
-          request.auth.token.email.lower() == "uhbijnokmpl098900@gmail.com" ||
-          request.auth.token.email.lower() == "iejehdgdig@gmail.com"
-        ))
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.email == "sdsdfdfddsfdd@gmail.com") ||
+        (request.auth.token.email != null && 
+         request.auth.token.email.lower() == "sdsdfdfddsfdd@gmail.com"
+        )
       );
     }
 

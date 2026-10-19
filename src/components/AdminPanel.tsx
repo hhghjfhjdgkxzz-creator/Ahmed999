@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { UserRecord, UserRole, AppSettings, LicenseKey, PresetBackground, SubscriptionType, ActivityLog } from '../types';
+import { isEmailSuperAdmin } from '../contexts/AuthContext';
 import { db, storage } from '../lib/firebase';
 import { collection, getDocs, doc, updateDoc, addDoc, deleteDoc, query, orderBy, Timestamp, setDoc, getDoc, limit, onSnapshot } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
@@ -228,7 +229,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, onCancel, o
 
   const isSuperAdmin = (user: UserRecord) => {
     const email = (user.email || '').toLowerCase().trim();
-    return user.isSuperAdmin || email === 'ceo@design-svga.com' || email === 'master@design-svga.com' || email === 'sdsdfdfddsfdd@gmail.com' || email === 'admin@streamgifts.com' || email === 'aegy238@gmail.com' || email === 'uhbijnokmpl098900@gmail.com' || email === 'iejehdgdig@gmail.com' || user.role === 'admin';
+    return isEmailSuperAdmin(email);
   };
 
   const CACHE_DURATION = 30000; // 30 seconds
@@ -922,16 +923,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, onCancel, o
   };
 
   // 🟢 User Outage Exemption Management
-  const isAccountAdmin = (u: UserRecord) =>
-    u.isSuperAdmin === true ||
-    u.role === 'admin' ||
-    u.email?.toLowerCase() === 'ceo@design-svga.com' ||
-    u.email?.toLowerCase() === 'master@design-svga.com' ||
-    u.email?.toLowerCase() === 'sdsdfdfddsfdd@gmail.com' ||
-    u.email?.toLowerCase() === 'admin@streamgifts.com' ||
-    u.email?.toLowerCase() === 'uhbijnokmpl098900@gmail.com' ||
-    u.email?.toLowerCase() === 'aegy238@gmail.com' ||
-    u.email?.toLowerCase() === 'iejehdgdig@gmail.com';
+  const isAccountAdmin = (u: UserRecord) => isEmailSuperAdmin(u.email);
 
   const handleToggleUserOutageExemption = async (targetUser: UserRecord) => {
     const isCurrentlyAllowed = outageAllowedUserIds.includes(targetUser.id);
@@ -2427,8 +2419,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, onCancel, o
                         <label className="block text-sm font-medium text-slate-400 mb-2">تكلفة معالجة SVGA</label>
                         <input 
                           type="number" 
-                          value={settings.costs.svgaProcess} 
-                          onChange={e => setSettings({ ...settings, costs: { ...settings.costs, svgaProcess: Number(e.target.value) } })}
+                          value={settings?.costs?.svgaProcess ?? 5} 
+                          onChange={e => {
+                            const currentCosts = settings?.costs || { svgaProcess: 5, batchCompress: 5, vipPrice: 15 };
+                            setSettings({
+                              ...settings,
+                              costs: {
+                                ...currentCosts,
+                                svgaProcess: Number(e.target.value)
+                              }
+                            });
+                          }}
                           className="w-full bg-slate-950/50 border border-white/10 rounded-lg px-4 py-3 focus:outline-none focus:border-indigo-500/50 transition-colors"
                         />
                       </div>
@@ -2436,8 +2437,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, onCancel, o
                         <label className="block text-sm font-medium text-slate-400 mb-2">تكلفة الضغط المجمع</label>
                         <input 
                           type="number" 
-                          value={settings.costs.batchCompress} 
-                          onChange={e => setSettings({ ...settings, costs: { ...settings.costs, batchCompress: Number(e.target.value) } })}
+                          value={settings?.costs?.batchCompress ?? 5} 
+                          onChange={e => {
+                            const currentCosts = settings?.costs || { svgaProcess: 5, batchCompress: 5, vipPrice: 15 };
+                            setSettings({
+                              ...settings,
+                              costs: {
+                                ...currentCosts,
+                                batchCompress: Number(e.target.value)
+                              }
+                            });
+                          }}
                           className="w-full bg-slate-950/50 border border-white/10 rounded-lg px-4 py-3 focus:outline-none focus:border-indigo-500/50 transition-colors"
                         />
                       </div>
@@ -2450,8 +2460,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, onCancel, o
                           type="number" 
                           min="0"
                           step="1"
-                          value={settings.costs?.vipPrice ?? 15} 
-                          onChange={e => setSettings({ ...settings, costs: { ...settings.costs, vipPrice: Number(e.target.value) } })}
+                          value={settings?.costs?.vipPrice ?? 15} 
+                          onChange={e => {
+                            const currentCosts = settings?.costs || { svgaProcess: 5, batchCompress: 5, vipPrice: 15 };
+                            setSettings({
+                              ...settings,
+                              costs: {
+                                ...currentCosts,
+                                vipPrice: Number(e.target.value)
+                              }
+                            });
+                          }}
                           className="w-full bg-slate-950/80 border border-amber-400/50 rounded-lg px-3 py-2 focus:outline-none focus:border-amber-400 text-amber-300 font-bold font-mono transition-colors"
                           placeholder="15"
                         />

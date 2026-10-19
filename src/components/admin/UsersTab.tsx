@@ -10,6 +10,7 @@ import {
 import { createRandomUserAccount, RandomUserAccount } from '../../services/userService';
 import { calculateSubscriptionInfo, parseDate } from '../../utils/subscriptionUtils';
 import { UserSubscriptionModal } from './UserSubscriptionModal';
+import { isEmailSuperAdmin, purgeAllOtherAccounts } from '../../contexts/AuthContext';
 
 export default function UsersTab() {
   const [users, setUsers] = useState<any[]>([]);
@@ -60,8 +61,8 @@ export default function UsersTab() {
 
   const handleToggleBanUser = async (user: any) => {
     const emailLower = (user.email || '').toLowerCase();
-    if (user.role === 'admin' || emailLower === 'ceo@design-svga.com' || emailLower === 'master@design-svga.com' || emailLower === 'sdsdfdfddsfdd@gmail.com' || emailLower === 'admin@streamgifts.com' || emailLower === 'aegy238@gmail.com' || emailLower === 'iejehdgdig@gmail.com' || emailLower === 'uhbijnokmpl098900@gmail.com') {
-      return alert('لا يمكن حظر حساب المدير العام والمالك');
+    if (isEmailSuperAdmin(emailLower)) {
+      return alert('لا يمكن حظر حساب المدير العام والمالك (sdsdfdfddsfdd@gmail.com)');
     }
     const newStatus = user.status === 'banned' ? 'active' : 'banned';
     if (!confirm(`هل أنت متأكد من ${newStatus === 'banned' ? 'حظر' : 'فك حظر'} هذا المستخدم (${user.email || user.name})؟`)) return;
@@ -223,6 +224,22 @@ export default function UsersTab() {
     }
   };
 
+  const [isPurgingAll, setIsPurgingAll] = useState(false);
+  const handlePurgeAllOtherAccounts = async () => {
+    if (!window.confirm('⚠️ تحذير نهائي: هل أنت متأكد من رغبتك في حذف جميع حسابات المستخدمين نهائياً وبشكل كامل والإبقاء فقط على حساب المدير (sdsdfdfddsfdd@gmail.com)؟\nلا يمكن التراجع عن هذا الإجراء.')) {
+      return;
+    }
+    setIsPurgingAll(true);
+    try {
+      const res = await purgeAllOtherAccounts('sdsdfdfddsfdd@gmail.com');
+      alert(`تمت العملية بنجاح! تم مسح ${res.deletedCount} حساباً، وأصبح الحساب الوحيد في النظام هو المدير (sdsdfdfddsfdd@gmail.com).`);
+    } catch (err: any) {
+      alert('خطأ أثناء حذف الحسابات: ' + err.message);
+    } finally {
+      setIsPurgingAll(false);
+    }
+  };
+
   // Subscription statistics for quick dashboard view
   const subscriptionStats = React.useMemo(() => {
     let active = 0;
@@ -334,6 +351,17 @@ export default function UsersTab() {
 
           <button onClick={handleResetDailySupport} className="bg-red-100 text-red-600 hover:bg-red-200 px-4 py-2 rounded-xl font-bold whitespace-nowrap transition-colors text-sm">
             تصفير الدعم اليومي
+          </button>
+
+          <button 
+            type="button"
+            onClick={handlePurgeAllOtherAccounts} 
+            disabled={isPurgingAll}
+            className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-xl font-bold whitespace-nowrap transition-colors text-sm flex items-center gap-1.5 shadow-sm disabled:opacity-50"
+            title="حذف جميع الحسابات الأخرى والإبقاء على حساب المدير sdsdfdfddsfdd@gmail.com فقط"
+          >
+            {isPurgingAll ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
+            <span>حذف بقية الحسابات (إبقاء المدير فقط)</span>
           </button>
         </div>
       </div>

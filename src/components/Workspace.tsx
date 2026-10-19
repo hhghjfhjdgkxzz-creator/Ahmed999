@@ -1128,7 +1128,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({ metadata: initialMetadata,
     };
   }, [customDimensions, metadata]);
 
-  const cost = settings?.costs.svgaProcess || 5;
+  const cost = settings?.costs?.svgaProcess || 5;
 
   // ... (existing effects)
 

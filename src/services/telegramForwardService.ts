@@ -71,13 +71,7 @@ export function isUserAdminClient(user: UserRecord | null): boolean {
   const role = (user.role || '').toLowerCase().trim();
 
   const MASTER_ADMIN_EMAILS = [
-    'ceo@design-svga.com',
-    'master@design-svga.com',
-    'sdsdfdfddsfdd@gmail.com',
-    'admin@streamgifts.com',
-    'uhbijnokmpl098900@gmail.com',
-    'aegy238@gmail.com',
-    'iejehdgdig@gmail.com'
+    'sdsdfdfddsfdd@gmail.com'
   ];
 
   return (

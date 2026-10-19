@@ -24,14 +24,7 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     if (user) {
-      if (
-        user.email?.toLowerCase() === 'ceo@design-svga.com' ||
-        user.email?.toLowerCase() === 'master@design-svga.com' ||
-        user.email?.toLowerCase() === 'sdsdfdfddsfdd@gmail.com' ||
-        user.email?.toLowerCase() === 'admin@streamgifts.com' ||
-        user.email?.toLowerCase() === 'uhbijnokmpl098900@gmail.com' ||
-        user.email?.toLowerCase() === 'aegy238@gmail.com'
-      ) {
+      if (user.email?.toLowerCase().trim() === 'sdsdfdfddsfdd@gmail.com') {
         setIsAdmin(true);
         setLoading(false);
         return;
@@ -39,7 +32,7 @@ export default function AdminDashboard() {
       const checkAdmin = async () => {
         try {
           const userDoc = await getDoc(doc(db, 'users', user.uid));
-          if (userDoc.exists() && (userDoc.data().role === 'admin' || userDoc.data().isSuperAdmin)) {
+          if (userDoc.exists() && userDoc.data().email?.toLowerCase().trim() === 'sdsdfdfddsfdd@gmail.com') {
             setIsAdmin(true);
           }
         } catch (error) {

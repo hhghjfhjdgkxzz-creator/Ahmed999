@@ -105,7 +105,7 @@ import { SubscriptionModal } from './components/SubscriptionModal';
 import { VideoDurationSpeedModal } from './components/VideoDurationSpeedModal';
 import { VipSubscriptionModal } from './components/VipSubscriptionModal';
 import { ScreenProtectionOverlay } from './components/ScreenProtectionOverlay';
-import { useAuth } from './contexts/AuthContext';
+import { useAuth, isEmailSuperAdmin } from './contexts/AuthContext';
 import { AppState, FileMetadata, AppSettings, UserRecord } from './types';
 import { useAccessControl } from './hooks/useAccessControl';
 import { doc, getDoc, onSnapshot, updateDoc, setDoc } from 'firebase/firestore';
@@ -208,6 +208,13 @@ const App: React.FC = () => {
   useEffect(() => {
     setVideoBgError(false);
   }, [settings?.backgroundUrl]);
+
+  // Auto-close auth modal as soon as user logs in (e.g. via Google or Email)
+  useEffect(() => {
+    if (currentUser) {
+      setShowAuthModal(false);
+    }
+  }, [currentUser]);
 
   const handleOpenEmbeddedPortal = useCallback((tabId: 'first' | 'second' | string = 'first') => {
     setEmbeddedPortalTab(tabId);
@@ -473,8 +480,8 @@ const App: React.FC = () => {
     localStorage.setItem('hasSeenOnboarding', 'true');
   };
 
-  const isSuperAdmin = currentUser?.email?.toLowerCase() === 'ceo@design-svga.com' || currentUser?.email?.toLowerCase() === 'master@design-svga.com' || currentUser?.email?.toLowerCase() === 'sdsdfdfddsfdd@gmail.com' || currentUser?.email?.toLowerCase() === 'admin@streamgifts.com' || currentUser?.email?.toLowerCase() === 'uhbijnokmpl098900@gmail.com' || currentUser?.email?.toLowerCase() === 'aegy238@gmail.com' || currentUser?.isSuperAdmin === true;
-  const isAdminUser = isSuperAdmin || currentUser?.role === 'admin' || currentUser?.role === 'moderator';
+  const isSuperAdmin = isEmailSuperAdmin(currentUser?.email);
+  const isAdminUser = isSuperAdmin;
   const isMaintenanceActive = Boolean(settings?.isMaintenanceMode);
 
   // Auto-open admin dashboard immediately upon admin login if requested

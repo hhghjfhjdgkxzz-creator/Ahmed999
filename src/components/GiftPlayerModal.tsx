@@ -81,7 +81,7 @@ export const GiftPlayerModal: React.FC<GiftPlayerModalProps> = ({ gift, onClose 
           svgaPlayerInstance = player;
           const fileData = await downloader.get(gift.originalUrl);
           const svgaData = await parser.do(fileData);
-          player.set({ loop: 0, fillMode: 'forwards' });
+          (player as any).set({ loop: 0, fillMode: 'forwards' });
           await player.mount(svgaData);
           player.start();
           setIsLoadingAsset(false);

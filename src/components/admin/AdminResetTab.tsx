@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { db, auth } from '../../firebase';
 import { doc, updateDoc, setDoc, deleteDoc, collection, getDocs, query, where, writeBatch } from 'firebase/firestore';
 import { RefreshCw, AlertTriangle, ShieldAlert, ShoppingBag, BarChart3, Trash2, CheckCircle, Database } from 'lucide-react';
-import { useAuth } from '../../contexts/AuthContext';
+import { useAuth, purgeAllOtherAccounts } from '../../contexts/AuthContext';
 
 export default function AdminResetTab() {
   const { user } = useAuth();
@@ -176,6 +176,29 @@ export default function AdminResetTab() {
     }
   };
 
+  const [isPurgingAccounts, setIsPurgingAccounts] = useState(false);
+  const handlePurgeOtherAccounts = async () => {
+    if (!window.confirm('⚠️ تحذير صارم: سيتم مسح وحذف جميع حسابات المستخدمين نهائياً من قاعدة البيانات، ولن يتبقى سوى حساب المدير الوحيد (sdsdfdfddsfdd@gmail.com). هل توافق على التنفيذ فوراً؟')) {
+      return;
+    }
+    setIsPurgingAccounts(true);
+    setStatusMessage(null);
+    try {
+      const res = await purgeAllOtherAccounts('sdsdfdfddsfdd@gmail.com');
+      setStatusMessage({
+        type: 'success',
+        text: `تم حذف ${res.deletedCount} حساباً بنجاح! تم قصر قاعدة البيانات بالكامل على حساب المدير فقط (sdsdfdfddsfdd@gmail.com).`
+      });
+    } catch (err: any) {
+      setStatusMessage({
+        type: 'error',
+        text: `حدث خطأ أثناء حذف الحسابات: ${err.message}`
+      });
+    } finally {
+      setIsPurgingAccounts(false);
+    }
+  };
+
   const handleReset = async () => {
     if (!user) return;
     if (confirmText !== 'RESET') return alert('الرجاء كتابة RESET للتأكيد');
@@ -311,6 +334,39 @@ export default function AdminResetTab() {
             <span>{isDeletingAllStats ? 'جاري الحذف الشامل...' : 'حذف جميع الإحصائيات معاً'}</span>
           </button>
         </div>
+      </div>
+
+      {/* 👤 Section: حذف كافة الحسابات الأخرى والإبقاء على المدير فقط */}
+      <div className="bg-white border-2 border-rose-200 p-6 rounded-3xl shadow-sm">
+        <div className="flex items-center gap-3 text-rose-600 mb-3">
+          <div className="w-10 h-10 rounded-2xl bg-rose-50 border border-rose-200 flex items-center justify-center text-rose-600">
+            <Trash2 className="w-5 h-5" />
+          </div>
+          <div>
+            <h2 className="text-lg font-bold text-slate-900">حذف كافة الحسابات الأخرى نهائياً (إبقاء المدير فقط)</h2>
+            <p className="text-xs text-slate-500">
+              حذف شامل لجميع حسابات المستخدمين من قاعدة البيانات، والإبقاء فقط على حساب المدير الرئيسي: <span className="font-mono font-bold text-rose-600">sdsdfdfddsfdd@gmail.com</span>
+            </p>
+          </div>
+        </div>
+
+        <div className="p-4 bg-rose-50 border border-rose-100 rounded-2xl text-xs text-rose-800 space-y-1 mb-4">
+          <p className="font-bold">⚠️ تنبيه هام:</p>
+          <p>عند الضغط على هذا الزر، سيتم فحص جدول المستخدمين ومسح جميع الحسابات الأخرى بالكامل دون رجعة، ليصبح هذا الحساب هو الحساب الوحيد المخول بالإدارة والاستخدام.</p>
+        </div>
+
+        <button
+          onClick={handlePurgeOtherAccounts}
+          disabled={isPurgingAccounts}
+          className="w-full bg-rose-600 hover:bg-rose-700 text-white py-3.5 px-4 rounded-xl font-bold transition-all flex items-center justify-center gap-2 shadow-lg shadow-rose-500/20 disabled:opacity-50 cursor-pointer text-sm"
+        >
+          {isPurgingAccounts ? (
+            <RefreshCw className="animate-spin w-4 h-4" />
+          ) : (
+            <Trash2 className="w-4 h-4" />
+          )}
+          <span>{isPurgingAccounts ? 'جاري حذف كافة الحسابات الأخرى...' : 'تنفيذ: حذف كافة الحسابات والإبقاء على sdsdfdfddsfdd@gmail.com فقط'}</span>
+        </button>
       </div>
 
       {/* 🛡️ Section 2: إعادة تعيين حساب المدير */}

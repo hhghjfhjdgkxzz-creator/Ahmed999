@@ -1143,7 +1143,7 @@ export const ClanChat: React.FC<ClanChatProps> = ({
             ref={nativeVoiceRecordInputRef}
             onChange={handleAudioFileUpload}
             accept="audio/*"
-            capture="microphone"
+            capture={"microphone" as any}
             className="hidden"
           />
 

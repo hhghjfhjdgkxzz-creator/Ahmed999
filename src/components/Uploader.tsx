@@ -254,6 +254,18 @@ export const Uploader: React.FC<UploaderProps> = ({
         <div className="flex flex-wrap items-center justify-center gap-2.5 w-full">
             <button
               type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                fileInputRef.current?.click();
+              }}
+              className="flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-indigo-500/20 to-purple-500/20 hover:from-indigo-500/40 hover:to-purple-500/40 text-indigo-200 border border-indigo-500/40 hover:border-indigo-400 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-sm"
+              title="رفع ملف جديد"
+            >
+              <UploadCloud className="w-4 h-4 text-indigo-300" />
+              <span>رفع ملف جديد</span>
+            </button>
+            <button
+              type="button"
               onClick={(e) => { 
                 e.stopPropagation(); 
                 setUploadMode('universal');

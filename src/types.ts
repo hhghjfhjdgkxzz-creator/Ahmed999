@@ -811,4 +811,101 @@ export interface AuthUser {
   [key: string]: any;
 }
 
+export type ClanRole = 'leader' | 'officer' | 'member' | 'guest' | 'deputy' | 'master' | string;
+
+export interface ClanSettings {
+  name?: string;
+  icon?: string;
+  description?: string;
+  bannerUrl?: string;
+  isOpenForRequests?: boolean;
+  allowMemberMessages?: boolean;
+  allowMemberImages?: boolean;
+  allowMemberAudio?: boolean;
+  allowMemberStickers?: boolean;
+  autoDeleteImagesDays?: number;
+  maxImageSizeBytes?: number;
+  [key: string]: any;
+}
+
+export interface ClanMember {
+  id: string;
+  userId: string;
+  name?: string;
+  userName?: string;
+  photoURL?: string;
+  userAvatar?: string;
+  role?: ClanRole;
+  clanRole?: ClanRole;
+  userRole?: string;
+  joinedAt?: any;
+  addedBy?: string;
+  status?: string;
+  title?: string;
+  coinsContributed?: number;
+  [key: string]: any;
+}
+
+export interface ClanJoinRequest {
+  id: string;
+  userId: string;
+  name?: string;
+  userName?: string;
+  userEmail?: string;
+  photoURL?: string;
+  userAvatar?: string;
+  userRole?: string;
+  whatsapp?: string;
+  portfolioUrl?: string;
+  note?: string;
+  status: 'pending' | 'approved' | 'rejected' | string;
+  createdAt?: any;
+  [key: string]: any;
+}
+
+export interface ClanMessage {
+  id: string;
+  userId?: string;
+  senderId?: string;
+  userName?: string;
+  senderName?: string;
+  userPhoto?: string;
+  senderAvatar?: string;
+  senderClanRole?: ClanRole;
+  text?: string;
+  content?: string;
+  type?: string;
+  mediaUrl?: string;
+  mediaSize?: number;
+  audioDuration?: number;
+  imageUrl?: string;
+  audioUrl?: string;
+  stickerUrl?: string;
+  createdAt?: any;
+  readBy?: any[];
+  [key: string]: any;
+}
+
+export interface ClanSticker {
+  id: string;
+  url: string;
+  title?: string;
+  name?: string;
+  category?: string;
+  createdAt?: any;
+  [key: string]: any;
+}
+
+export interface ClanAuditLog {
+  id: string;
+  action: string;
+  performedBy?: string;
+  adminId?: string;
+  adminName?: string;
+  details?: string;
+  timestamp?: any;
+  createdAt?: any;
+  [key: string]: any;
+}
+
 

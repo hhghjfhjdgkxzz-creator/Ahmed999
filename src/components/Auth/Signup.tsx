@@ -85,6 +85,8 @@ export const Signup: React.FC<SignupProps> = ({ onToggle }) => {
             </div>
           )}
 
+
+
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="block text-slate-400 text-xs font-bold uppercase tracking-widest mb-2">
