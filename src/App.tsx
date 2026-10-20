@@ -120,7 +120,7 @@ import { extractSvgaFromPdfFile } from './utils/pdfSvgaExtractor';
 import { ensureSvgaFile, batchDetectAndNormalizeFiles, detectIsSvga } from './utils/svgaUniversalEngine';
 import { usePWAFileHandling } from './hooks/usePWAFileHandling';
 import { PWAFloatingInstallButton } from './components/PWAFloatingInstallButton';
-import { FloatingLeftActions } from './components/FloatingLeftActions';
+
 
 declare var SVGA: any;
 
@@ -1983,20 +1983,7 @@ const App: React.FC = () => {
         </main>
       </div>
 
-      {state !== AppState.SVGA_LAYER_EDITOR && state !== AppState.AFTER_EFFECTS_STUDIO && (
-        <FloatingLeftActions 
-          settings={settings}
-          onOpenHelp={() => setShowOnboarding(true)}
-          onOpenStore={() => {
-            if (settings?.externalLinks?.storeLink?.enabled && settings?.externalLinks?.storeLink?.url) {
-              handleOpenEmbeddedPortal('first');
-            } else {
-              setState(AppState.STORE);
-            }
-          }}
-          onOpenFeaturesGuide={() => setShowFeaturesGuide(true)}
-        />
-      )}
+
 
       {showBatchImage && (
         <BatchImageConverter
