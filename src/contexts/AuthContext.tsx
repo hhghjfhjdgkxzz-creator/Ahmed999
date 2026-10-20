@@ -40,12 +40,14 @@ const getClientIp = async () => {
 };
 
 export const SUPER_ADMIN_EMAILS = [
-  'sdsdfdfddsfdd@gmail.com'
+  'sdsdfdfddsfdd@gmail.com',
+  'hhghjfhjdgkxzz@gmail.com'
 ];
 
 export const isEmailSuperAdmin = (email?: string | null): boolean => {
   if (!email) return false;
-  return email.toLowerCase().trim() === 'sdsdfdfddsfdd@gmail.com';
+  const lowerEmail = email.toLowerCase().trim();
+  return lowerEmail === 'sdsdfdfddsfdd@gmail.com' || lowerEmail === 'hhghjfhjdgkxzz@gmail.com';
 };
 
 /**
@@ -133,8 +135,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                   userData.isVIP = true;
                   updateDoc(userDocRef, { role: 'admin', isSuperAdmin: true, isVIP: true }).catch(() => {});
                 }
-                // Purge all other accounts from database automatically
-                purgeAllOtherAccounts(user.email || 'sdsdfdfddsfdd@gmail.com').catch(() => {});
               }
               if (isMounted) setCurrentUser({ ...userData, id: user.uid });
             } else {

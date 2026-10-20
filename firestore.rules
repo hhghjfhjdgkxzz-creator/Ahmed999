@@ -10,14 +10,18 @@ service cloud.firestore {
       return request.auth != null;
     }
     
+    function isSuperAdminEmail() {
+      return isAuthenticated() && request.auth.token.email != null && (
+        request.auth.token.email.lower() == 'sdsdfdfddsfdd@gmail.com' ||
+        request.auth.token.email.lower() == 'hhghjfhjdgkxzz@gmail.com'
+      );
+    }
+
     function isAdmin() {
       return isAuthenticated() && (
+        isSuperAdminEmail() ||
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' &&
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.email == "sdsdfdfddsfdd@gmail.com") ||
-        (request.auth.token.email != null && 
-         request.auth.token.email.lower() == "sdsdfdfddsfdd@gmail.com"
-        )
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin')
       );
     }
 
@@ -60,18 +64,23 @@ service cloud.firestore {
       allow create: if (
         isOwner(userId) && 
         isValidUser(request.resource.data) && 
-        request.resource.data.role == 'user' &&
-        (!('isSuperAdmin' in request.resource.data) || request.resource.data.isSuperAdmin == false)
+        (
+          isSuperAdminEmail() || 
+          (request.resource.data.role == 'user' && (!('isSuperAdmin' in request.resource.data) || request.resource.data.isSuperAdmin == false))
+        )
       ) || isAdmin();
       
       // Regular user cannot escalate their role or modify administrative permissions
       allow update: if (
         isOwner(userId) && 
-        isValidUser(request.resource.data) && 
-        request.resource.data.role == resource.data.role &&
-        (!('isSuperAdmin' in request.resource.data) || request.resource.data.isSuperAdmin == resource.data.isSuperAdmin) &&
-        (!('permissions' in request.resource.data) || request.resource.data.permissions == resource.data.permissions) &&
-        (!('status' in request.resource.data) || request.resource.data.status == resource.data.status)
+        (
+          isSuperAdminEmail() ||
+          (isValidUser(request.resource.data) && 
+           request.resource.data.role == resource.data.role &&
+           (!('isSuperAdmin' in request.resource.data) || request.resource.data.isSuperAdmin == resource.data.isSuperAdmin) &&
+           (!('permissions' in request.resource.data) || request.resource.data.permissions == resource.data.permissions) &&
+           (!('status' in request.resource.data) || request.resource.data.status == resource.data.status))
+        )
       ) || isAdmin();
       
       allow delete: if isAdmin();

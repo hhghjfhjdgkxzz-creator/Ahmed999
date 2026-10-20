@@ -5,7 +5,7 @@ import { db, storage } from '../lib/firebase';
 import { collection, getDocs, doc, updateDoc, addDoc, deleteDoc, query, orderBy, Timestamp, setDoc, getDoc, limit, onSnapshot } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { StoreManager } from './StoreManager';
-import { Users, Key, Image as ImageIcon, Settings as SettingsIcon, Trash2, Ban, CheckCircle, Upload, RefreshCw, X, FileText, Link as LinkIcon, Link2, BadgeCheck, Wifi, Smartphone, Store, UserPlus, Lock, Unlock, Shield, ShieldPlus, ShieldOff, GitBranch, Download, ShieldCheck, PowerOff, Power, AlertTriangle, Eye, EyeOff, Copy, Check, CheckCircle2, Loader2, Server, Clock, UserCheck, Search, Filter, Crown, Send, Calendar, ArrowUpDown, AlertCircle, Edit, Edit2 } from 'lucide-react';
+import { Users, Key, Image as ImageIcon, Settings as SettingsIcon, Trash2, Ban, CheckCircle, Upload, RefreshCw, X, FileText, Link as LinkIcon, Link2, BadgeCheck, Wifi, Smartphone, Store, UserPlus, Lock, Unlock, Shield, ShieldPlus, ShieldOff, GitBranch, Download, ShieldCheck, PowerOff, Power, AlertTriangle, Eye, EyeOff, Copy, Check, CheckCircle2, Loader2, Server, Clock, UserCheck, Search, Filter, Crown, Send, Calendar, ArrowUpDown, AlertCircle, Edit, Edit2, Save } from 'lucide-react';
 import { calculateSubscriptionInfo, parseDate, calculateExtendedExpiry, formatInputDate } from '../utils/subscriptionUtils';
 import { UserSubscriptionModal } from './admin/UserSubscriptionModal';
 import { initializeApp } from 'firebase/app';
@@ -316,15 +316,43 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, onCancel, o
   const [logoUrlInput, setLogoUrlInput] = useState('');
   const [bgUrlInput, setBgUrlInput] = useState('');
   const [presetUrlInput, setPresetUrlInput] = useState('');
+  const [isUploadingBg, setIsUploadingBg] = useState(false);
+  const [isSavingBg, setIsSavingBg] = useState(false);
+  const [isUploadingLogo, setIsUploadingLogo] = useState(false);
+  const [isSavingLogo, setIsSavingLogo] = useState(false);
 
-  // Real-time Settings Listener for instantaneous Outage state sync
+  // Real-time Settings Listener & server settings fetch for fast sync
   useEffect(() => {
+    // 1. Immediately fetch persistent settings from server API (ensures backgroundUrl is always loaded)
+    fetch('/api/settings/global')
+      .then(res => res.json())
+      .then(data => {
+        if (data) {
+          setSettings(prev => ({ ...prev, ...data }));
+          if (data.logoUrl) setLogoUrlInput(data.logoUrl);
+          if (data.backgroundUrl) setBgUrlInput(data.backgroundUrl);
+        }
+      })
+      .catch(() => {});
+
+    // 2. Listen for app-settings-updated events dispatched across components
+    const handleSettingsUpdated = (e: any) => {
+      const data = e?.detail;
+      if (data) {
+        setSettings(prev => ({ ...prev, ...data }));
+        if (data.backgroundUrl !== undefined) setBgUrlInput(data.backgroundUrl);
+        if (data.logoUrl !== undefined) setLogoUrlInput(data.logoUrl);
+      }
+    };
+    window.addEventListener('app-settings-updated', handleSettingsUpdated);
+
+    // 3. Real-time Firestore snapshot listener
     const unsub = onSnapshot(doc(db, 'settings', 'global'), (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data() as AppSettings;
         setSettings(prev => ({ ...prev, ...data }));
-        if (data.logoUrl && !logoUrlInput) setLogoUrlInput(data.logoUrl);
-        if (data.backgroundUrl && !bgUrlInput) setBgUrlInput(data.backgroundUrl);
+        if (data.logoUrl) setLogoUrlInput(data.logoUrl);
+        if (data.backgroundUrl) setBgUrlInput(data.backgroundUrl);
         setOutageTitleAr(data.maintenanceTitle || 'حالياً سيرفر التطبيق متعطل الآن');
         setOutageTitleEn(data.maintenanceTitleEn || 'Currently, the application server is down now.');
         setOutageMessageAr(data.maintenanceMessage || 'نعتذر لجميع المستخدمين عن هذا التوقف المؤقت. خوادم التطبيق تخضع حالياً لأعمال صيانة طارئة وفحص فني شامل لضمان أعلى مستويات الأداء والاستقرار. فريق الدعم الفني يعمل بكامل طاقته على استعادة كامل الخدمات في أقرب وقت ممكن. شكراً لتفهمكم وصبركم.');
@@ -334,9 +362,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, onCancel, o
           setOutageAllowedUserIds(data.maintenanceAllowedUserIds);
         }
       }
-    }, (err) => console.warn("AdminPanel settings snapshot error:", err));
+    }, (err) => console.warn("AdminPanel settings snapshot notice:", err));
 
-    return () => unsub();
+    return () => {
+      unsub();
+      window.removeEventListener('app-settings-updated', handleSettingsUpdated);
+    };
   }, []);
 
   // Fetch Data
@@ -385,85 +416,126 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, onCancel, o
     setLoading(true);
     try {
       if (activeTab === 'users' || activeTab === 'server_outage') {
-        const q = query(collection(db, 'users'), orderBy('createdAt', 'desc'));
-        const snapshot = await getDocs(q);
-        const usersData = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as UserRecord));
-        setUsers(usersData);
+        try {
+          const q = query(collection(db, 'users'), orderBy('createdAt', 'desc'));
+          const snapshot = await getDocs(q);
+          const usersData = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as UserRecord));
+          setUsers(usersData);
 
-        // Fetch banned IPs and Devices
-        const [ipSnap, deviceSnap] = await Promise.all([
-          getDocs(collection(db, 'banned_ips')),
-          getDocs(collection(db, 'banned_devices'))
-        ]);
-        
-        // Exclude dummy placeholders like 0.0.0.0 or admin_created and cleanup
-        const dummyIps = ['0.0.0.0', '127.0.0.1', 'unknown', 'local', '::1'];
-        const dummyDevices = ['admin_created', 'unknown', 'default', 'undefined', 'null'];
+          // Fetch banned IPs and Devices
+          const [ipSnap, deviceSnap] = await Promise.all([
+            getDocs(collection(db, 'banned_ips')).catch(() => ({ docs: [] })),
+            getDocs(collection(db, 'banned_devices')).catch(() => ({ docs: [] }))
+          ]);
+          
+          const dummyIps = ['0.0.0.0', '127.0.0.1', 'unknown', 'local', '::1'];
+          const dummyDevices = ['admin_created', 'unknown', 'default', 'undefined', 'null'];
 
-        const ips: string[] = [];
-        for (const d of ipSnap.docs) {
-          const ipVal = d.data()?.ip || d.id;
-          if (dummyIps.includes(ipVal)) {
-            deleteDoc(doc(db, 'banned_ips', d.id)).catch(() => {});
-          } else {
-            ips.push(ipVal);
+          const ips: string[] = [];
+          for (const d of ipSnap.docs) {
+            const ipVal = d.data()?.ip || d.id;
+            if (dummyIps.includes(ipVal)) {
+              deleteDoc(doc(db, 'banned_ips', d.id)).catch(() => {});
+            } else {
+              ips.push(ipVal);
+            }
           }
-        }
 
-        const devices: string[] = [];
-        for (const d of deviceSnap.docs) {
-          const devId = d.id;
-          if (dummyDevices.includes(devId)) {
-            deleteDoc(doc(db, 'banned_devices', devId)).catch(() => {});
-          } else {
-            devices.push(devId);
+          const devices: string[] = [];
+          for (const d of deviceSnap.docs) {
+            const devId = d.id;
+            if (dummyDevices.includes(devId)) {
+              deleteDoc(doc(db, 'banned_devices', devId)).catch(() => {});
+            } else {
+              devices.push(devId);
+            }
           }
-        }
 
-        setBannedIps(ips);
-        setBannedDevices(devices);
-        
-        setCache(prev => ({ ...prev, [activeTab]: { data: { users: usersData, bannedIps: ips, bannedDevices: devices }, timestamp: now } }));
+          setBannedIps(ips);
+          setBannedDevices(devices);
+          
+          setCache(prev => ({ ...prev, [activeTab]: { data: { users: usersData, bannedIps: ips, bannedDevices: devices }, timestamp: now } }));
+        } catch (uErr) {
+          console.warn("Notice: users query handled:", uErr);
+        }
       } else if (activeTab === 'keys') {
-        const q = query(collection(db, 'licenseKeys'), orderBy('createdAt', 'desc'));
-        const snapshot = await getDocs(q);
-        const keysData = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as LicenseKey));
-        setKeys(keysData);
-        setCache(prev => ({ ...prev, keys: { data: keysData, timestamp: now } }));
+        try {
+          const q = query(collection(db, 'licenseKeys'), orderBy('createdAt', 'desc'));
+          const snapshot = await getDocs(q);
+          const keysData = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as LicenseKey));
+          setKeys(keysData);
+          setCache(prev => ({ ...prev, keys: { data: keysData, timestamp: now } }));
+        } catch (kErr) {
+          console.warn("Notice: keys query handled:", kErr);
+        }
       } else if (activeTab === 'assets') {
-        const q = query(collection(db, 'presetBackgrounds'), orderBy('createdAt', 'desc'));
-        const snapshot = await getDocs(q);
-        const backgroundsData = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as PresetBackground));
-        setBackgrounds(backgroundsData);
+        let backgroundsData: PresetBackground[] = [];
+        try {
+          const q = query(collection(db, 'presetBackgrounds'), orderBy('createdAt', 'desc'));
+          const snapshot = await getDocs(q);
+          backgroundsData = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as PresetBackground));
+          setBackgrounds(backgroundsData);
+        } catch (bErr) {
+          console.warn("Notice: presetBackgrounds handled:", bErr);
+        }
         
-        const settingsDoc = await getDoc(doc(db, 'settings', 'global'));
-        let settingsData = null;
-        if (settingsDoc.exists()) {
-            settingsData = settingsDoc.data() as AppSettings;
-            setSettings(settingsData);
-            setLogoUrlInput(settingsData.logoUrl || '');
-            setBgUrlInput(settingsData.backgroundUrl || '');
+        // Load persistent settings from server API (ensures backgroundUrl is always fetched)
+        let settingsData: AppSettings | null = null;
+        try {
+          const res = await fetch('/api/settings/global');
+          const serverSettings = await res.json();
+          if (serverSettings) {
+            settingsData = serverSettings as AppSettings;
+            setSettings(prev => ({ ...(prev || {}), ...serverSettings }));
+            if (serverSettings.logoUrl !== undefined) setLogoUrlInput(serverSettings.logoUrl || '');
+            if (serverSettings.backgroundUrl !== undefined) setBgUrlInput(serverSettings.backgroundUrl || '');
+          }
+        } catch (_) {}
+
+        if (!settingsData) {
+          try {
+            const settingsDoc = await getDoc(doc(db, 'settings', 'global'));
+            if (settingsDoc.exists()) {
+              settingsData = settingsDoc.data() as AppSettings;
+              setSettings(settingsData);
+              if (settingsData.logoUrl) setLogoUrlInput(settingsData.logoUrl || '');
+              if (settingsData.backgroundUrl) setBgUrlInput(settingsData.backgroundUrl || '');
+            }
+          } catch (_) {}
         }
         setCache(prev => ({ ...prev, assets: { data: { backgrounds: backgroundsData, settings: settingsData }, timestamp: now } }));
       } else if (activeTab === 'settings') {
-        const docRef = doc(db, 'settings', 'global');
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-          const settingsData = docSnap.data() as AppSettings;
-          setSettings(settingsData);
-          setCache(prev => ({ ...prev, settings: { data: settingsData, timestamp: now } }));
-        } else {
-          setCache(prev => ({ ...prev, settings: { data: settings, timestamp: now } }));
-        }
+        try {
+          const res = await fetch('/api/settings/global');
+          const serverSettings = await res.json();
+          if (serverSettings) {
+            setSettings(prev => ({ ...(prev || {}), ...serverSettings }));
+            setCache(prev => ({ ...prev, settings: { data: serverSettings, timestamp: now } }));
+          }
+        } catch (_) {}
+
+        try {
+          const docRef = doc(db, 'settings', 'global');
+          const docSnap = await getDoc(docRef);
+          if (docSnap.exists()) {
+            const settingsData = docSnap.data() as AppSettings;
+            setSettings(settingsData);
+            setCache(prev => ({ ...prev, settings: { data: settingsData, timestamp: now } }));
+          }
+        } catch (_) {}
       } else if (activeTab === 'records') {
-        const q = query(collection(db, 'activityLogs'), orderBy('timestamp', 'desc'), limit(100));
-        const snapshot = await getDocs(q);
-        const logsData = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as ActivityLog));
-        setLogs(logsData);
-        setCache(prev => ({ ...prev, records: { data: logsData, timestamp: now } }));
+        try {
+          const q = query(collection(db, 'activityLogs'), orderBy('timestamp', 'desc'), limit(100));
+          const snapshot = await getDocs(q);
+          const logsData = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as ActivityLog));
+          setLogs(logsData);
+          setCache(prev => ({ ...prev, records: { data: logsData, timestamp: now } }));
+        } catch (rErr) {
+          console.warn("Notice: records query handled:", rErr);
+        }
       }
     } catch (error) {
-      console.error("Error fetching data:", error);
+      console.warn("Handled fetchData notice:", error);
     } finally {
       setLoading(false);
     }
@@ -761,49 +833,178 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, onCancel, o
   // ... (Asset Management)
   const handleUploadAsset = async (file: File, type: 'logo' | 'background' | 'preset') => {
     if (!file) return;
-    try {
-      const storageRef = ref(storage, `assets/${type}/${Date.now()}_${file.name}`);
-      await uploadBytes(storageRef, file);
-      const url = await getDownloadURL(storageRef);
+    if (type === 'background') {
+      setIsUploadingBg(true);
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+        const res = await fetch('/api/settings/upload-background', {
+          method: 'POST',
+          body: formData
+        });
+        const data = await res.json();
+        if (!data.success) {
+          throw new Error(data.message || data.error || 'فشل رفع الخلفية');
+        }
+        const newUrl = data.backgroundUrl;
+        setSettings(prev => prev ? { ...prev, backgroundUrl: newUrl } : ({ backgroundUrl: newUrl } as any));
+        setBgUrlInput(newUrl);
+        localStorage.setItem('appSettings', JSON.stringify({ ...(settings || {}), backgroundUrl: newUrl }));
+        window.dispatchEvent(new CustomEvent('app-settings-updated', { detail: { backgroundUrl: newUrl } }));
 
-      if (type === 'logo') {
-        await setDoc(doc(db, 'settings', 'global'), { logoUrl: url }, { merge: true });
-        setSettings(prev => prev ? { ...prev, logoUrl: url } : null);
-        setLogoUrlInput(url);
-      } else if (type === 'background') {
-        await setDoc(doc(db, 'settings', 'global'), { backgroundUrl: url }, { merge: true });
-        setSettings(prev => prev ? { ...prev, backgroundUrl: url } : null);
-        setBgUrlInput(url);
-      } else if (type === 'preset') {
+        try {
+          await setDoc(doc(db, 'settings', 'global'), { backgroundUrl: newUrl }, { merge: true });
+        } catch (_) {}
+
+        alert('✅ تم رفع وتحديث خلفية الموقع بنجاح! أصبحت الآن ثابتة ومطبقة لجميع المستخدمين.');
+      } catch (err: any) {
+        console.error('Error uploading background:', err);
+        alert('فشل رفع الخلفية: ' + (err.message || 'حدث خطأ أثناء الرفع'));
+      } finally {
+        setIsUploadingBg(false);
+      }
+    } else if (type === 'logo') {
+      setIsUploadingLogo(true);
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+        const res = await fetch('/api/settings/upload-logo', {
+          method: 'POST',
+          body: formData
+        });
+        const data = await res.json();
+        if (!data.success) {
+          throw new Error(data.message || data.error || 'فشل رفع الشعار');
+        }
+        const newUrl = data.logoUrl;
+        setSettings(prev => prev ? { ...prev, logoUrl: newUrl } : ({ logoUrl: newUrl } as any));
+        setLogoUrlInput(newUrl);
+        localStorage.setItem('appSettings', JSON.stringify({ ...(settings || {}), logoUrl: newUrl }));
+        window.dispatchEvent(new CustomEvent('app-settings-updated', { detail: { logoUrl: newUrl } }));
+
+        try {
+          await setDoc(doc(db, 'settings', 'global'), { logoUrl: newUrl }, { merge: true });
+        } catch (_) {}
+
+        alert('✅ تم رفع وتحديث شعار الموقع بنجاح!');
+      } catch (err: any) {
+        console.error('Error uploading logo:', err);
+        alert('فشل رفع الشعار: ' + (err.message || 'حدث خطأ أثناء الرفع'));
+      } finally {
+        setIsUploadingLogo(false);
+      }
+    } else if (type === 'preset') {
+      try {
+        const storageRef = ref(storage, `assets/preset/${Date.now()}_${file.name}`);
+        await uploadBytes(storageRef, file);
+        const url = await getDownloadURL(storageRef);
         await addDoc(collection(db, 'presetBackgrounds'), {
           label: file.name,
           url,
           createdAt: Timestamp.now()
         });
         fetchData();
+      } catch (error) {
+        console.error("Error uploading preset:", error);
+        alert("فشل رفع الخلفية: " + (error as Error).message);
       }
-    } catch (error) {
-      console.error("Error uploading asset:", error);
-      alert("فشل رفع الملف");
     }
   };
 
   const handleSaveAssetUrl = async (type: 'logo' | 'background') => {
-      try {
-          if (type === 'logo') {
-              const cleanUrl = logoUrlInput.trim();
-              await setDoc(doc(db, 'settings', 'global'), { logoUrl: cleanUrl }, { merge: true });
-              setSettings(prev => prev ? { ...prev, logoUrl: cleanUrl } : null);
-          } else {
-              const cleanUrl = bgUrlInput.trim();
-              await setDoc(doc(db, 'settings', 'global'), { backgroundUrl: cleanUrl }, { merge: true });
-              setSettings(prev => prev ? { ...prev, backgroundUrl: cleanUrl } : null);
-          }
-          alert("تم حفظ الرابط بنجاح");
-      } catch (error) {
-          console.error("Error saving asset url:", error);
-          alert("فشل حفظ الرابط");
+    try {
+      if (type === 'logo') {
+        setIsSavingLogo(true);
+        const cleanUrl = logoUrlInput.trim();
+        const res = await fetch('/api/settings/update', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ logoUrl: cleanUrl })
+        });
+        const data = await res.json();
+        if (!data.success) throw new Error(data.message || data.error || 'فشل حفظ الشعار');
+
+        setSettings(prev => prev ? { ...prev, logoUrl: cleanUrl } : ({ logoUrl: cleanUrl } as any));
+        localStorage.setItem('appSettings', JSON.stringify({ ...(settings || {}), logoUrl: cleanUrl }));
+        window.dispatchEvent(new CustomEvent('app-settings-updated', { detail: { logoUrl: cleanUrl } }));
+        try {
+          await setDoc(doc(db, 'settings', 'global'), { logoUrl: cleanUrl }, { merge: true });
+        } catch (_) {}
+        alert("✅ تم حفظ وتحديث رابط الشعار بنجاح لجميع المستخدمين!");
+      } else {
+        setIsSavingBg(true);
+        const cleanUrl = bgUrlInput.trim();
+        if (!cleanUrl) {
+          alert("يرجى إدخال أو لصق رابط الخلفية أولاً قبل الضغط على تأكيد وحفظ الرابط.");
+          setIsSavingBg(false);
+          return;
+        }
+        const res = await fetch('/api/settings/update', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ backgroundUrl: cleanUrl })
+        });
+        const data = await res.json();
+        if (!data.success) throw new Error(data.message || data.error || 'فشل حفظ الخلفية');
+
+        setSettings(prev => prev ? { ...prev, backgroundUrl: cleanUrl } : ({ backgroundUrl: cleanUrl } as any));
+        localStorage.setItem('appSettings', JSON.stringify({ ...(settings || {}), backgroundUrl: cleanUrl }));
+        window.dispatchEvent(new CustomEvent('app-settings-updated', { detail: { backgroundUrl: cleanUrl } }));
+        try {
+          await setDoc(doc(db, 'settings', 'global'), { backgroundUrl: cleanUrl }, { merge: true });
+        } catch (_) {}
+        alert("✅ تم حفظ وتأكيد رابط خلفية الموقع بنجاح! تم تطبيقها لجميع المستخدمين فوراً.");
       }
+    } catch (error: any) {
+      console.error("Error saving asset url:", error);
+      alert("فشل حفظ الرابط: " + (error?.message || 'حدث خطأ'));
+    } finally {
+      setIsSavingBg(false);
+      setIsSavingLogo(false);
+    }
+  };
+
+  const handleDeleteBackground = async () => {
+    if (!confirm('هل أنت متأكد من حذف خلفية الموقع الحالية والعودة إلى الخلفية الافتراضية لجميع المستخدمين؟')) return;
+    try {
+      const res = await fetch('/api/settings/delete-background', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      const data = await res.json();
+      setSettings(prev => prev ? { ...prev, backgroundUrl: '' } : null);
+      setBgUrlInput('');
+      localStorage.setItem('appSettings', JSON.stringify({ ...(settings || {}), backgroundUrl: '' }));
+      window.dispatchEvent(new CustomEvent('app-settings-updated', { detail: { backgroundUrl: '' } }));
+      try {
+        await setDoc(doc(db, 'settings', 'global'), { backgroundUrl: '' }, { merge: true });
+      } catch (_) {}
+      alert("✅ تم حذف خلفية الموقع بنجاح!");
+    } catch (err: any) {
+      console.error("Error deleting background:", err);
+      alert("فشل حذف الخلفية: " + (err.message || 'حدث خطأ'));
+    }
+  };
+
+  const handleDeleteLogo = async () => {
+    if (!confirm('هل أنت متأكد من حذف شعار الموقع؟')) return;
+    try {
+      await fetch('/api/settings/delete-logo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      setSettings(prev => prev ? { ...prev, logoUrl: '' } : null);
+      setLogoUrlInput('');
+      localStorage.setItem('appSettings', JSON.stringify({ ...(settings || {}), logoUrl: '' }));
+      window.dispatchEvent(new CustomEvent('app-settings-updated', { detail: { logoUrl: '' } }));
+      try {
+        await setDoc(doc(db, 'settings', 'global'), { logoUrl: '' }, { merge: true });
+      } catch (_) {}
+      alert("✅ تم حذف الشعار بنجاح!");
+    } catch (err: any) {
+      console.error("Error deleting logo:", err);
+      alert("فشل حذف الشعار: " + (err.message || 'حدث خطأ'));
+    }
   };
 
   const handleAddPresetUrl = async () => {
@@ -1862,86 +2063,181 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, onCancel, o
                 <div className="space-y-8">
                   {/* App Branding */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className="bg-slate-950/30 border border-white/10 rounded-xl p-6">
-                      <h4 className="font-bold mb-4 flex items-center gap-2">
-                        <ImageIcon className="w-4 h-4 text-indigo-400" />
-                        شعار التطبيق (Logo)
-                      </h4>
-                      <div className="flex flex-col gap-4">
-                        <div className="flex items-center gap-4">
-                            {settings?.logoUrl && (
-                            <img src={settings.logoUrl} alt="Logo" className="w-16 h-16 rounded-lg object-contain bg-black/20" />
-                            )}
-                            <label className="flex-1 cursor-pointer">
-                            <div className="border-2 border-dashed border-white/10 hover:border-indigo-500/50 rounded-lg p-4 text-center transition-colors">
-                                <Upload className="w-6 h-6 mx-auto mb-2 text-slate-400" />
-                                <span className="text-sm text-slate-400">اختر ملف الشعار</span>
-                            </div>
-                            <input type="file" className="hidden" accept="image/*" onChange={(e) => e.target.files?.[0] && handleUploadAsset(e.target.files[0], 'logo')} />
-                            </label>
+                    {/* Logo Section */}
+                    <div className="bg-slate-950/30 border border-white/10 rounded-xl p-6 flex flex-col justify-between">
+                      <div>
+                        <div className="flex items-center justify-between mb-4">
+                          <h4 className="font-bold flex items-center gap-2 text-white">
+                            <ImageIcon className="w-4 h-4 text-indigo-400" />
+                            شعار التطبيق (Logo)
+                          </h4>
+                          {settings?.logoUrl ? (
+                            <span className="text-xs bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 px-2.5 py-0.5 rounded-full font-medium">شعار مخصص</span>
+                          ) : (
+                            <span className="text-xs bg-slate-800 text-slate-400 px-2.5 py-0.5 rounded-full font-medium">الشعار الافتراضي</span>
+                          )}
                         </div>
-                        <div className="flex gap-2">
-                            <input 
-                                type="text" 
-                                value={logoUrlInput} 
-                                onChange={(e) => setLogoUrlInput(e.target.value)}
-                                placeholder="أو أدخل رابط الشعار مباشرة"
-                                className="flex-1 bg-slate-950/50 border border-white/10 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500/50"
-                            />
-                            <button onClick={() => handleSaveAssetUrl('logo')} className="p-2 bg-indigo-500/20 text-indigo-400 rounded-lg hover:bg-indigo-500/30">
-                                <LinkIcon className="w-4 h-4" />
+
+                        {settings?.logoUrl && (
+                          <div className="mb-4 flex items-center gap-3 p-3 bg-slate-900/60 rounded-xl border border-white/5">
+                            <img src={settings.logoUrl} alt="Logo" className="w-14 h-14 rounded-lg object-contain bg-black/40 border border-white/10 shrink-0" />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs text-slate-400 truncate dir-ltr font-mono">{settings.logoUrl}</p>
+                            </div>
+                            <button 
+                              onClick={handleDeleteLogo} 
+                              className="p-2 text-red-400 hover:text-red-300 hover:bg-red-500/20 rounded-lg transition-colors"
+                              title="حذف الشعار"
+                            >
+                              <Trash2 className="w-4 h-4" />
                             </button>
+                          </div>
+                        )}
+
+                        <div className="flex flex-col gap-3">
+                          <label className="cursor-pointer">
+                            <div className="border-2 border-dashed border-white/10 hover:border-indigo-500/50 rounded-xl p-3 text-center transition-colors flex items-center justify-center gap-2">
+                              {isUploadingLogo ? <Loader2 className="w-5 h-5 animate-spin text-indigo-400" /> : <Upload className="w-5 h-5 text-indigo-400" />}
+                              <span className="text-sm text-slate-300 font-medium">{isUploadingLogo ? 'جارٍ رفع الشعار...' : 'اختر ملف الشعار من جهازك'}</span>
+                            </div>
+                            <input type="file" className="hidden" accept="image/*" disabled={isUploadingLogo} onChange={(e) => e.target.files?.[0] && handleUploadAsset(e.target.files[0], 'logo')} />
+                          </label>
+
+                          <div className="flex gap-2">
+                            <input 
+                              type="text" 
+                              value={logoUrlInput} 
+                              onChange={(e) => setLogoUrlInput(e.target.value)}
+                              placeholder="أو أدخل رابط الشعار مباشرة"
+                              className="flex-1 bg-slate-950/50 border border-white/10 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-indigo-500/50"
+                              dir="ltr"
+                            />
+                            <button 
+                              onClick={() => handleSaveAssetUrl('logo')} 
+                              disabled={isSavingLogo}
+                              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-sm font-semibold flex items-center gap-1.5 transition-colors shrink-0 disabled:opacity-50"
+                            >
+                              {isSavingLogo ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                              <span>حفظ</span>
+                            </button>
+                          </div>
                         </div>
                       </div>
                     </div>
 
-                    <div className="bg-slate-950/30 border border-white/10 rounded-xl p-6">
-                      <h4 className="font-bold mb-4 flex items-center gap-2">
-                        <ImageIcon className="w-4 h-4 text-purple-400" />
-                        خلفية الموقع (يدعم الصور وصيغ MP4 للفيديو)
-                      </h4>
-                      <div className="flex flex-col gap-4">
-                        <div className="flex items-center gap-4">
-                            {settings?.backgroundUrl && (
-                              isVideoUrl(settings.backgroundUrl) ? (
-                                <div className="relative w-28 h-18 rounded-lg overflow-hidden border border-purple-500/40 bg-black/40 shrink-0 shadow-md">
-                                  <video 
-                                    src={settings.backgroundUrl} 
-                                    autoPlay 
-                                    loop 
-                                    muted 
-                                    playsInline 
-                                    className="w-full h-full object-cover" 
-                                  />
-                                  <span className="absolute bottom-1 right-1 text-[9px] bg-purple-600/90 text-white font-bold px-1.5 py-0.5 rounded shadow">
-                                    MP4 فيديو
-                                  </span>
-                                </div>
-                              ) : (
-                                <img src={settings.backgroundUrl} alt="Background" className="w-24 h-16 rounded-lg object-cover bg-black/20 shrink-0" />
-                              )
+                    {/* Site Background Section */}
+                    <div className="bg-slate-950/30 border border-white/10 rounded-xl p-6 flex flex-col justify-between">
+                      <div>
+                        <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+                          <h4 className="font-bold flex items-center gap-2 text-white">
+                            <ImageIcon className="w-4 h-4 text-purple-400" />
+                            خلفية الموقع (يدعم الصور وصيغ MP4 للفيديو)
+                          </h4>
+                          {settings?.backgroundUrl ? (
+                            <span className="inline-flex items-center gap-1.5 text-xs bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2.5 py-0.5 rounded-full font-medium">
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              الخلفية الحالية نشطة ومطبقة لجميع المستخدمين
+                            </span>
+                          ) : (
+                            <span className="text-xs bg-slate-800 text-slate-400 px-2.5 py-0.5 rounded-full font-medium">
+                              الخلفية الافتراضية نشطة
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Background Live Preview */}
+                        {settings?.backgroundUrl && (
+                          <div className="mb-4 relative rounded-xl overflow-hidden border border-purple-500/30 bg-black/50 shadow-lg group">
+                            {isVideoUrl(settings.backgroundUrl) ? (
+                              <div className="relative w-full h-36">
+                                <video 
+                                  src={settings.backgroundUrl} 
+                                  autoPlay 
+                                  loop 
+                                  muted 
+                                  playsInline 
+                                  className="w-full h-full object-cover" 
+                                />
+                                <span className="absolute top-2 right-2 text-[10px] bg-purple-600/90 text-white font-bold px-2 py-0.5 rounded-md shadow flex items-center gap-1">
+                                  🎬 فيديو MP4 نشط لجميع المستخدمين
+                                </span>
+                              </div>
+                            ) : (
+                              <div className="relative w-full h-36">
+                                <img 
+                                  src={settings.backgroundUrl} 
+                                  alt="Background" 
+                                  className="w-full h-full object-cover" 
+                                />
+                                <span className="absolute top-2 right-2 text-[10px] bg-indigo-600/90 text-white font-bold px-2 py-0.5 rounded-md shadow flex items-center gap-1">
+                                  🖼️ صورة نشطة لجميع المستخدمين
+                                </span>
+                              </div>
                             )}
-                            <label className="flex-1 cursor-pointer">
-                            <div className="border-2 border-dashed border-white/10 hover:border-purple-500/50 rounded-lg p-4 text-center transition-colors">
-                                <Upload className="w-6 h-6 mx-auto mb-2 text-slate-400" />
-                                <span className="text-sm text-slate-400">اختر ملف الخلفية (صورة أو فيديو MP4)</span>
+                            <div className="p-2 bg-slate-900/90 border-t border-white/5 flex items-center justify-between gap-2">
+                              <p className="text-xs text-slate-300 font-mono truncate dir-ltr">{settings.backgroundUrl}</p>
+                              <span className="text-[10px] text-emerald-400 shrink-0 font-semibold">ثابتة ومحفوظة ✅</span>
                             </div>
-                            <input type="file" className="hidden" accept="image/*,video/*,video/mp4,video/webm" onChange={(e) => e.target.files?.[0] && handleUploadAsset(e.target.files[0], 'background')} />
-                            </label>
-                        </div>
-                        <div className="flex gap-2">
+                          </div>
+                        )}
+
+                        {/* Action Buttons: Upload New Background File & Delete Background */}
+                        <div className="flex flex-wrap gap-2.5 mb-3">
+                          <label className="flex-1 cursor-pointer">
+                            <div className="flex items-center justify-center gap-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold py-2.5 px-4 rounded-xl shadow-md transition-all text-sm">
+                              {isUploadingBg ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                              <span>{isUploadingBg ? 'جارٍ رفع الخلفية...' : 'رفع خلفية جديدة (ملف من جهازك)'}</span>
+                            </div>
                             <input 
-                                type="text" 
-                                value={bgUrlInput} 
-                                onChange={(e) => setBgUrlInput(e.target.value)}
-                                placeholder="أو أدخل رابط الخلفية مباشرة (صورة أو فيديو MP4/WebM)"
-                                className="flex-1 bg-slate-950/50 border border-white/10 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-purple-500/50"
-                                dir="ltr"
+                              type="file" 
+                              className="hidden" 
+                              accept="image/*,video/*,video/mp4,video/webm" 
+                              disabled={isUploadingBg}
+                              onChange={(e) => e.target.files?.[0] && handleUploadAsset(e.target.files[0], 'background')} 
                             />
-                            <button onClick={() => handleSaveAssetUrl('background')} className="p-2 bg-purple-500/20 text-purple-400 rounded-lg hover:bg-purple-500/30">
-                                <LinkIcon className="w-4 h-4" />
+                          </label>
+
+                          {(settings?.backgroundUrl || bgUrlInput) && (
+                            <button 
+                              type="button" 
+                              onClick={handleDeleteBackground}
+                              className="flex items-center justify-center gap-2 bg-red-500/20 hover:bg-red-500/30 text-red-300 border border-red-500/30 font-bold py-2.5 px-4 rounded-xl transition-all text-sm shrink-0"
+                              title="حذف الخلفية والعودة للافتراضي"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                              <span>حذف الخلفية</span>
                             </button>
+                          )}
                         </div>
+
+                        {/* URL Input & Confirmation Button */}
+                        <div className="flex flex-col sm:flex-row gap-2">
+                          <input 
+                            type="text" 
+                            value={bgUrlInput} 
+                            onChange={(e) => setBgUrlInput(e.target.value)}
+                            placeholder="أو أدخل رابط الخلفية مباشرة (صورة أو فيديو MP4/WebM)"
+                            className="flex-1 bg-slate-950/60 border border-purple-500/30 focus:border-purple-500 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none transition-colors"
+                            dir="ltr"
+                          />
+                          <button 
+                            type="button"
+                            onClick={() => handleSaveAssetUrl('background')} 
+                            disabled={isSavingBg}
+                            className="flex items-center justify-center gap-2 bg-purple-600 hover:bg-purple-500 text-white font-bold px-5 py-2.5 rounded-xl shadow-md transition-all text-sm shrink-0 disabled:opacity-50"
+                            title="تأكيد وحفظ الرابط وتطبيقه لجميع المستخدمين"
+                          >
+                            {isSavingBg ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                            <span>تأكيد وحفظ الرابط</span>
+                          </button>
+                        </div>
+
+                        {isUploadingBg && (
+                          <div className="mt-3 p-3 bg-purple-950/40 border border-purple-500/40 rounded-xl text-purple-200 text-xs flex items-center gap-2 animate-pulse">
+                            <Loader2 className="w-4 h-4 animate-spin text-purple-400 shrink-0" />
+                            <span>يتم الآن رفع ملف الخلفية وحفظه وتطبيقه تلقائياً على كل المستخدمين...</span>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>

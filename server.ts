@@ -6,6 +6,7 @@ import audioRouter from "./src/server/audioRouter";
 import exportJobsRouter from "./src/server/exportJobsRouter";
 import storageRouter from "./src/server/storageRouter";
 import telegramRouter from "./src/server/telegramRouter";
+import settingsRouter from "./src/server/settingsRouter";
 
 // In-memory maintenance cache for instant fast response
 let serverMaintenanceState = {
@@ -154,6 +155,10 @@ async function startServer() {
   app.use('/api/export-jobs', exportJobsRouter);
   app.use('/api/storage', storageRouter);
   app.use('/api/telegram', telegramRouter);
+  app.use('/api/settings', settingsRouter);
+
+  // Serve user uploads statically
+  app.use('/uploads', express.static(path.join(process.cwd(), 'public', 'uploads')));
 
   // Direct In-Memory Download Buffer Store for Reliable Downloads
   const downloadStore = new Map<string, { buffer: Buffer, mime: string, name: string, expires: number }>();

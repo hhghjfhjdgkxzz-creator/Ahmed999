@@ -504,13 +504,43 @@ const App: React.FC = () => {
   );
 
   useEffect(() => {
-    // Real-time listener for Global Settings
+    // 1. Instantly load server persistent settings (including backgroundUrl for all users)
+    const syncServerSettings = () => {
+      fetch('/api/settings/global')
+        .then(res => res.json())
+        .then(data => {
+          if (data && (data.backgroundUrl !== undefined || data.appName || data.logoUrl !== undefined)) {
+            setSettings(prev => {
+              const merged = { ...(prev || {}), ...data };
+              localStorage.setItem('appSettings', JSON.stringify(merged));
+              return merged;
+            });
+          }
+        })
+        .catch(() => {});
+    };
+
+    syncServerSettings();
+    window.addEventListener('focus', syncServerSettings);
+    const syncInterval = setInterval(syncServerSettings, 8000);
+
+    // 2. Real-time listener for Global Settings in Firestore
     const docRef = doc(db, 'settings', 'global');
     const unsubscribe = onSnapshot(docRef, (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data() as AppSettings;
-        setSettings(data);
-        localStorage.setItem('appSettings', JSON.stringify(data));
+        setSettings(prev => {
+          const merged = {
+            ...(prev || {}),
+            ...data,
+            backgroundUrl: data.backgroundUrl !== undefined ? data.backgroundUrl : prev?.backgroundUrl,
+            logoUrl: data.logoUrl !== undefined ? data.logoUrl : prev?.logoUrl,
+            isMaintenanceMode: Boolean(data.isMaintenanceMode)
+          };
+          localStorage.setItem('appSettings', JSON.stringify(merged));
+          return merged;
+        });
+
         // Sync with backend memory cache
         try {
           fetch('/api/maintenance/sync', {
@@ -537,7 +567,24 @@ const App: React.FC = () => {
       }
     });
 
-    return () => unsubscribe();
+    const handleSettingsUpdated = (e: any) => {
+      const data = e?.detail;
+      if (data) {
+        setSettings(prev => {
+          const merged = { ...(prev || {}), ...data };
+          localStorage.setItem('appSettings', JSON.stringify(merged));
+          return merged;
+        });
+      }
+    };
+    window.addEventListener('app-settings-updated', handleSettingsUpdated);
+
+    return () => {
+      clearInterval(syncInterval);
+      window.removeEventListener('focus', syncServerSettings);
+      unsubscribe();
+      window.removeEventListener('app-settings-updated', handleSettingsUpdated);
+    };
   }, []);
 
   // Fail-safe VIB (VIP) authorization check to prevent direct state navigation
@@ -948,9 +995,17 @@ const App: React.FC = () => {
         currentUser={currentUser} 
         onRefresh={async () => {
           try {
+            const res = await fetch('/api/settings/global');
+            const data = await res.json();
+            if (data) {
+              setSettings(prev => ({ ...(prev || {}), ...data }));
+              localStorage.setItem('appSettings', JSON.stringify(data));
+            }
+          } catch (_) {}
+          try {
             const docSnap = await getDoc(doc(db, 'settings', 'global'));
             if (docSnap.exists()) {
-              setSettings(docSnap.data() as AppSettings);
+              setSettings(prev => ({ ...(prev || {}), ...(docSnap.data() as AppSettings) }));
             }
           } catch (e) {}
         }}
@@ -962,7 +1017,7 @@ const App: React.FC = () => {
   if (!currentUser) {
     const rawAuthBg = settings?.backgroundUrl ? settings.backgroundUrl.trim() : '';
     const isVideoAuth = !!(rawAuthBg && isVideoUrl(rawAuthBg));
-    const hasCustomBg = !!(rawAuthBg && !rawAuthBg.includes('unsplash') && !isVideoAuth);
+    const hasCustomBg = !!(rawAuthBg && !isVideoAuth);
     return (
       <div className="min-h-screen text-slate-200 overflow-x-hidden relative flex items-center justify-center p-4 bg-[#070a12]">
         {hasCustomBg && (
@@ -1047,8 +1102,8 @@ const App: React.FC = () => {
   const activeUser = currentUser || guestUser;
 
   const rawBgUrl = settings?.backgroundUrl ? settings.backgroundUrl.trim() : '';
-  const isVideoBg = !!(rawBgUrl && isVideoUrl(rawBgUrl) && !videoBgError);
-  const hasCustomBg = !!(rawBgUrl && !rawBgUrl.includes('unsplash') && !isVideoBg);
+  const isVideoBg = !!(rawBgUrl && isVideoUrl(rawBgUrl));
+  const hasCustomBg = !!(rawBgUrl && !isVideoBg);
 
   const themeAmbientGlow = activeThemeConfig?.glowColor || 'rgba(99, 102, 241, 0.25)';
   const themeRadialGlow = `radial-gradient(circle at 50% -10%, ${themeAmbientGlow.replace(/[\d\.]+\)$/, '0.22)')} 0%, transparent 70%)`;

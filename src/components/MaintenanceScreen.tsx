@@ -44,6 +44,18 @@ export const MaintenanceScreen: React.FC<MaintenanceScreenProps> = ({
     }, 1000);
   };
 
+  React.useEffect(() => {
+    // Automatically query server to release lock if maintenance is not active
+    fetch('/api/settings/global')
+      .then(res => res.json())
+      .then(data => {
+        if (data && !data.isMaintenanceMode && onRefresh) {
+          onRefresh();
+        }
+      })
+      .catch(() => {});
+  }, [onRefresh]);
+
   const handleAdminLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError('');
