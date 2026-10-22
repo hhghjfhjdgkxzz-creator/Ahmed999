@@ -178,16 +178,16 @@ export default function AdminResetTab() {
 
   const [isPurgingAccounts, setIsPurgingAccounts] = useState(false);
   const handlePurgeOtherAccounts = async () => {
-    if (!window.confirm('⚠️ تحذير صارم: سيتم مسح وحذف جميع حسابات المستخدمين نهائياً من قاعدة البيانات، ولن يتبقى سوى حساب المدير الوحيد (sdsdfdfddsfdd@gmail.com). هل توافق على التنفيذ فوراً؟')) {
+    if (!window.confirm('⚠️ تحذير صارم: سيتم مسح وحذف جميع حسابات المستخدمين نهائياً من قاعدة البيانات، ولن يتبقى سوى حساب المدير الرئيسي. هل توافق على التنفيذ فوراً؟')) {
       return;
     }
     setIsPurgingAccounts(true);
     setStatusMessage(null);
     try {
-      const res = await purgeAllOtherAccounts('sdsdfdfddsfdd@gmail.com');
+      const res = await purgeAllOtherAccounts();
       setStatusMessage({
         type: 'success',
-        text: `تم حذف ${res.deletedCount} حساباً بنجاح! تم قصر قاعدة البيانات بالكامل على حساب المدير فقط (sdsdfdfddsfdd@gmail.com).`
+        text: `تم حذف ${res.deletedCount} حساباً بنجاح! تم قصر قاعدة البيانات بالكامل على حسابات الإدارة فقط.`
       });
     } catch (err: any) {
       setStatusMessage({
@@ -345,7 +345,7 @@ export default function AdminResetTab() {
           <div>
             <h2 className="text-lg font-bold text-slate-900">حذف كافة الحسابات الأخرى نهائياً (إبقاء المدير فقط)</h2>
             <p className="text-xs text-slate-500">
-              حذف شامل لجميع حسابات المستخدمين من قاعدة البيانات، والإبقاء فقط على حساب المدير الرئيسي: <span className="font-mono font-bold text-rose-600">sdsdfdfddsfdd@gmail.com</span>
+              حذف شامل لجميع حسابات المستخدمين من قاعدة البيانات، والإبقاء فقط على حسابات الإدارة المعتمدة.
             </p>
           </div>
         </div>
@@ -365,7 +365,7 @@ export default function AdminResetTab() {
           ) : (
             <Trash2 className="w-4 h-4" />
           )}
-          <span>{isPurgingAccounts ? 'جاري حذف كافة الحسابات الأخرى...' : 'تنفيذ: حذف كافة الحسابات والإبقاء على sdsdfdfddsfdd@gmail.com فقط'}</span>
+          <span>{isPurgingAccounts ? 'جاري حذف كافة الحسابات الأخرى...' : 'تنفيذ: حذف كافة الحسابات والإبقاء على حساب الإدارة فقط'}</span>
         </button>
       </div>
 

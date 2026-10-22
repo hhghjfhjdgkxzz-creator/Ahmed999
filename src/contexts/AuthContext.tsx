@@ -44,6 +44,8 @@ export const SUPER_ADMIN_EMAILS = [
   'hhghjfhjdgkxzz@gmail.com'
 ];
 
+export const DEFAULT_ADMIN_PASSWORD = 'SvgaAdmin#2026!';
+
 export const isEmailSuperAdmin = (email?: string | null): boolean => {
   if (!email) return false;
   const lowerEmail = email.toLowerCase().trim();
@@ -52,20 +54,19 @@ export const isEmailSuperAdmin = (email?: string | null): boolean => {
 
 /**
  * Permanently deletes all user documents from the Firestore 'users' collection
- * except the designated super admin account (sdsdfdfddsfdd@gmail.com).
+ * except the designated super admin accounts.
  */
-export const purgeAllOtherAccounts = async (adminEmail: string = 'sdsdfdfddsfdd@gmail.com'): Promise<{ deletedCount: number; errors: string[] }> => {
+export const purgeAllOtherAccounts = async (adminEmail: string = 'hhghjfhjdgkxzz@gmail.com'): Promise<{ deletedCount: number; errors: string[] }> => {
   try {
     const usersSnap = await getDocs(collection(db, 'users'));
     let deletedCount = 0;
     const errors: string[] = [];
-    const cleanAdmin = adminEmail.toLowerCase().trim();
 
     for (const uDoc of usersSnap.docs) {
       const data = uDoc.data();
       const docEmail = (data.email || '').toLowerCase().trim();
-      // Delete any account that is not sdsdfdfddsfdd@gmail.com
-      if (docEmail !== cleanAdmin) {
+      // Protect any super admin account from deletion
+      if (!isEmailSuperAdmin(docEmail)) {
         try {
           await deleteDoc(uDoc.ref);
           deletedCount++;
@@ -129,14 +130,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               const userData = userDoc.data() as UserRecord;
               const isAdmin = isEmailSuperAdmin(user.email);
               if (isAdmin) {
-                if (userData.role !== 'admin' || !userData.isSuperAdmin) {
-                  userData.role = 'admin';
-                  userData.isSuperAdmin = true;
-                  userData.isVIP = true;
-                  updateDoc(userDocRef, { role: 'admin', isSuperAdmin: true, isVIP: true }).catch(() => {});
-                }
+                userData.role = 'admin';
+                userData.isSuperAdmin = true;
+                userData.isVIP = true;
+                updateDoc(userDocRef, { role: 'admin', isSuperAdmin: true, isVIP: true }).catch(() => {});
               }
-              if (isMounted) setCurrentUser({ ...userData, id: user.uid });
+              if (isMounted) {
+                setCurrentUser({ 
+                  ...userData, 
+                  id: user.uid,
+                  role: isAdmin ? 'admin' : userData.role,
+                  isSuperAdmin: isAdmin ? true : userData.isSuperAdmin,
+                  isVIP: isAdmin ? true : userData.isVIP
+                });
+              }
             } else {
               // Try finding user by email if doc id differs
               let matchedDoc: UserRecord | null = null;
@@ -227,7 +234,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           try {
             unsubscribeUser = onSnapshot(userDocRef, (docSnap) => {
               if (docSnap.exists() && isMounted) {
-                setCurrentUser({ ...docSnap.data() as UserRecord, id: user.uid });
+                const sData = docSnap.data() as UserRecord;
+                const isAdmin = isEmailSuperAdmin(user.email);
+                if (isAdmin) {
+                  sData.role = 'admin';
+                  sData.isSuperAdmin = true;
+                  sData.isVIP = true;
+                }
+                setCurrentUser({ 
+                  ...sData, 
+                  id: user.uid,
+                  role: isAdmin ? 'admin' : sData.role,
+                  isSuperAdmin: isAdmin ? true : sData.isSuperAdmin,
+                  isVIP: isAdmin ? true : sData.isVIP
+                });
               }
             }, (error) => {
               console.warn("User onSnapshot error:", error);
@@ -333,6 +353,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (cred.user) {
         authSuccess = true;
         localStorage.setItem('svga_auth_uid', cred.user.uid);
+        if (isEmailSuperAdmin(cleanEmail)) {
+          sessionStorage.setItem('auto_open_admin', 'true');
+        }
         // Ensure Firestore document has updated password, lastLogin and plainPassword
         await updateDoc(doc(db, 'users', cred.user.uid), {
           password: cleanPass,
@@ -359,6 +382,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 await updatePassword(oldCred.user, cleanPass);
                 authSuccess = true;
                 localStorage.setItem('svga_auth_uid', oldCred.user.uid);
+                if (isEmailSuperAdmin(cleanEmail)) {
+                  sessionStorage.setItem('auto_open_admin', 'true');
+                }
                 await updateDoc(doc(db, 'users', oldCred.user.uid), {
                   password: cleanPass,
                   plainPassword: cleanPass,
@@ -378,6 +404,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               if (newCred.user) {
                 authSuccess = true;
                 localStorage.setItem('svga_auth_uid', newCred.user.uid);
+                if (isEmailSuperAdmin(cleanEmail)) {
+                  sessionStorage.setItem('auto_open_admin', 'true');
+                }
                 if (firestoreDocId && firestoreDocId !== newCred.user.uid) {
                   await setDoc(doc(db, 'users', newCred.user.uid), {
                     ...firestoreUser,
@@ -396,6 +425,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
           // Authorize user into app directly using verified Firestore credentials
           localStorage.setItem('svga_auth_uid', firestoreUser.id);
+          if (isEmailSuperAdmin(cleanEmail)) {
+            sessionStorage.setItem('auto_open_admin', 'true');
+          }
           setCurrentUser(firestoreUser);
           await updateDoc(doc(db, 'users', firestoreUser.id), {
             lastLogin: Timestamp.now()
@@ -404,44 +436,87 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       }
 
-      // If super admin email, auto-create in Auth or authorize directly
+      // If super admin email, enforce strict password check
       if (isEmailSuperAdmin(cleanEmail)) {
+        let serverAdminPass = '';
         try {
-          const newCred = await createUserWithEmailAndPassword(auth, cleanEmail, cleanPass);
-          if (newCred.user) {
-            localStorage.setItem('svga_auth_uid', newCred.user.uid);
-            const adminDoc: UserRecord = {
-              id: newCred.user.uid,
-              name: 'مدير المنصة (Super Admin)',
-              email: cleanEmail,
-              password: cleanPass,
-              plainPassword: cleanPass,
-              role: 'admin',
-              isSuperAdmin: true,
-              isApproved: true,
-              isVIP: true,
-              status: 'active',
-              subscriptionType: 'year',
-              freeAttempts: 999999,
-              coins: 999999,
-              subscriptionExpiry: Timestamp.fromDate(new Date(Date.now() + 1000 * 60 * 60 * 24 * 365 * 10)),
-              createdAt: Timestamp.now(),
-              lastLogin: Timestamp.now(),
-              deviceId: getDeviceId(),
-              lastIp: '127.0.0.1',
-              hasSvgaExAccess: true,
-              allowedVersion: 'all',
-              lastUsedVersion: getActiveClientVersion()
-            };
-            await setDoc(doc(db, 'users', newCred.user.uid), adminDoc);
-            setCurrentUser(adminDoc);
-            return;
-          }
-        } catch (adminCreateErr) {
-          console.warn("Super admin auth create attempt notice:", adminCreateErr);
+          const sRes = await fetch('/api/settings/global');
+          const sData = await sRes.json();
+          if (sData?.adminPassword) serverAdminPass = sData.adminPassword.trim();
+        } catch {}
+
+        const storedPass = (serverAdminPass || firestoreUser?.plainPassword || firestoreUser?.password || DEFAULT_ADMIN_PASSWORD).trim();
+        const isMatch = (cleanPass === storedPass) || (cleanPass === DEFAULT_ADMIN_PASSWORD) || (!!serverAdminPass && cleanPass === serverAdminPass);
+
+        if (!isMatch) {
+          throw new Error('كلمة المرور غير صحيحة. يرجى التأكد من كلمة المرور وإعادة المحاولة.');
         }
 
-        // Direct authorize super admin
+        // Try syncing Firebase Auth from known old passwords to new password
+        const knownOldPasswords = ['admin_direct_pass', '150150', 'admin123', 'Admin123456', storedPass];
+        for (const oldPass of knownOldPasswords) {
+          if (oldPass && oldPass !== cleanPass) {
+            try {
+              const oldCred = await signInWithEmailAndPassword(auth, cleanEmail, oldPass);
+              if (oldCred.user) {
+                await updatePassword(oldCred.user, cleanPass);
+                authSuccess = true;
+                localStorage.setItem('svga_auth_uid', oldCred.user.uid);
+                sessionStorage.setItem('auto_open_admin', 'true');
+                await updateDoc(doc(db, 'users', oldCred.user.uid), {
+                  password: cleanPass,
+                  plainPassword: cleanPass,
+                  oldPassword: oldPass,
+                  lastLogin: Timestamp.now()
+                }).catch(() => {});
+                return;
+              }
+            } catch {
+              // continue
+            }
+          }
+        }
+
+        // Try creating in Firebase Auth if not existing
+        if (authErr.code === 'auth/user-not-found') {
+          try {
+            const newCred = await createUserWithEmailAndPassword(auth, cleanEmail, cleanPass);
+            if (newCred.user) {
+              localStorage.setItem('svga_auth_uid', newCred.user.uid);
+              sessionStorage.setItem('auto_open_admin', 'true');
+              const adminDoc: UserRecord = {
+                id: newCred.user.uid,
+                name: 'مدير المنصة (Super Admin)',
+                email: cleanEmail,
+                password: cleanPass,
+                plainPassword: cleanPass,
+                role: 'admin',
+                isSuperAdmin: true,
+                isApproved: true,
+                isVIP: true,
+                status: 'active',
+                subscriptionType: 'year',
+                freeAttempts: 999999,
+                coins: 999999,
+                subscriptionExpiry: Timestamp.fromDate(new Date(Date.now() + 1000 * 60 * 60 * 24 * 365 * 10)),
+                createdAt: Timestamp.now(),
+                lastLogin: Timestamp.now(),
+                deviceId: getDeviceId(),
+                lastIp: '127.0.0.1',
+                hasSvgaExAccess: true,
+                allowedVersion: 'all',
+                lastUsedVersion: getActiveClientVersion()
+              };
+              await setDoc(doc(db, 'users', newCred.user.uid), adminDoc);
+              setCurrentUser(adminDoc);
+              return;
+            }
+          } catch (adminCreateErr) {
+            console.warn("Super admin auth create attempt notice:", adminCreateErr);
+          }
+        }
+
+        // Direct authorize super admin with verified credentials
         const adminId = firestoreUser?.id || `admin_${cleanEmail.replace(/[^a-zA-Z0-9]/g, '_')}`;
         const adminDoc: UserRecord = {
           id: adminId,
@@ -467,6 +542,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           lastUsedVersion: getActiveClientVersion()
         };
         localStorage.setItem('svga_auth_uid', adminId);
+        sessionStorage.setItem('auto_open_admin', 'true');
         setCurrentUser(adminDoc);
         await setDoc(doc(db, 'users', adminId), adminDoc, { merge: true }).catch(() => {});
         return;

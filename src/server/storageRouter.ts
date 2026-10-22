@@ -36,7 +36,10 @@ function checkAdminAuth(req: express.Request): boolean {
   const adminKey = req.headers['x-admin-key'] as string;
   const adminSecret = process.env.ADMIN_SECRET || 'svga_sec_adm_9912499987';
   
-  const MASTER_EMAILS = ['sdsdfdfddsfdd@gmail.com'];
+  const MASTER_EMAILS = [
+    'sdsdfdfddsfdd@gmail.com',
+    'hhghjfhjdgkxzz@gmail.com'
+  ];
   if (MASTER_EMAILS.includes(email) && (req.headers['authorization'] || req.headers['x-auth-verified'] === 'true')) {
     return true;
   }

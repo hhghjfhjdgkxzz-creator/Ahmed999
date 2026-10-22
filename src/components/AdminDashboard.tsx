@@ -3,7 +3,7 @@ import { Settings, Gift, Diamond, Mic, List, Plus, Trash2, Edit2, Check, X, Shie
 import { db, storage } from '../firebase';
 import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, orderBy, getDoc, setDoc, onSnapshot, DocumentSnapshot, where } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth, isEmailSuperAdmin } from '../contexts/AuthContext';
 import BannersTab from './admin/BannersTab';
 import UsersTab from './admin/UsersTab';
 import RoomBackgroundsTab from './admin/RoomBackgroundsTab';
@@ -24,7 +24,7 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     if (user) {
-      if (user.email?.toLowerCase().trim() === 'sdsdfdfddsfdd@gmail.com') {
+      if (isEmailSuperAdmin(user.email)) {
         setIsAdmin(true);
         setLoading(false);
         return;
@@ -32,7 +32,7 @@ export default function AdminDashboard() {
       const checkAdmin = async () => {
         try {
           const userDoc = await getDoc(doc(db, 'users', user.uid));
-          if (userDoc.exists() && userDoc.data().email?.toLowerCase().trim() === 'sdsdfdfddsfdd@gmail.com') {
+          if (userDoc.exists() && isEmailSuperAdmin(userDoc.data().email)) {
             setIsAdmin(true);
           }
         } catch (error) {

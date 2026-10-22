@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { UserRecord, UserRole, AppSettings, LicenseKey, PresetBackground, SubscriptionType, ActivityLog } from '../types';
 import { isEmailSuperAdmin } from '../contexts/AuthContext';
-import { db, storage } from '../lib/firebase';
+import { db, storage, auth } from '../lib/firebase';
 import { collection, getDocs, doc, updateDoc, addDoc, deleteDoc, query, orderBy, Timestamp, setDoc, getDoc, limit, onSnapshot } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { StoreManager } from './StoreManager';
-import { Users, Key, Image as ImageIcon, Settings as SettingsIcon, Trash2, Ban, CheckCircle, Upload, RefreshCw, X, FileText, Link as LinkIcon, Link2, BadgeCheck, Wifi, Smartphone, Store, UserPlus, Lock, Unlock, Shield, ShieldPlus, ShieldOff, GitBranch, Download, ShieldCheck, PowerOff, Power, AlertTriangle, Eye, EyeOff, Copy, Check, CheckCircle2, Loader2, Server, Clock, UserCheck, Search, Filter, Crown, Send, Calendar, ArrowUpDown, AlertCircle, Edit, Edit2, Save } from 'lucide-react';
+import { Users, Key, Image as ImageIcon, Settings as SettingsIcon, Trash2, Ban, CheckCircle, Upload, RefreshCw, X, FileText, Link as LinkIcon, Link2, BadgeCheck, Wifi, Smartphone, Store, UserPlus, Lock, Unlock, Shield, ShieldPlus, ShieldOff, GitBranch, Download, ShieldCheck, PowerOff, Power, AlertTriangle, Eye, EyeOff, Copy, Check, CheckCircle2, Loader2, Server, Clock, UserCheck, Search, Filter, Crown, Send, Calendar, ArrowUpDown, AlertCircle, Edit, Edit2, Save, Zap } from 'lucide-react';
 import { calculateSubscriptionInfo, parseDate, calculateExtendedExpiry, formatInputDate } from '../utils/subscriptionUtils';
 import { UserSubscriptionModal } from './admin/UserSubscriptionModal';
 import { initializeApp } from 'firebase/app';
@@ -147,8 +147,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, onCancel, o
     { id: 'settings', label: 'الإعدادات', icon: <SettingsIcon /> },
   ];
 
+  const isSuper = Boolean(
+    currentUser?.isSuperAdmin || 
+    currentUser?.role === 'admin' || 
+    isEmailSuperAdmin(currentUser?.email)
+  );
+
   const canAccessTab = (tabId: string) => {
-    if (currentUser?.isSuperAdmin || currentUser?.role === 'admin') return true;
+    if (isSuper) return true;
     if (currentUser?.role === 'moderator') {
       return currentUser.permissions?.includes(tabId);
     }
@@ -161,6 +167,83 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, onCancel, o
   const [savingPassword, setSavingPassword] = useState(false);
   const [copiedPasswordUserId, setCopiedPasswordUserId] = useState<string | null>(null);
   const [passwordSuccessInfo, setPasswordSuccessInfo] = useState<{ email: string; pass: string } | null>(null);
+
+  // Dedicated Super Admin Password Management
+  const [showAdminPassModal, setShowAdminPassModal] = useState(false);
+  const [adminNewPass, setAdminNewPass] = useState('');
+  const [adminConfirmPass, setAdminConfirmPass] = useState('');
+  const [adminPassSuccess, setAdminPassSuccess] = useState<string | null>(null);
+  const [isUpdatingAdminPass, setIsUpdatingAdminPass] = useState(false);
+  const [showAdminPassText, setShowAdminPassText] = useState(false);
+
+  const handleUpdateAdminPassword = async (passToSet?: string) => {
+    const finalPass = (passToSet || adminNewPass).trim();
+    if (!finalPass) {
+      return alert("يرجى إدخال كلمة المرور الجديدة");
+    }
+    if (finalPass.length < 6) {
+      return alert("كلمة المرور يجب أن تتكون من 6 خانات على الأقل");
+    }
+    if (!passToSet && adminConfirmPass.trim() && finalPass !== adminConfirmPass.trim()) {
+      return alert("كلمة المرور وتأكيدها غير متطابقين");
+    }
+
+    setIsUpdatingAdminPass(true);
+    try {
+      const adminEmail = (currentUser?.email || 'hhghjfhjdgkxzz@gmail.com').trim().toLowerCase();
+      
+      // 1. Update Firebase Auth password if current user is logged in
+      const currentAuthUser = auth.currentUser;
+      if (currentAuthUser) {
+        try {
+          const { updatePassword } = await import('firebase/auth');
+          await updatePassword(currentAuthUser, finalPass);
+        } catch (authErr) {
+          console.warn("Notice: could not update Firebase Auth directly:", authErr);
+        }
+      }
+
+      // 2. Update Firestore user document
+      if (currentUser?.id) {
+        try {
+          await updateDoc(doc(db, 'users', currentUser.id), {
+            password: finalPass,
+            plainPassword: finalPass,
+            oldPassword: currentUser.plainPassword || currentUser.password || '',
+            passwordUpdatedAt: Timestamp.now()
+          });
+        } catch (fsErr) {
+          console.warn("Notice: could not update user doc directly:", fsErr);
+        }
+      }
+
+      // 3. Persist to server settings global config (/api/settings/update)
+      try {
+        await fetch('/api/settings/update', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            adminPassword: finalPass,
+            adminEmail: adminEmail,
+            adminPasswordUpdatedAt: new Date().toISOString()
+          })
+        });
+      } catch (sErr) {
+        console.warn("Server settings sync notice:", sErr);
+      }
+
+      // 4. Update local state & users list
+      setUsers(prev => prev.map(u => isEmailSuperAdmin(u.email) ? { ...u, password: finalPass, plainPassword: finalPass } : u));
+      setAdminPassSuccess(finalPass);
+      setAdminNewPass('');
+      setAdminConfirmPass('');
+    } catch (err: any) {
+      console.error("Error updating admin password:", err);
+      alert("حدث خطأ أثناء حفظ كلمة المرور: " + (err.message || "خطأ غير معروف"));
+    } finally {
+      setIsUpdatingAdminPass(false);
+    }
+  };
 
   const handleOpenResetPassword = (user: UserRecord) => {
     setResetPasswordModal({
@@ -204,6 +287,28 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, onCancel, o
       };
 
       await updateDoc(doc(db, 'users', targetUser.id), updates);
+
+      // If user is super admin, also update server settings and Auth
+      if (isEmailSuperAdmin(targetUser.email)) {
+        try {
+          await fetch('/api/settings/update', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              adminPassword: newPass,
+              adminEmail: targetUser.email,
+              adminPasswordUpdatedAt: new Date().toISOString()
+            })
+          });
+        } catch (_) {}
+
+        if (auth.currentUser && (auth.currentUser.uid === targetUser.id || (auth.currentUser.email && auth.currentUser.email.toLowerCase() === targetUser.email.toLowerCase()))) {
+          try {
+            const { updatePassword } = await import('firebase/auth');
+            await updatePassword(auth.currentUser, newPass);
+          } catch (_) {}
+        }
+      }
       
       setUsers(prev => prev.map(u => u.id === targetUser.id ? { ...u, ...updates } : u));
       setPasswordSuccessInfo({
@@ -1220,14 +1325,28 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, onCancel, o
   return (
     <div className="w-full h-full flex flex-col text-white bg-slate-900/50 rounded-xl overflow-hidden border border-white/10">
       {/* Header */}
-      <div className="flex justify-between items-center p-6 border-b border-white/10 bg-slate-900/80">
-        <h2 className="text-2xl font-bold flex items-center gap-2">
-          <SettingsIcon className="w-6 h-6 text-indigo-400" />
+      <div className="flex justify-between items-center p-4 sm:p-6 border-b border-white/10 bg-slate-900/80">
+        <h2 className="text-xl sm:text-2xl font-bold flex items-center gap-2">
+          <SettingsIcon className="w-5 h-5 sm:w-6 sm:h-6 text-indigo-400" />
           لوحة التحكم
         </h2>
-        <button onClick={onCancel} className="p-2 hover:bg-white/10 rounded-lg transition-colors">
-          <X className="w-5 h-5" />
-        </button>
+        <div className="flex items-center gap-2.5">
+          <button
+            type="button"
+            onClick={() => {
+              setShowAdminPassModal(true);
+              setAdminPassSuccess(null);
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-500/20 via-yellow-500/20 to-amber-600/20 hover:from-amber-500/30 hover:to-amber-600/30 text-amber-300 border border-amber-500/40 text-xs font-black transition-all shadow-sm cursor-pointer"
+            title="تغيير كلمة المرور لحساب المدير العام"
+          >
+            <Key className="w-3.5 h-3.5 text-amber-400" />
+            <span>تغيير كلمة سر المدير</span>
+          </button>
+          <button onClick={onCancel} className="p-2 hover:bg-white/10 rounded-lg transition-colors cursor-pointer" title="إغلاق">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
       </div>
 
       <div className="flex flex-col lg:flex-row flex-1 overflow-hidden">
@@ -1725,6 +1844,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, onCancel, o
                               </button>
                             </td>
                              <td className="p-3 flex gap-2">
+                              <button 
+                                onClick={() => {
+                                  if (isSuperAdmin(user)) {
+                                    setShowAdminPassModal(true);
+                                    setAdminPassSuccess(null);
+                                  } else {
+                                    handleOpenResetPassword(user);
+                                  }
+                                }}
+                                className="p-1.5 hover:bg-indigo-500/20 text-indigo-400 rounded transition-colors cursor-pointer"
+                                title="تعيين / تغيير كلمة المرور"
+                              >
+                                <Key className="w-4 h-4" />
+                              </button>
                               {!isSuperAdmin(user) && (
                                 <>
                                   <button 
@@ -1733,13 +1866,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, onCancel, o
                                     title="إدارة وتعديل وتمديد تاريخ انتهاء الاشتراك"
                                   >
                                     <Calendar className="w-4 h-4" />
-                                  </button>
-                                  <button 
-                                    onClick={() => handleOpenResetPassword(user)}
-                                    className="p-1.5 hover:bg-indigo-500/20 text-indigo-400 rounded transition-colors"
-                                    title="تعيين / تغيير كلمة المرور"
-                                  >
-                                    <Key className="w-4 h-4" />
                                   </button>
                                   <button 
                                     onClick={() => handleToggleVipDirect(user.id, !!user.isVIP)}
@@ -2687,6 +2813,41 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, onCancel, o
               {activeTab === 'settings' && (
                 <div className="max-w-2xl mx-auto">
                   <h3 className="text-xl font-bold mb-6">الإعدادات العامة</h3>
+
+                  {/* بطاقة تغيير وتعيين كلمة سر المدير */}
+                  <div className="mb-8 p-5 sm:p-6 rounded-2xl bg-gradient-to-br from-amber-500/10 via-slate-900/80 to-purple-900/20 border border-amber-500/30 shadow-xl">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4 pb-4 border-b border-white/10">
+                      <div className="flex items-center gap-3">
+                        <div className="w-11 h-11 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-300 shrink-0">
+                          <Key className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h4 className="text-base font-black text-white">كلمة سر حساب المدير العام</h4>
+                            <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded-full font-mono font-bold">Super Admin</span>
+                          </div>
+                          <p className="text-xs text-slate-400 font-mono mt-0.5">
+                            {currentUser?.email || 'hhghjfhjdgkxzz@gmail.com'}
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowAdminPassModal(true);
+                          setAdminPassSuccess(null);
+                        }}
+                        className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black font-black text-xs transition-all shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2 cursor-pointer shrink-0"
+                      >
+                        <Lock className="w-4 h-4" />
+                        <span>تغيير كلمة المرور الآن</span>
+                      </button>
+                    </div>
+                    <p className="text-xs text-slate-300 leading-relaxed">
+                      تتيح لك هذه الميزة تعيين كلمة سر جديدة لحساب المدير متى أردت، مع حفظها فورياً في قواعد بيانات النظام واعتمادها في عمليات تسجيل الدخول القادمة.
+                    </p>
+                  </div>
+
                   <form onSubmit={handleSaveSettings} className="space-y-6">
                     <div>
                       <label className="block text-sm font-medium text-slate-400 mb-2">اسم التطبيق</label>
@@ -3577,6 +3738,170 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, onCancel, o
           }}
           currentAdminEmail={currentUser?.email || 'admin'}
         />
+      )}
+
+      {/* 🔐 نافذة تغيير كلمة سر المدير العام */}
+      {showAdminPassModal && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-200">
+          <div className="bg-slate-900 border border-amber-500/40 rounded-3xl p-6 sm:p-7 max-w-md w-full shadow-2xl relative text-right" dir="rtl">
+            <div className="flex items-center justify-between pb-4 mb-4 border-b border-white/10">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-300">
+                  <Key className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-white">تغيير كلمة سر المدير</h3>
+                  <p className="text-xs text-slate-400 font-mono">
+                    {currentUser?.email || 'hhghjfhjdgkxzz@gmail.com'}
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={() => {
+                  setShowAdminPassModal(false);
+                  setAdminPassSuccess(null);
+                }}
+                className="p-2 hover:bg-white/10 rounded-xl transition-colors text-slate-400 hover:text-white cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {adminPassSuccess ? (
+              <div className="space-y-4">
+                <div className="p-4 rounded-2xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-sm space-y-2">
+                  <div className="flex items-center gap-2 font-bold text-emerald-400">
+                    <CheckCircle2 className="w-5 h-5" />
+                    <span>تم تغيير كلمة سر حساب المدير بنجاح!</span>
+                  </div>
+                  <p className="text-xs text-slate-300">
+                    تم تفعيل وحفظ كلمة المرور الجديدة في النظام وقاعدة البيانات، يمكنك استخدامها في تسجيل الدخول من الآن.
+                  </p>
+                </div>
+
+                <div className="bg-slate-950/90 border border-white/10 rounded-2xl p-4 space-y-2.5">
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="text-slate-400">البريد الإلكتروني:</span>
+                    <span className="font-mono text-white select-all font-bold">
+                      {currentUser?.email || 'hhghjfhjdgkxzz@gmail.com'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="text-slate-400">كلمة المرور الجديدة:</span>
+                    <span className="font-mono text-amber-300 font-black text-sm select-all">
+                      {adminPassSuccess}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex gap-2.5 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const email = currentUser?.email || 'hhghjfhjdgkxzz@gmail.com';
+                      const text = `بيانات دخول المدير:\nالبريد: ${email}\nكلمة المرور: ${adminPassSuccess}`;
+                      navigator.clipboard.writeText(text);
+                      alert('تم نسخ البريد وكلمة المرور الجديدة للحافظة ✅');
+                    }}
+                    className="flex-1 py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-600/25 cursor-pointer"
+                  >
+                    <Copy className="w-4 h-4" />
+                    <span>نسخ بيانات الدخول</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowAdminPassModal(false);
+                      setAdminPassSuccess(null);
+                    }}
+                    className="py-3 px-5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs transition-colors cursor-pointer"
+                  >
+                    إغلاق
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <form 
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  handleUpdateAdminPassword();
+                }} 
+                className="space-y-4"
+              >
+                <div>
+                  <div className="flex justify-between items-center mb-1.5">
+                    <label className="text-xs font-bold text-slate-300">كلمة المرور الجديدة</label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const randomPass = 'Admin#' + Math.floor(1000 + Math.random() * 9000) + '@Svga!';
+                        setAdminNewPass(randomPass);
+                        setAdminConfirmPass(randomPass);
+                      }}
+                      className="text-[11px] text-amber-400 hover:text-amber-300 flex items-center gap-1 font-bold cursor-pointer"
+                    >
+                      <Zap className="w-3 h-3" />
+                      <span>توليد كلمة سر عشوائية</span>
+                    </button>
+                  </div>
+                  <div className="relative">
+                    <input
+                      type={showAdminPassText ? "text" : "password"}
+                      value={adminNewPass}
+                      onChange={(e) => setAdminNewPass(e.target.value)}
+                      placeholder="أدخل 6 خانات على الأقل..."
+                      className="w-full bg-slate-950 border border-white/10 rounded-xl px-4 py-2.5 pl-11 text-white font-mono text-sm focus:outline-none focus:border-amber-500 transition-colors"
+                      required
+                      minLength={6}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowAdminPassText(!showAdminPassText)}
+                      className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white cursor-pointer"
+                    >
+                      {showAdminPassText ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-300 mb-1.5">تأكيد كلمة المرور</label>
+                  <input
+                    type={showAdminPassText ? "text" : "password"}
+                    value={adminConfirmPass}
+                    onChange={(e) => setAdminConfirmPass(e.target.value)}
+                    placeholder="أعد كتابة كلمة المرور..."
+                    className="w-full bg-slate-950 border border-white/10 rounded-xl px-4 py-2.5 text-white font-mono text-sm focus:outline-none focus:border-amber-500 transition-colors"
+                    required
+                    minLength={6}
+                  />
+                </div>
+
+                <div className="pt-2 flex gap-3">
+                  <button
+                    type="submit"
+                    disabled={isUpdatingAdminPass}
+                    className="flex-1 py-3 px-4 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black font-black text-xs flex items-center justify-center gap-2 transition-all shadow-lg shadow-amber-500/20 disabled:opacity-50 cursor-pointer"
+                  >
+                    {isUpdatingAdminPass ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Save className="w-4 h-4" />
+                    )}
+                    <span>{isUpdatingAdminPass ? 'جاري الحفظ...' : 'حفظ كلمة المرور الجديدة'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowAdminPassModal(false)}
+                    className="py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs transition-colors cursor-pointer"
+                  >
+                    إلغاء
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
       )}
 
       {/* Feature Preview & Management Modal */}

@@ -62,7 +62,7 @@ export default function UsersTab() {
   const handleToggleBanUser = async (user: any) => {
     const emailLower = (user.email || '').toLowerCase();
     if (isEmailSuperAdmin(emailLower)) {
-      return alert('لا يمكن حظر حساب المدير العام والمالك (sdsdfdfddsfdd@gmail.com)');
+      return alert('لا يمكن حظر حساب مدير المنصة العام والمالك');
     }
     const newStatus = user.status === 'banned' ? 'active' : 'banned';
     if (!confirm(`هل أنت متأكد من ${newStatus === 'banned' ? 'حظر' : 'فك حظر'} هذا المستخدم (${user.email || user.name})؟`)) return;
@@ -226,13 +226,13 @@ export default function UsersTab() {
 
   const [isPurgingAll, setIsPurgingAll] = useState(false);
   const handlePurgeAllOtherAccounts = async () => {
-    if (!window.confirm('⚠️ تحذير نهائي: هل أنت متأكد من رغبتك في حذف جميع حسابات المستخدمين نهائياً وبشكل كامل والإبقاء فقط على حساب المدير (sdsdfdfddsfdd@gmail.com)؟\nلا يمكن التراجع عن هذا الإجراء.')) {
+    if (!window.confirm('⚠️ تحذير نهائي: هل أنت متأكد من رغبتك في حذف جميع حسابات المستخدمين نهائياً وبشكل كامل والإبقاء فقط على حسابات الإدارة؟\nلا يمكن التراجع عن هذا الإجراء.')) {
       return;
     }
     setIsPurgingAll(true);
     try {
-      const res = await purgeAllOtherAccounts('sdsdfdfddsfdd@gmail.com');
-      alert(`تمت العملية بنجاح! تم مسح ${res.deletedCount} حساباً، وأصبح الحساب الوحيد في النظام هو المدير (sdsdfdfddsfdd@gmail.com).`);
+      const res = await purgeAllOtherAccounts();
+      alert(`تمت العملية بنجاح! تم مسح ${res.deletedCount} حساباً، وأصبحت قاعدة البيانات مقتصرة على حسابات الإدارة.`);
     } catch (err: any) {
       alert('خطأ أثناء حذف الحسابات: ' + err.message);
     } finally {

@@ -480,8 +480,8 @@ const App: React.FC = () => {
     localStorage.setItem('hasSeenOnboarding', 'true');
   };
 
-  const isSuperAdmin = isEmailSuperAdmin(currentUser?.email);
-  const isAdminUser = isSuperAdmin;
+  const isSuperAdmin = Boolean(isEmailSuperAdmin(currentUser?.email) || currentUser?.isSuperAdmin);
+  const isAdminUser = Boolean(isSuperAdmin || currentUser?.role === 'admin' || currentUser?.role === 'moderator');
   const isMaintenanceActive = Boolean(settings?.isMaintenanceMode);
 
   // Auto-open admin dashboard immediately upon admin login if requested
@@ -1921,9 +1921,14 @@ const App: React.FC = () => {
                 </ErrorBoundary>
               </div>
             )}
-            {state === AppState.ADMIN_PANEL && (currentUser?.role === 'admin' || currentUser?.role === 'moderator') && (
+            {state === AppState.ADMIN_PANEL && (
               <AdminPanel 
-                currentUser={currentUser} 
+                currentUser={currentUser ? {
+                  ...currentUser,
+                  role: (isAdminUser || isSuperAdmin) ? 'admin' : (currentUser.role || 'admin'),
+                  isSuperAdmin: (isAdminUser || isSuperAdmin) ? true : !!currentUser.isSuperAdmin,
+                  isVIP: (isAdminUser || isSuperAdmin) ? true : !!currentUser.isVIP
+                } : currentUser} 
                 onCancel={handleReset} 
                 onOpenFeature={(actionKey) => {
                   const keyToState: Record<string, AppState> = {

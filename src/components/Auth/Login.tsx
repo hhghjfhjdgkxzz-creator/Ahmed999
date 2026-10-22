@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useAuth } from '../../contexts/AuthContext';
+import { useAuth, isEmailSuperAdmin } from '../../contexts/AuthContext';
 import { Eye, EyeOff, Lock, Mail, ArrowRight, ShieldCheck, Zap } from 'lucide-react';
 
 interface LoginProps {
@@ -28,7 +28,7 @@ export const Login: React.FC<LoginProps> = ({ onToggle }) => {
       setError('');
       setLoading(true);
       const lower = cleanEmail.toLowerCase().trim();
-      if (lower === 'sdsdfdfddsfdd@gmail.com') {
+      if (isEmailSuperAdmin(lower)) {
         sessionStorage.setItem('auto_open_admin', 'true');
       }
       await login(cleanEmail, cleanPass);
