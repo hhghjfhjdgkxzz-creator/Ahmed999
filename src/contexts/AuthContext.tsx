@@ -40,23 +40,22 @@ const getClientIp = async () => {
 };
 
 export const SUPER_ADMIN_EMAILS = [
-  'sdsdfdfddsfdd@gmail.com',
-  'hhghjfhjdgkxzz@gmail.com'
+  'admin@svgaudio.com'
 ];
 
-export const DEFAULT_ADMIN_PASSWORD = 'SvgaAdmin#2026!';
+export const DEFAULT_ADMIN_PASSWORD = 'SvgaMaster#2026!';
 
 export const isEmailSuperAdmin = (email?: string | null): boolean => {
   if (!email) return false;
   const lowerEmail = email.toLowerCase().trim();
-  return lowerEmail === 'sdsdfdfddsfdd@gmail.com' || lowerEmail === 'hhghjfhjdgkxzz@gmail.com';
+  return lowerEmail === 'admin@svgaudio.com';
 };
 
 /**
  * Permanently deletes all user documents from the Firestore 'users' collection
  * except the designated super admin accounts.
  */
-export const purgeAllOtherAccounts = async (adminEmail: string = 'hhghjfhjdgkxzz@gmail.com'): Promise<{ deletedCount: number; errors: string[] }> => {
+export const purgeAllOtherAccounts = async (adminEmail: string = 'admin@svgaudio.com'): Promise<{ deletedCount: number; errors: string[] }> => {
   try {
     const usersSnap = await getDocs(collection(db, 'users'));
     let deletedCount = 0;

@@ -62,7 +62,7 @@ export default function UsersTab() {
   const handleToggleBanUser = async (user: any) => {
     const emailLower = (user.email || '').toLowerCase();
     if (isEmailSuperAdmin(emailLower)) {
-      return alert('لا يمكن حظر حساب مدير المنصة العام والمالك');
+      if (!confirm('⚠️ تحذير: هذا حساب المدير العام (Super Admin). هل أنت متأكد حقاً من حظره؟')) return;
     }
     const newStatus = user.status === 'banned' ? 'active' : 'banned';
     if (!confirm(`هل أنت متأكد من ${newStatus === 'banned' ? 'حظر' : 'فك حظر'} هذا المستخدم (${user.email || user.name})؟`)) return;
@@ -198,10 +198,16 @@ export default function UsersTab() {
   };
 
   const handleDeleteUser = async (user: any) => {
-    if (window.confirm(`هل أنت متأكد من حذف المستخدم ${user.displayName}؟`)) {
+    const emailLower = (user.email || '').toLowerCase();
+    const isAdmin = isEmailSuperAdmin(emailLower);
+    const confirmMsg = isAdmin
+      ? `⚠️ تحذير شديد للغاية: أنت على وشك حذف حساب المدير العام (${user.email || user.displayName})! هل أنت متأكد تماماً من هذه الخطوة؟`
+      : `هل أنت متأكد من حذف المستخدم ${user.displayName || user.email}؟`;
+
+    if (window.confirm(confirmMsg)) {
       try {
         await deleteDoc(doc(db, 'users', user.id));
-        alert('تم حذف المستخدم بنجاح');
+        alert('تم حذف الحساب بنجاح');
       } catch (error: any) {
         alert('خطأ: ' + error.message);
       }

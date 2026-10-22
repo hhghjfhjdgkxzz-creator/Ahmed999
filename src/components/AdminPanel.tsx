@@ -190,7 +190,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, onCancel, o
 
     setIsUpdatingAdminPass(true);
     try {
-      const adminEmail = (currentUser?.email || 'hhghjfhjdgkxzz@gmail.com').trim().toLowerCase();
+      const adminEmail = (currentUser?.email || 'admin@svgaudio.com').trim().toLowerCase();
       
       // 1. Update Firebase Auth password if current user is logged in
       const currentAuthUser = auth.currentUser;
@@ -2881,7 +2881,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, onCancel, o
                             <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded-full font-mono font-bold">Super Admin</span>
                           </div>
                           <p className="text-xs text-slate-400 font-mono mt-0.5">
-                            {currentUser?.email || 'hhghjfhjdgkxzz@gmail.com'}
+                            {currentUser?.email || 'admin@svgaudio.com'}
                           </p>
                         </div>
                       </div>
@@ -3806,7 +3806,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, onCancel, o
                 <div>
                   <h3 className="text-lg font-bold text-white">تغيير كلمة سر المدير</h3>
                   <p className="text-xs text-slate-400 font-mono">
-                    {currentUser?.email || 'hhghjfhjdgkxzz@gmail.com'}
+                    {currentUser?.email || 'admin@svgaudio.com'}
                   </p>
                 </div>
               </div>
@@ -3837,7 +3837,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, onCancel, o
                   <div className="flex justify-between items-center text-xs">
                     <span className="text-slate-400">البريد الإلكتروني:</span>
                     <span className="font-mono text-white select-all font-bold">
-                      {currentUser?.email || 'hhghjfhjdgkxzz@gmail.com'}
+                      {currentUser?.email || 'admin@svgaudio.com'}
                     </span>
                   </div>
                   <div className="flex justify-between items-center text-xs">
@@ -3852,7 +3852,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, onCancel, o
                   <button
                     type="button"
                     onClick={() => {
-                      const email = currentUser?.email || 'hhghjfhjdgkxzz@gmail.com';
+                      const email = currentUser?.email || 'admin@svgaudio.com';
                       const text = `بيانات دخول المدير:\nالبريد: ${email}\nكلمة المرور: ${adminPassSuccess}`;
                       navigator.clipboard.writeText(text);
                       alert('تم نسخ البريد وكلمة المرور الجديدة للحافظة ✅');

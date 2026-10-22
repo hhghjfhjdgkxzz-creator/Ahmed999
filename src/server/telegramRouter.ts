@@ -207,8 +207,7 @@ export function checkIsAdminStrict(meta: any, headers: Record<string, any>, isWr
   const adminSecret = process.env.ADMIN_SECRET || 'svga_sec_adm_9912499987';
 
   const MASTER_ADMIN_EMAILS = [
-    'sdsdfdfddsfdd@gmail.com',
-    'hhghjfhjdgkxzz@gmail.com'
+    'admin@svgaudio.com'
   ];
 
   if (adminKey && (adminKey === 'super_admin_bypass' || adminKey === adminSecret)) return true;

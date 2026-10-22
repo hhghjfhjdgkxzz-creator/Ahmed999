@@ -103,7 +103,7 @@ async function startServer() {
     const reqSecret = adminSecret || req.headers['x-admin-key'];
     const userEmail = ((req.headers['x-user-email'] || req.body?.userEmail || '') as string).toLowerCase().trim();
     const hasAuthToken = Boolean(req.headers['authorization'] || req.headers['x-auth-verified'] === 'true');
-    const isMasterEmail = ['aegy238@gmail.com', 'uhbijnokmpl098900@gmail.com', 'iejehdgdig@gmail.com'].includes(userEmail);
+    const isMasterEmail = ['aegy238@gmail.com', 'uhbijnokmpl098900@gmail.com', 'iejehdgdig@gmail.com', 'admin@svgaudio.com'].includes(userEmail);
 
     const isAuthorized = reqSecret === SERVER_ADMIN_SECRET || (isMasterEmail && hasAuthToken);
 
@@ -134,7 +134,7 @@ async function startServer() {
     const userEmail = (req.headers['x-user-email'] as string || '').toLowerCase().trim();
     const adminKey = req.headers['x-admin-key'] as string;
     const hasAuthToken = Boolean(req.headers['authorization'] || req.headers['x-auth-verified'] === 'true');
-    const isMasterEmail = ['aegy238@gmail.com', 'uhbijnokmpl098900@gmail.com', 'iejehdgdig@gmail.com'].includes(userEmail);
+    const isMasterEmail = ['aegy238@gmail.com', 'uhbijnokmpl098900@gmail.com', 'iejehdgdig@gmail.com', 'admin@svgaudio.com'].includes(userEmail);
 
     const isAdmin = (isMasterEmail && hasAuthToken) || adminKey === SERVER_ADMIN_SECRET || adminKey === 'super_admin_bypass';
 
