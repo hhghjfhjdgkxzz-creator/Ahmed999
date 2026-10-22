@@ -2189,6 +2189,9 @@ const App: React.FC = () => {
 
       {/* Floating Smart Circle for Dimensions, Zoom & Themes ("الدايرة الذكية") */}
       <ThemeDimensionsWidget />
+
+      {/* Floating Full Website Translation Widget */}
+      <LanguageTranslatorWidget />
     </div>
   );
 };
