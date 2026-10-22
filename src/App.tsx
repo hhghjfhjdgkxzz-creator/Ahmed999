@@ -509,9 +509,14 @@ const App: React.FC = () => {
       fetch('/api/settings/global')
         .then(res => res.json())
         .then(data => {
-          if (data && (data.backgroundUrl !== undefined || data.appName || data.logoUrl !== undefined)) {
+          if (data && typeof data === 'object') {
             setSettings(prev => {
-              const merged = { ...(prev || {}), ...data };
+              const merged = {
+                ...(prev || {}),
+                ...data,
+                backgroundUrl: data.backgroundUrl !== undefined ? data.backgroundUrl : (prev?.backgroundUrl ?? ''),
+                logoUrl: data.logoUrl !== undefined ? data.logoUrl : (prev?.logoUrl ?? '')
+              };
               localStorage.setItem('appSettings', JSON.stringify(merged));
               return merged;
             });
@@ -524,7 +529,7 @@ const App: React.FC = () => {
     window.addEventListener('focus', syncServerSettings);
     const syncInterval = setInterval(syncServerSettings, 8000);
 
-    // 2. Real-time listener for Global Settings in Firestore
+    // 2. Real-time listener for Global Settings in Firestore (for maintenance mode, outage alerts)
     const docRef = doc(db, 'settings', 'global');
     const unsubscribe = onSnapshot(docRef, (docSnap) => {
       if (docSnap.exists()) {
@@ -533,8 +538,9 @@ const App: React.FC = () => {
           const merged = {
             ...(prev || {}),
             ...data,
-            backgroundUrl: data.backgroundUrl !== undefined ? data.backgroundUrl : prev?.backgroundUrl,
-            logoUrl: data.logoUrl !== undefined ? data.logoUrl : prev?.logoUrl,
+            // Keep server-authoritative backgroundUrl & logoUrl, never allow stale Firestore snapshot to revert them
+            backgroundUrl: prev?.backgroundUrl !== undefined ? prev.backgroundUrl : '',
+            logoUrl: prev?.logoUrl !== undefined ? prev.logoUrl : '',
             isMaintenanceMode: Boolean(data.isMaintenanceMode)
           };
           localStorage.setItem('appSettings', JSON.stringify(merged));

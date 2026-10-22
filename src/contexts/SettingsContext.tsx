@@ -25,31 +25,64 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const docRef = doc(db, 'settings', 'global');
-    
-    // Initial fetch
-    getDoc(docRef).then(docSnap => {
-      if (docSnap.exists()) {
-        const data = docSnap.data() as AppSettings;
-        setSettings(data);
-        localStorage.setItem('appSettings', JSON.stringify(data));
-      }
-      setLoading(false);
-    }).catch(err => {
-      console.warn("Settings fetch error:", err);
-      setLoading(false);
-    });
+    // 1. Fetch authoritative server settings
+    const syncServerSettings = () => {
+      fetch('/api/settings/global')
+        .then(res => res.json())
+        .then(data => {
+          if (data && typeof data === 'object') {
+            setSettings(prev => {
+              const merged = { ...(prev || {}), ...data };
+              localStorage.setItem('appSettings', JSON.stringify(merged));
+              return merged;
+            });
+          }
+        })
+        .catch(() => {})
+        .finally(() => setLoading(false));
+    };
 
-    // Real-time listener
+    syncServerSettings();
+
+    // 2. Real-time Firestore listener for maintenance and system status
+    const docRef = doc(db, 'settings', 'global');
     const unsubscribe = onSnapshot(docRef, (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data() as AppSettings;
-        setSettings(data);
-        localStorage.setItem('appSettings', JSON.stringify(data));
+        setSettings(prev => {
+          const merged = {
+            ...(prev || {}),
+            ...data,
+            // Keep server-authoritative backgroundUrl and logoUrl
+            backgroundUrl: prev?.backgroundUrl !== undefined ? prev.backgroundUrl : '',
+            logoUrl: prev?.logoUrl !== undefined ? prev.logoUrl : ''
+          };
+          localStorage.setItem('appSettings', JSON.stringify(merged));
+          return merged;
+        });
       }
+      setLoading(false);
+    }, (err) => {
+      console.warn("Settings fetch notice:", err);
+      setLoading(false);
     });
 
-    return () => unsubscribe();
+    const handleSettingsUpdated = (e: any) => {
+      const data = e?.detail;
+      if (data) {
+        setSettings(prev => {
+          const merged = { ...(prev || {}), ...data };
+          localStorage.setItem('appSettings', JSON.stringify(merged));
+          return merged;
+        });
+      }
+    };
+    window.addEventListener('app-settings-updated', handleSettingsUpdated);
+
+    return () => {
+      unsubscribe();
+      window.removeEventListener('app-settings-updated', handleSettingsUpdated);
+    };
   }, []);
 
   return (

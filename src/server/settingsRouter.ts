@@ -177,6 +177,7 @@ router.post('/delete-background', async (_req, res) => {
     });
   } catch (err: any) {
     console.error('[SettingsRouter] Background delete error:', err);
+    return res.status(500).json({ success: false, error: err?.message || 'Failed to delete background' });
   }
 });
 

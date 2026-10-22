@@ -434,8 +434,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, onCancel, o
       .then(data => {
         if (data) {
           setSettings(prev => ({ ...prev, ...data }));
-          if (data.logoUrl) setLogoUrlInput(data.logoUrl);
-          if (data.backgroundUrl) setBgUrlInput(data.backgroundUrl);
+          if (data.logoUrl !== undefined) setLogoUrlInput(data.logoUrl || '');
+          if (data.backgroundUrl !== undefined) setBgUrlInput(data.backgroundUrl || '');
         }
       })
       .catch(() => {});
@@ -445,8 +445,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, onCancel, o
       const data = e?.detail;
       if (data) {
         setSettings(prev => ({ ...prev, ...data }));
-        if (data.backgroundUrl !== undefined) setBgUrlInput(data.backgroundUrl);
-        if (data.logoUrl !== undefined) setLogoUrlInput(data.logoUrl);
+        if (data.backgroundUrl !== undefined) setBgUrlInput(data.backgroundUrl || '');
+        if (data.logoUrl !== undefined) setLogoUrlInput(data.logoUrl || '');
       }
     };
     window.addEventListener('app-settings-updated', handleSettingsUpdated);
@@ -455,9 +455,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, onCancel, o
     const unsub = onSnapshot(doc(db, 'settings', 'global'), (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data() as AppSettings;
-        setSettings(prev => ({ ...prev, ...data }));
-        if (data.logoUrl) setLogoUrlInput(data.logoUrl);
-        if (data.backgroundUrl) setBgUrlInput(data.backgroundUrl);
+        setSettings(prev => ({
+          ...prev,
+          ...data,
+          // Retain server-authoritative backgroundUrl and logoUrl, do not let stale Firestore overwrite them
+          backgroundUrl: prev?.backgroundUrl !== undefined ? prev.backgroundUrl : '',
+          logoUrl: prev?.logoUrl !== undefined ? prev.logoUrl : ''
+        }));
         setOutageTitleAr(data.maintenanceTitle || 'حالياً سيرفر التطبيق متعطل الآن');
         setOutageTitleEn(data.maintenanceTitleEn || 'Currently, the application server is down now.');
         setOutageMessageAr(data.maintenanceMessage || 'نعتذر لجميع المستخدمين عن هذا التوقف المؤقت. خوادم التطبيق تخضع حالياً لأعمال صيانة طارئة وفحص فني شامل لضمان أعلى مستويات الأداء والاستقرار. فريق الدعم الفني يعمل بكامل طاقته على استعادة كامل الخدمات في أقرب وقت ممكن. شكراً لتفهمكم وصبركم.');
@@ -610,12 +614,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, onCancel, o
         }
         setCache(prev => ({ ...prev, assets: { data: { backgrounds: backgroundsData, settings: settingsData }, timestamp: now } }));
       } else if (activeTab === 'settings') {
+        let serverSettingsData: any = null;
         try {
           const res = await fetch('/api/settings/global');
-          const serverSettings = await res.json();
-          if (serverSettings) {
-            setSettings(prev => ({ ...(prev || {}), ...serverSettings }));
-            setCache(prev => ({ ...prev, settings: { data: serverSettings, timestamp: now } }));
+          serverSettingsData = await res.json();
+          if (serverSettingsData) {
+            setSettings(prev => ({ ...(prev || {}), ...serverSettingsData }));
+            setCache(prev => ({ ...prev, settings: { data: serverSettingsData, timestamp: now } }));
           }
         } catch (_) {}
 
@@ -624,8 +629,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, onCancel, o
           const docSnap = await getDoc(docRef);
           if (docSnap.exists()) {
             const settingsData = docSnap.data() as AppSettings;
-            setSettings(settingsData);
-            setCache(prev => ({ ...prev, settings: { data: settingsData, timestamp: now } }));
+            setSettings(prev => ({
+              ...settingsData,
+              ...(serverSettingsData || {}),
+              backgroundUrl: serverSettingsData?.backgroundUrl !== undefined ? serverSettingsData.backgroundUrl : (prev?.backgroundUrl || ''),
+              logoUrl: serverSettingsData?.logoUrl !== undefined ? serverSettingsData.logoUrl : (prev?.logoUrl || '')
+            }));
+            setCache(prev => ({ ...prev, settings: { data: { ...settingsData, ...(serverSettingsData || {}) }, timestamp: now } }));
           }
         } catch (_) {}
       } else if (activeTab === 'records') {
@@ -1052,8 +1062,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, onCancel, o
         const data = await res.json();
         if (!data.success) throw new Error(data.message || data.error || 'فشل حفظ الخلفية');
 
-        setSettings(prev => prev ? { ...prev, backgroundUrl: cleanUrl } : ({ backgroundUrl: cleanUrl } as any));
-        localStorage.setItem('appSettings', JSON.stringify({ ...(settings || {}), backgroundUrl: cleanUrl }));
+        const currentStored = (() => {
+          try { return JSON.parse(localStorage.getItem('appSettings') || '{}'); } catch { return {}; }
+        })();
+        const updated = { ...currentStored, ...(settings || {}), backgroundUrl: cleanUrl };
+        setSettings(updated);
+        localStorage.setItem('appSettings', JSON.stringify(updated));
         window.dispatchEvent(new CustomEvent('app-settings-updated', { detail: { backgroundUrl: cleanUrl } }));
         try {
           await setDoc(doc(db, 'settings', 'global'), { backgroundUrl: cleanUrl }, { merge: true });
@@ -1077,14 +1091,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, onCancel, o
         headers: { 'Content-Type': 'application/json' }
       });
       const data = await res.json();
-      setSettings(prev => prev ? { ...prev, backgroundUrl: '' } : null);
+      const currentStored = (() => {
+        try { return JSON.parse(localStorage.getItem('appSettings') || '{}'); } catch { return {}; }
+      })();
+      const updated = { ...currentStored, ...(settings || {}), backgroundUrl: '' };
+      setSettings(updated);
       setBgUrlInput('');
-      localStorage.setItem('appSettings', JSON.stringify({ ...(settings || {}), backgroundUrl: '' }));
+      localStorage.setItem('appSettings', JSON.stringify(updated));
       window.dispatchEvent(new CustomEvent('app-settings-updated', { detail: { backgroundUrl: '' } }));
       try {
         await setDoc(doc(db, 'settings', 'global'), { backgroundUrl: '' }, { merge: true });
       } catch (_) {}
-      alert("✅ تم حذف خلفية الموقع بنجاح!");
+      alert("✅ تم حذف خلفية الموقع بنجاح! تم تطبيق الإزالة فوراً والعودة للخلفية الافتراضية.");
     } catch (err: any) {
       console.error("Error deleting background:", err);
       alert("فشل حذف الخلفية: " + (err.message || 'حدث خطأ'));
@@ -1147,7 +1165,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, onCancel, o
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await setDoc(doc(db, 'settings', 'global'), settings, { merge: true });
+      await fetch('/api/settings/update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(settings)
+      });
+      await setDoc(doc(db, 'settings', 'global'), settings, { merge: true }).catch(() => {});
+      localStorage.setItem('appSettings', JSON.stringify(settings));
+      window.dispatchEvent(new CustomEvent('app-settings-updated', { detail: settings }));
       alert("تم حفظ الإعدادات بنجاح");
     } catch (error) {
       console.error("Error saving settings:", error);
@@ -2404,10 +2429,39 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, onCancel, o
                             ) : (
                               <img src={bg.url} alt={bg.label} className="w-full h-full object-cover" />
                             )}
-                            <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                            <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                              <button 
+                                onClick={async () => {
+                                  try {
+                                    const res = await fetch('/api/settings/update', {
+                                      method: 'POST',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ backgroundUrl: bg.url })
+                                    });
+                                    const data = await res.json();
+                                    if (!data.success) throw new Error(data.message || 'فشل تطبيق الخلفية');
+                                    const currentStored = (() => {
+                                      try { return JSON.parse(localStorage.getItem('appSettings') || '{}'); } catch { return {}; }
+                                    })();
+                                    const updated = { ...currentStored, ...(settings || {}), backgroundUrl: bg.url };
+                                    setSettings(updated);
+                                    setBgUrlInput(bg.url);
+                                    localStorage.setItem('appSettings', JSON.stringify(updated));
+                                    window.dispatchEvent(new CustomEvent('app-settings-updated', { detail: { backgroundUrl: bg.url } }));
+                                    alert("✅ تم تعيين وتطبيق هذه الخلفية للموقع بنجاح!");
+                                  } catch (err: any) {
+                                    alert("فشل تطبيق الخلفية: " + (err?.message || 'حدث خطأ'));
+                                  }
+                                }}
+                                className="p-2 bg-purple-600/90 text-white rounded-full hover:bg-purple-600 transition-colors shadow-lg"
+                                title="تعيين هذه الخلفية كخلفية رئيسية للموقع"
+                              >
+                                <Check className="w-4 h-4" />
+                              </button>
                               <button 
                                 onClick={() => handleDeletePreset(bg.id, bg.url)}
-                                className="p-2 bg-red-500/20 text-red-400 rounded-full hover:bg-red-500/40 transition-colors"
+                                className="p-2 bg-red-500/30 text-red-300 rounded-full hover:bg-red-500/50 transition-colors shadow-lg"
+                                title="حذف من قائمة الخلفيات الجاهزة"
                               >
                                 <Trash2 className="w-4 h-4" />
                               </button>
